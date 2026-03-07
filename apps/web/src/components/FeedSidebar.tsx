@@ -44,16 +44,16 @@ export const FeedSidebar: React.FC<Props> = ({ onAddArticle }) => {
                     <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.2em]">News Source</h2>
                     <div className="flex bg-slate-100 p-1 rounded-lg">
                         <button
-                            className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all ${source === 'yahoo' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                            onClick={() => setSource('yahoo')}
-                        >
-                            Yahoo
-                        </button>
-                        <button
                             className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all ${source === 'bloomberg' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
                             onClick={() => setSource('bloomberg')}
                         >
                             BBG
+                        </button>
+                        <button
+                            className={`px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider transition-all ${source === 'yahoo' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                            onClick={() => setSource('yahoo')}
+                        >
+                            Yahoo
                         </button>
                     </div>
                 </div>
