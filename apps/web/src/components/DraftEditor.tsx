@@ -44,39 +44,39 @@ export const DraftEditor: React.FC<Props> = ({
 
                 {/* Selected Articles List */}
                 <section>
-                    <div className="flex justify-between items-center mb-6">
+                    <div className="flex justify-between items-center mb-4">
                         <label className="text-xs font-black text-slate-400 uppercase tracking-widest italic">Selected Articles ({articles.length} / 5)</label>
                     </div>
 
                     {articles.length === 0 ? (
-                        <div className="py-12 px-6 border-2 border-dashed border-slate-100 rounded-2xl text-center">
+                        <div className="py-8 px-6 border-2 border-dashed border-slate-100 rounded-2xl text-center">
                             <p className="text-slate-400 font-medium mb-1">No articles selected yet.</p>
                             <p className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">Search headlines in the sidebar and click &quot;Add&quot;</p>
                         </div>
                     ) : (
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                             {articles.map((article, idx) => (
-                                <div key={article.id} className="flex gap-6 p-6 bg-slate-50 rounded-2xl border border-slate-200 shadow-sm items-start relative group transition-all hover:bg-white hover:border-slate-300">
-                                    <div className="h-10 w-10 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-black text-sm shadow-lg">
+                                <div key={article.id} className="flex gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-sm items-start relative group transition-all hover:bg-white hover:border-slate-300">
+                                    <div className="h-8 w-8 shrink-0 bg-slate-900 text-white rounded-full flex items-center justify-center font-black text-xs shadow-md">
                                         {idx + 1}
                                     </div>
                                     <div className="flex-1 pr-8">
-                                        <h4 className="font-bold text-slate-900 mb-2 text-lg">
+                                        <h4 className="font-bold text-slate-900 mb-1 text-base leading-tight">
                                             {article.title}
                                         </h4>
-                                        <p className="text-sm text-slate-500 line-clamp-2 leading-relaxed mb-3">
-                                            {article.snippet && article.snippet !== "No description available" ? article.snippet : "Description will be pulled automatically for final mailing."}
+                                        <p className="text-xs text-slate-500 line-clamp-1 leading-relaxed mb-1">
+                                            {article.snippet && article.snippet !== "No description available" ? article.snippet : "Description will be pulled automatically."}
                                         </p>
-                                        <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-blue-600 hover:text-blue-800 break-all underline-offset-4 hover:underline">
+                                        <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-blue-600 hover:text-blue-800 break-all underline-offset-4 hover:underline">
                                             {article.link}
                                         </a>
                                     </div>
                                     <button
                                         onClick={() => onRemoveArticle(article.id)}
-                                        className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                        className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-red-500 transition-colors"
                                         title="Remove from draft"
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                     </button>
                                 </div>
                             ))}
