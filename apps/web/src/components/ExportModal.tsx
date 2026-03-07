@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Article } from 'core';
 
 interface Props {
@@ -53,41 +54,51 @@ export const ExportModal: React.FC<Props> = ({ synopsis, articles }) => {
         );
     }
 
-    return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-800">Preview Export</h2>
+    return createPortal(
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-900 tracking-tight">Preview Newsletter</h2>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Review the final layout before exporting to Substack</p>
+                    </div>
                     <button
                         onClick={() => setIsOpen(false)}
-                        className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                        className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-50 rounded-full"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-8 bg-gray-50 flex justify-center">
-                    <div className="bg-white shadow-sm border border-gray-200 p-8 min-w-[600px]" dangerouslySetInnerHTML={{ __html: generateHTML() }} />
+                <div className="flex-1 overflow-y-auto p-12 bg-slate-50/50 flex justify-center">
+                    <div className="bg-white shadow-xl border border-slate-200 p-12 w-full max-w-[680px] min-h-full" dangerouslySetInnerHTML={{ __html: generateHTML() }} />
                 </div>
 
-                <div className="p-6 border-t border-gray-100 flex justify-between items-center bg-white rounded-b-2xl">
-                    <p className="text-sm text-gray-500">HTML is wrapped with inline-styles for reliable rendering in Substack.</p>
+                <div className="p-6 border-t border-slate-100 flex justify-between items-center bg-white rounded-b-2xl">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium max-w-xs">HTML is optimized for Substack and other major email providers.</p>
+                    </div>
                     <button
                         onClick={handleCopy}
-                        className={`px-6 py-2.5 rounded-lg flex items-center font-medium transition-colors ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-900 text-white hover:bg-gray-800'}`}
+                        className={`px-8 py-3 rounded-xl flex items-center font-black uppercase tracking-widest text-xs transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg hover:shadow-slate-200'}`}
                     >
                         {copied ? (
                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                 </svg>
-                                Copied to Clipboard
+                                Copied!
                             </>
                         ) : (
                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
                                 Copy HTML Source
@@ -96,6 +107,7 @@ export const ExportModal: React.FC<Props> = ({ synopsis, articles }) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
