@@ -25,7 +25,7 @@ export async function getAuthenticatedUser(req: Request): Promise<{ id: string; 
     try {
         const payload = await verifyJwt<{ id: string; username: string }>(token);
         return payload;
-    } catch (err) {
+    } catch {
         return null;
     }
 }
@@ -82,7 +82,7 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
         try {
             const { username, password } = await req.json();
-            const user = sqlite.query("SELECT id, username, password_hash FROM users WHERE username = ?").get(username) as any;
+            const user = sqlite.query("SELECT id, username, password_hash FROM users WHERE username = ?").get(username) as { id: string, username: string, password_hash: string } | undefined;
 
             if (!user) {
                 return new Response(JSON.stringify({ error: "Invalid credentials" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -103,7 +103,7 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
                     "Set-Cookie": `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`
                 }
             });
-        } catch (err) {
+        } catch {
             return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500, headers: corsHeaders });
         }
     }

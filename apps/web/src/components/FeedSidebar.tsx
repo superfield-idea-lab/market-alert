@@ -3,7 +3,7 @@ import { Article } from 'core';
 
 interface Props {
     onAddArticle: (article: Article) => void;
-    onLoadDraft: (draft: any) => void;
+    onLoadDraft: (draft: { id: string; synopsis: string; articles: Article[] }) => void;
 }
 
 export const FeedSidebar: React.FC<Props> = ({ onAddArticle, onLoadDraft }) => {
@@ -11,7 +11,7 @@ export const FeedSidebar: React.FC<Props> = ({ onAddArticle, onLoadDraft }) => {
     const [source, setSource] = useState<'yahoo' | 'bloomberg'>('yahoo');
     const [query, setQuery] = useState('');
     const [articles, setArticles] = useState<Article[]>([]);
-    const [drafts, setDrafts] = useState<any[]>([]);
+    const [drafts, setDrafts] = useState<{ id: string; synopsis: string; articles: Article[]; updated_at: string }[]>([]);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {

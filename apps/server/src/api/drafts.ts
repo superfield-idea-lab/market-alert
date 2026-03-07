@@ -21,10 +21,10 @@ export async function handleDraftsRequest(req: Request, url: URL): Promise<Respo
         }
 
         try {
-            const drafts = sqlite.query("SELECT * FROM drafts WHERE user_id = ? ORDER BY updated_at DESC").all(user.id);
+            const drafts = sqlite.query("SELECT * FROM drafts WHERE user_id = ? ORDER BY updated_at DESC").all(user.id) as { articles: string }[];
 
             // Parse the JSON stringified articles arrays back to real arrays for the client
-            const parsedDrafts = drafts.map((draft: any) => ({
+            const parsedDrafts = drafts.map((draft: { articles: string }) => ({
                 ...draft,
                 articles: JSON.parse(draft.articles)
             }));

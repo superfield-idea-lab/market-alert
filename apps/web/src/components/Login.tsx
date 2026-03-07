@@ -36,8 +36,8 @@ export const Login: React.FC = () => {
             }
 
             setUser(data.user);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Authentication failed.");
         } finally {
             setLoading(false);
         }

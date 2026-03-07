@@ -44,7 +44,7 @@ function Dashboard() {
         }
     };
 
-    const handleLoadDraft = (draft: any) => {
+    const handleLoadDraft = (draft: { id: string; synopsis: string; articles: Article[] }) => {
         setCurrentDraftId(draft.id);
         setSynopsis(draft.synopsis);
         setSelectedArticles(draft.articles || []);

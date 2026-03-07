@@ -55,7 +55,7 @@ export async function signJwt(payload: object, expiresInHours = 24 * 7): Promise
 /**
  * Verifies and decodes a JWT token. Throws if invalid or expired.
  */
-export async function verifyJwt<T = any>(token: string): Promise<T> {
+export async function verifyJwt<T>(token: string): Promise<T> {
     const parts = token.split('.');
     if (parts.length !== 3) {
         throw new Error("Invalid token format");
