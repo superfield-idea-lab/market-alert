@@ -1,0 +1,23 @@
+name: API Integration Tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+      - name: Install Dependencies
+        run: bun install
+      - name: Lint and Format Check
+        run: bun run lint
+      - name: Run API Integration Tests
+        run: bunx vitest run apps/server/tests/integration
+        env:
+          FIXTURES: "true"
