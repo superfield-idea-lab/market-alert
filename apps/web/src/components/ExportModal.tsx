@@ -1,0 +1,101 @@
+import React, { useState } from 'react';
+import { Article } from 'core';
+
+interface Props {
+    synopsis: string;
+    articles: Article[];
+}
+
+export const ExportModal: React.FC<Props> = ({ synopsis, articles }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const generateHTML = () => {
+        const formattedSynopsis = synopsis.split('\n').map(p => `<p style="margin-bottom: 1em; line-height: 1.6; color: #333; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">${p}</p>`).join('');
+
+        const formattedArticles = articles.map(a => `
+      <div style="margin-bottom: 24px; padding: 16px; border-left: 4px solid #3b82f6; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <h3 style="margin: 0 0 8px 0; font-size: 18px;">
+          <a href="${a.link}" style="color: #2563eb; text-decoration: none; font-weight: bold;">${a.title}</a>
+        </h3>
+        <p style="margin: 0 0 8px 0; font-size: 14px; line-height: 1.5; color: #4b5563;">${a.snippet}</p>
+        <span style="font-size: 12px; color: #9ca3af; text-transform: uppercase;">VIA ${a.source.toUpperCase()}</span>
+      </div>
+    `).join('');
+
+        return `
+      <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="margin-bottom: 32px;">
+          ${formattedSynopsis}
+        </div>
+        <div style="border-top: 2px solid #e5e7eb; padding-top: 24px;">
+          <h2 style="font-size: 20px; font-weight: bold; margin-bottom: 20px; color: #111827; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">This Week's Top Stories</h2>
+          ${formattedArticles}
+        </div>
+      </div>
+    `;
+    };
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(generateHTML());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    if (!isOpen) {
+        return (
+            <button
+                onClick={() => setIsOpen(true)}
+                className="fixed bottom-6 right-6 px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 hover:-translate-y-1 transition-all focus:outline-none focus:ring-4 focus:ring-blue-300"
+            >
+                Export to Substack
+            </button>
+        );
+    }
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
+                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <h2 className="text-2xl font-bold text-gray-800">Preview Export</h2>
+                    <button
+                        onClick={() => setIsOpen(false)}
+                        className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-8 bg-gray-50 flex justify-center">
+                    <div className="bg-white shadow-sm border border-gray-200 p-8 min-w-[600px]" dangerouslySetInnerHTML={{ __html: generateHTML() }} />
+                </div>
+
+                <div className="p-6 border-t border-gray-100 flex justify-between items-center bg-white rounded-b-2xl">
+                    <p className="text-sm text-gray-500">HTML is wrapped with inline-styles for reliable rendering in Substack.</p>
+                    <button
+                        onClick={handleCopy}
+                        className={`px-6 py-2.5 rounded-lg flex items-center font-medium transition-colors ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-900 text-white hover:bg-gray-800'}`}
+                    >
+                        {copied ? (
+                            <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                                Copied to Clipboard
+                            </>
+                        ) : (
+                            <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copy HTML Source
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};

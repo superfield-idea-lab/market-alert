@@ -5,7 +5,11 @@
  * feed views for Yahoo/Bloomberg, and the template preview layout.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { Article } from 'core';
+import { FeedSidebar } from './components/FeedSidebar';
+import { DraftEditor } from './components/DraftEditor';
+import { ExportModal } from './components/ExportModal';
 
 /**
  * Functional component `App`.
@@ -14,10 +18,34 @@ import React from 'react';
  * @returns {JSX.Element} The rendered React tree for the application stub.
  */
 function App() {
+    const [synopsis, setSynopsis] = useState('');
+    const [selectedArticles, setSelectedArticles] = useState<Article[]>([]);
+
+    const handleAddArticle = (article: Article) => {
+        if (selectedArticles.length >= 5) {
+            alert("You can only select up to 5 articles for the weekly recap.");
+            return;
+        }
+        if (selectedArticles.find(a => a.id === article.id)) {
+            return; // already added
+        }
+        setSelectedArticles([...selectedArticles, article]);
+    };
+
+    const handleRemoveArticle = (id: string) => {
+        setSelectedArticles(selectedArticles.filter(a => a.id !== id));
+    };
+
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
-            <h1 className="text-4xl font-bold text-blue-600 mb-4">Weekly Recap Newsletter</h1>
-            <p className="text-lg text-gray-700">Substack Integration Coming Soon</p>
+        <div className="flex bg-gray-100 font-sans" style={{ height: '100vh', overflow: 'hidden' }}>
+            <FeedSidebar onAddArticle={handleAddArticle} />
+            <DraftEditor
+                synopsis={synopsis}
+                setSynopsis={setSynopsis}
+                articles={selectedArticles}
+                onRemoveArticle={handleRemoveArticle}
+            />
+            <ExportModal synopsis={synopsis} articles={selectedArticles} />
         </div>
     );
 }

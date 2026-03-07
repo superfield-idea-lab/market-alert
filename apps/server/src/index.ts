@@ -6,6 +6,8 @@
  * the compiled frontend React application from `apps/web/dist`.
  */
 
+import { fetchFeeds } from './api/feeds';
+
 export default {
     port: 31415,
 
@@ -15,7 +17,43 @@ export default {
      * 
      * @returns {Response} A unified response object containing the HTML document or API payload.
      */
-    fetch() {
+    async fetch(req: Request) {
+        const url = new URL(req.url);
+
+        // Handle CORS for local dev
+        if (req.method === "OPTIONS") {
+            const res = new Response("Departed", {
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            });
+            return res;
+        }
+
+        if (url.pathname === '/api/feeds') {
+            const source = url.searchParams.get('source');
+            if (source === 'yahoo' || source === 'bloomberg') {
+                const articles = await fetchFeeds(source);
+                return new Response(JSON.stringify(articles), {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    }
+                });
+            }
+            return new Response(JSON.stringify({ error: 'Invalid source' }), { status: 400, headers: { "Access-Control-Allow-Origin": "*" } });
+        }
+
+        // Serve static assets requested by Vite
+        const staticFilePath = `../web/dist${url.pathname === '/' ? '/index.html' : url.pathname}`;
+        const file = Bun.file(staticFilePath);
+        if (await file.exists()) {
+            return new Response(file);
+        }
+
+        // Fallback to index.html for client-side React Router
         return new Response(Bun.file("../web/dist/index.html"));
     },
 };
