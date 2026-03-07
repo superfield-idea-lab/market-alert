@@ -84,6 +84,22 @@ export const DraftEditor: React.FC<Props> = ({
                     )}
                 </section>
             </div>
+
+            {/* Bottom Controls Bar */}
+            <div className="h-24 px-8 border-t border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur-md shrink-0">
+                <div className="flex gap-4">
+                    <button
+                        onClick={onSaveDraft}
+                        disabled={isSaving}
+                        className="px-6 py-3 bg-slate-100 text-slate-900 font-black uppercase tracking-widest text-xs rounded-xl hover:bg-slate-200 transition-all border border-slate-200 disabled:opacity-50 flex items-center gap-2"
+                    >
+                        {isSaving ? (
+                            <div className="w-3 h-3 border-2 border-slate-300 border-t-slate-800 rounded-full animate-spin"></div>
+                        ) : null}
+                        {isSaving ? "Saving..." : "Save Draft"}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 };
