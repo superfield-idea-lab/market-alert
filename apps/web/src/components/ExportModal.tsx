@@ -46,9 +46,9 @@ export const ExportModal: React.FC<Props> = ({ synopsis, articles }) => {
         return (
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-6 right-6 px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 hover:-translate-y-1 transition-all focus:outline-none focus:ring-4 focus:ring-blue-300"
+                className="px-8 py-3 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-xl hover:bg-slate-800 transition-all shadow-lg hover:shadow-slate-200 active:scale-95"
             >
-                Export to Substack
+                Preview & Export
             </button>
         );
     }
