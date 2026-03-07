@@ -70,5 +70,5 @@ test('End-to-End Authentication and Drafting Workflow', async ({ page }) => {
     await page.locator('button', { hasText: 'Sign In' }).click();
 
     // Verify Dashboard renders again
-    await expect(page.locator('h2', { hasText: 'Weekly Recap Draft' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Weekly Recap Draft' })).toBeVisible();
 });
