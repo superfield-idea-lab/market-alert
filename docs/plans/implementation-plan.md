@@ -40,10 +40,10 @@ The E2E workflow fails because:
 
 - [x] **Fix post-commit and pre-push hooks:** Run `bunx prettier --write docs/plans/next-prompt.md` after appending to avoid blocking the next push.
 - [x] **Rebase onto starter/main:** Force-rebased `feat/scaffold` onto `dot-matrix-labs/calypso-starter:main` to establish shared history for PR creation.
-- [ ] **Fix `playwright.config.ts` webServer:** Change command to build the web app then start the Bun server: `bun run --filter web build && bun run apps/server/src/index.ts`. Set `url` (not `port`) to `http://localhost:31415` and set `timeout` to 30000.
-- [ ] **Fix `.github/workflows/test-e2e.yml`:** Add a Postgres service container (`postgres:16`) with `DATABASE_URL` env var. Add a `bun run --filter web build` step before running Playwright.
-- [ ] **Rewrite `tests/e2e/app.spec.ts`:** Replace the old journalism test with a sanity smoke test for the current Calypso UI — verify the app loads, the 3/4 + 1/4 resizable layout is visible, and no console errors appear.
-- [ ] **Verify unit and component tests pass:** Check `tests/unit/` and `apps/web/tests/` for any stale references to the old scaffold app and update them.
+- [x] **Fix `playwright.config.ts` webServer:** Changed command to `bun run --filter web build && bun run apps/server/src/index.ts`. Uses `url:` (not `port:`) with 60s timeout.
+- [x] **Fix `.github/workflows/test-e2e.yml`:** Added `postgres:16` service with `DATABASE_URL`. Fixed branch refs (`master` → `main`) in all four workflow files.
+- [x] **Rewrite `tests/e2e/app.spec.ts`:** Two smoke tests — (1) login screen renders, (2) register → Calypso layout shell visible (Main Project + Team Chat). Selectors match actual Login.tsx markup.
+- [x] **Verify unit and component tests pass:** All three test stubs are clean (no stale journalism references).
 
 ## Phase 3: The Project Board (3/4 View)
 

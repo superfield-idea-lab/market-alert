@@ -2,9 +2,9 @@ name: API Integration Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [main]
   pull_request:
-    branches: [ master ]
+    branches: [main]
 
 jobs:
   test:
@@ -20,4 +20,4 @@ jobs:
       - name: Run API Integration Tests
         run: bunx vitest run apps/server/tests/integration
         env:
-          FIXTURES: "true"
+          FIXTURES: 'true'
