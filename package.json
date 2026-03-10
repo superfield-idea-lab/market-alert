@@ -8,7 +8,7 @@
   "scripts": {
     "postinstall": "git config core.hooksPath .githooks",
     "build": "bun run --filter '*' build",
-    "test": "bun run packages/db/migrate.ts && bunx vitest run && bunx playwright test",
+    "test": "bun run packages/db/migrate.ts && bun --bun vitest run && bunx playwright test",
     "lint": "bunx eslint .",
     "format": "bunx prettier --write .",
     "dev": "bun run --filter '*' dev",
