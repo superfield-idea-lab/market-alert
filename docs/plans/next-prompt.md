@@ -2,8 +2,8 @@
 
 ## Context
 
-Root `tsconfig.json` excludes `apps/web/tests/component` so `expect.element()` (a Vitest Browser Mode
-API) is only type-checked by the web-specific tsconfig, which runs in the vitest browser context.
+Root `tsconfig.json` excludes `apps/web/tests/component` — no custom `.d.ts` needed. The browser
+component tests are type-checked only by the vitest browser config at runtime.
 
 Component tests now use Vitest Browser Mode (`@vitest/browser` + playwright provider +
 `vitest-browser-react`). All 4 component tests pass in headless Chromium. No server or Postgres
