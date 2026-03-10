@@ -2,6 +2,9 @@
 
 ## Context
 
+Both root `tsconfig.json` and `apps/web/tsconfig.json` now exclude `tests/component` so
+`expect.element()` (Vitest Browser Mode API) is never seen by standalone `tsc --noEmit`.
+
 E2E workflow now uses `bunx playwright install --with-deps chromium` (single command, chromium only)
 instead of `install-deps && install chromium` which downloaded all browser dependencies and hung.
 
@@ -47,6 +50,21 @@ Add `apps/web/tests/component/kanban.test.tsx` using `vitest-browser-react` + mo
 ### Constraints
 
 TypeScript only. Bun for all scripts. No mocks in implementation code. No forbidden packages.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
 
 ---
 
