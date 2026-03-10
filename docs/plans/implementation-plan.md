@@ -38,7 +38,7 @@ The E2E workflow fails because:
 
 ### Fixes Required
 
-- [ ] **Fix post-commit hook:** Run `bunx prettier --write docs/plans/next-prompt.md` after appending to avoid blocking the next push.
+- [x] **Fix post-commit and pre-push hooks:** Run `bunx prettier --write docs/plans/next-prompt.md` after appending to avoid blocking the next push.
 - [ ] **Fix `playwright.config.ts` webServer:** Change command to build the web app then start the Bun server: `bun run --filter web build && bun run apps/server/src/index.ts`. Set `url` (not `port`) to `http://localhost:31415` and set `timeout` to 30000.
 - [ ] **Fix `.github/workflows/test-e2e.yml`:** Add a Postgres service container (`postgres:16`) with `DATABASE_URL` env var. Add a `bun run --filter web build` step before running Playwright.
 - [ ] **Rewrite `tests/e2e/app.spec.ts`:** Replace the old journalism test with a sanity smoke test for the current Calypso UI — verify the app loads, the 3/4 + 1/4 resizable layout is visible, and no console errors appear.

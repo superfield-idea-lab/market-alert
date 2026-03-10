@@ -101,6 +101,8 @@ disable, comment out, or add skip/todo markers to avoid addressing failures.
 
 EOF
 
+  bunx prettier --write docs/plans/next-prompt.md >/dev/null 2>&1 || true
+
   echo "" >&2
   echo "WARNING: Test failures detected. Push is proceeding, but" >&2
   echo "docs/plans/next-prompt.md has been updated with the failing tests." >&2

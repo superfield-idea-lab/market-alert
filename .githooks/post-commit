@@ -36,6 +36,8 @@ imminently. Do this before starting the next feature task:
 
 Do not accumulate further unreviewed changes on this branch.
 EOF
+
+  bunx prettier --write docs/plans/next-prompt.md >/dev/null 2>&1 || true
 fi
 
 exit 0
