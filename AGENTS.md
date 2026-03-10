@@ -1,95 +1,50 @@
 ---
 description: Default execution context and agent instructions
 ---
-
-# Calypso
-
+# Calypso Agent Config
 <!-- last-edited: 2026-03-10 -->
+**ROLE**: Autonomous Agent.
+**GOAL**: Complete assigned task in a single pass with minimal human intervention.
+**CONSTRAINT**: Follow curriculum strictly in order. Load ONLY required context per phase.
 
-You are an autonomous agent. Complete the assigned task in a single pass with minimal human intervention. Follow the curriculum below in order. Load only what the current phase requires.
+## CURRICULUM
+### P1: Orient
+1. READ `agent-context/index.md` (Document graph & keyword index).
+2. READ `docs/plans/next-prompt.md` IF exists (Assigned task).
+3. IF no task assigned: ASK human "What should I build?". (ONLY valid reason to ask here).
 
----
+### P2: Select Workflow
+Match task to EXACTLY ONE workflow in `agent-context/development/`. READ & STRICTLY FOLLOW it:
+- Feature/Module -> `development-standards.md`
+- Hardening/Security -> `hardening.md`
+- Documentation -> `documentation-standard.md`
+- Requirements -> `product-owner-interview.md`
+- Scaffold -> `init/scaffold-task.md`
 
-## Phase 1: Orient
+### P3: Load Implementation Context
+1. READ domain implementation doc (via Task Routing in `agent-context/index.md`).
+2. STOP reading here. This is sufficient. BEGIN WORK.
 
-1. Read `agent-context/index.md`. This is the full document graph and keyword index.
-2. Read `docs/plans/next-prompt.md` if it exists. This is your assigned task.
-3. IF no task is assigned: ask the human what to build. This is the ONE acceptable reason to ask.
+### P4: Context Escalation (ON UNCERTAINTY ONLY)
+IF design decision blocked during implementation:
+1. CHECK: Solvable from implementation doc? YES -> WORK. NO -> PROCEED.
+2. READ `agent-context/index.md` keyword index.
+3. IDENTIFY matching blueprint(s).
+4. READ ONLY relevant blueprint section. Apply & Return to WORK.
+5. IF STILL BLOCKED: READ `agent-communication.md` §Document Precedence Rules.
+6. IF STILL BLOCKED: Search codebase for analogous patterns. Use simplest pattern.
+7. IF STILL BLOCKED: ASK human. State explicitly: [Tried], [Found], [Decision Needed].
 
----
+## COMMIT RULES
+READ `agent-context/development/git-standards.md` before first commit.
+- FORMAT: `type: imperative summary` (types: feat, fix, refactor, test, docs, chore, security)
+- STAGE: Explicit files only. NEVER `git add .`
+- OVERRIDE: NEVER use `--no-verify`. ALL tests MUST pass.
 
-## Phase 2: Select a Workflow
-
-Based on the task, pick exactly one development workflow from `agent-context/development/`:
-
-| Task type | Workflow document |
-|---|---|
-| New feature or module | `development/development-standards.md` |
-| Hardening / security / resilience | `development/hardening.md` |
-| Writing documentation | `development/documentation-standard.md` |
-| Requirements gathering | `development/product-owner-interview.md` |
-| Project scaffold from zero | `init/scaffold-task.md` |
-
-Read the selected workflow document. Follow it as your primary instruction set.
-
----
-
-## Phase 3: Load Implementation Context
-
-1. Read the implementation document for the domain you are working in (see the Task Routing table in `agent-context/index.md`).
-2. The implementation document contains: stack spec, package inventory, module structure, interfaces, patterns, and checklists.
-3. This is sufficient to write correct code. **Stop here and begin work.**
-
----
-
-## Phase 4: Deepen Context (only when needed)
-
-If at any point during implementation you encounter uncertainty — a design decision you cannot resolve from the implementation document alone — do NOT ask the human. Instead, escalate your context:
-
-```
-CONFIDENCE CHECK
-  Can I resolve this from the implementation document?
-    YES → continue working.
-    NO  → proceed to step 1 below.
-
-1. Read the keyword index in agent-context/index.md.
-2. Identify the blueprint(s) whose keywords match your uncertainty.
-3. Read the relevant blueprint section (not the full document — use the
-   Context Map and section headers to target the specific concern).
-4. Apply what you learned. Return to implementation.
-
-Still uncertain after reading the blueprint?
-5. Read agent-communication.md §Document Precedence Rules to check
-   whether a newer document supersedes what you found.
-6. Search the codebase for analogous existing implementations.
-7. Choose the simplest solution consistent with the blueprint principles.
-
-Still blocked?
-8. Only now: ask the human. State what you tried, what you found, and
-   what specific decision you need made.
-```
-
-This is a **context escalation loop**, not a one-time decision. Each pass through the loop adds more context. Most tasks complete at Phase 3. Blueprints are reference material, not required reading.
-
----
-
-## Commit Standards
-
-Read `agent-context/development/git-standards.md` before your first commit. Key rules:
-
-- Conventional commit format: `type: imperative summary`
-- Valid types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `security`
-- Stage files explicitly by name. NEVER `git add .`
-- NEVER use `--no-verify`
-- All tests MUST pass before committing
-
----
-
-## Rules
-
-- **Autonomy first.** Do not ask the human for help unless you have exhausted the context escalation loop above.
-- **Minimal context loading.** Do not read documents speculatively. Load what you need for the current phase, then work.
-- **Implementation docs before blueprints.** Blueprints explain why. Implementation docs tell you what to build. Start with what.
-- **One workflow per session.** Pick one workflow document and follow it to completion. Do not mix workflows.
-- **Follow patterns exactly.** When an implementation document provides a code pattern, copy it. Do not invent alternatives.
-- **Update docs you contradict.** If your implementation necessarily deviates from a documented pattern, update the document before committing. Stale docs are worse than no docs.
+## CORE DIRECTIVES
+1. DEFAULT: Autonompus execution.
+2. CONSTRAIN: Minimal context loading. Do NOT read speculatively.
+3. PRECEDENCE: Implementation docs (WHAT) > Blueprints (WHY).
+4. SCOPE: ONE workflow document per session.
+5. RIGIDITY: Copy provided code patterns EXACTLY.
+6. SELF-CORRECTION: IF implementation contradicts docs, UPDATE docs before commit.
