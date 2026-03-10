@@ -54,6 +54,8 @@ Implement the core task management interface with the required views.
 - [x] **Blueprint compliance:** Component tests run in headless Chromium via `playwright-component.config.ts`. API integration tests start server + Postgres in CI. `wait-on` added as dev dep.
 - [x] **`apps/web/tsconfig.json`:** Scoped to `src/` and `tests/` with DOM lib — prevents web build from picking up Bun-typed server files.
 - [x] **Vitest runtime:** All `bunx vitest` replaced with `bun --bun vitest` so workers run in Bun runtime. Note: Vitest's Vite transform pipeline still intercepts `import.meta.dir` — integration tests must not call `migrate()` directly; the running server handles it on startup.
+- [x] **Server static path:** Use `import.meta.dir` for the web/dist path in `apps/server/src/index.ts` so it resolves correctly regardless of cwd (fixes E2E/component webServer startup).
+- [ ] **Component tests:** Migrate from standalone Playwright config to Vitest Browser Mode (`@vitest/browser` + `playwright` provider) for proper React component testing in Chromium.
 - [ ] **View 2: Kanban View:** GitHub Projects-style drag-and-drop board based on customizable status columns.
 - [ ] **View 3: Gantt Waterfall:** Timeline view visualizing tasks based on `Estimate Start`, `Estimated Deliver`, and `Depends On` relationships.
 

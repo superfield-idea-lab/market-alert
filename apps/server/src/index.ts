@@ -47,15 +47,16 @@ export default {
       if (tasksRes) return tasksRes;
     }
 
-    // Serve static assets requested by Vite
-    const staticFilePath = `../web/dist${url.pathname === '/' ? '/index.html' : url.pathname}`;
+    // Serve static assets — path is relative to this file, not process cwd
+    const webDist = `${import.meta.dir}/../../web/dist`;
+    const staticFilePath = `${webDist}${url.pathname === '/' ? '/index.html' : url.pathname}`;
     const file = Bun.file(staticFilePath);
     if (await file.exists()) {
       return new Response(file);
     }
 
     // Fallback to index.html for client-side React Router
-    return new Response(Bun.file('../web/dist/index.html'));
+    return new Response(Bun.file(`${webDist}/index.html`));
   },
 };
 
