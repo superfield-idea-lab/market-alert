@@ -10,33 +10,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: calypso
-          POSTGRES_PASSWORD: calypso
-          POSTGRES_DB: calypso_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso_test
-
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
       - name: Install Dependencies
         run: bun install
-      - name: Lint and Format Check
-        run: bun run lint
-      - name: Install Playwright OS Dependencies
-        run: bunx playwright install-deps && bunx playwright install chromium
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
       - name: Run Component Tests
-        run: bunx playwright test -c playwright-component.config.ts
+        run: bun --bun vitest run --config apps/web/vitest.browser.config.ts

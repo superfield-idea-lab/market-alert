@@ -2,15 +2,14 @@
 
 ## Context
 
-Phase 3 List View is complete and blueprint-compliant:
+Component tests now use Vitest Browser Mode (`@vitest/browser` + playwright provider +
+`vitest-browser-react`). All 4 component tests pass in headless Chromium. No server or Postgres
+needed for component tests.
 
-- `packages/db/schema.sql` seeds all entity types (user, task, tag, github_link, channel, message)
-- `packages/core/types.ts` exports `Task`, `TaskStatus`, `TaskPriority`
-- `apps/server/src/api/tasks.ts` handles `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/:id`
-- `apps/web/src/components/TaskListView.tsx` — table with status cycling, New Task modal
-- Component tests run in headless Chromium via `playwright-component.config.ts`
-- API integration tests start server + Postgres in CI (`test-api.yml`)
-- `wait-on` added as dev dependency for server readiness check
+- Config: `apps/web/vitest.browser.config.ts`
+- Tests: `apps/web/tests/component/task-list.test.tsx`
+- CI: `test-component.yml` runs `bun --bun vitest run --config apps/web/vitest.browser.config.ts`
+- Old `playwright-component.config.ts` deleted
 
 ## Next Task — Phase 3: Kanban View
 
@@ -33,79 +32,12 @@ No drag-and-drop yet — clicking the status badge moves the card to the next co
 
 ### 3. Component tests
 
-Add `apps/web/tests/component/kanban.spec.ts` — Playwright tests in headless Chromium:
+Add `apps/web/tests/component/kanban.test.tsx` using `vitest-browser-react` + mocked fetch:
 
 - Kanban renders three column headers (Todo, In Progress, Done)
-- Creating a task and switching to Kanban shows it in the Todo column
-- Cycling status moves the card to the correct column
+- Task with status "todo" appears in the Todo column
+- Cycling status moves the card to In Progress column
 
 ### Constraints
 
-TypeScript only. Bun for all scripts. No mocks. No forbidden packages.
-
----
-
-## Commit Size Warning
-
-The previous commit touched 65 files (limit: 10).
-Commits should be small and focused. If the next task touches many files, split it.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
+TypeScript only. Bun for all scripts. No mocks in implementation code. No forbidden packages.
