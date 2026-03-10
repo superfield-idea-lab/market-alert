@@ -40,6 +40,7 @@ The E2E workflow fails because:
 
 - [x] **Fix post-commit and pre-push hooks:** Run `bunx prettier --write docs/plans/next-prompt.md` after appending to avoid blocking the next push.
 - [x] **Rebase onto starter/main:** Force-rebased `feat/scaffold` onto `dot-matrix-labs/calypso-starter:main` to establish shared history for PR creation.
+- [x] **Playwright CI install:** Use `bunx playwright install --with-deps chromium` (not `install-deps && install`) in both E2E and component workflows to avoid downloading all browser deps.
 - [x] **Fix `playwright.config.ts` webServer:** Changed command to `bun run --filter web build && bun run apps/server/src/index.ts`. Uses `url:` (not `port:`) with 60s timeout.
 - [x] **Fix `.github/workflows/test-e2e.yml`:** Added `postgres:16` service with `DATABASE_URL`. Fixed branch refs (`master` → `main`) in all four workflow files.
 - [x] **Rewrite `tests/e2e/app.spec.ts`:** Two smoke tests — (1) login screen renders, (2) register → Calypso layout shell visible (Main Project + Team Chat). Selectors match actual Login.tsx markup.
