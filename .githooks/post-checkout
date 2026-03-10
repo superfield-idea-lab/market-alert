@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# post-checkout: no-op. Calypso standards live in prompts/ in the repo.
+exit 0
