@@ -1,13 +1,37 @@
-export interface Article {
+export type EntityType = 'task' | 'tag' | 'github_link' | 'channel' | 'message';
+
+export interface Entity {
     id: string;
-    title: string;
-    link: string;
-    snippet: string;
-    pubDate: string;
-    source: 'yahoo' | 'bloomberg';
+    type: EntityType;
+    properties: Record<string, any>;
+    tenant_id: string | null;
+    version: number;
+    created_at: string;
+    updated_at: string;
 }
 
-export interface NewsletterDraft {
-    synopsis: string;
-    articles: Article[];
+export interface Relation {
+    id: string;
+    source_id: string;
+    target_id: string;
+    type: string;
+    properties: Record<string, any>;
+    created_at: string;
+}
+
+// Calypso Specific semantic properties mapped from the Entity JSONB
+export interface TaskProperties {
+    name: string;
+    description: string;
+    owner: string;
+    priority: 'low' | 'medium' | 'high' | 'urgent';
+    estimateStart?: string;
+    estimatedDeliver?: string;
+}
+
+export interface GithubLinkProperties {
+    issueNumber: number;
+    repository: string;
+    status: 'open' | 'closed';
+    url: string;
 }

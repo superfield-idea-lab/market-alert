@@ -11,8 +11,8 @@ import { migrate } from 'db';
 import { handleAuthRequest } from './api/auth';
 import { handleDraftsRequest } from './api/drafts';
 
-// Ensure SQLite tables exist before answering traffic
-migrate();
+// Ensure Postgres tables exist before answering traffic
+await migrate();
 
 export default {
     port: 31415,
