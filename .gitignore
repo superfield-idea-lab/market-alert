@@ -35,3 +35,6 @@ coverage/
 
 # SQLite
 *.sqlite
+
+# Deprecated agent contexts
+.agent-context-deprecated-*
