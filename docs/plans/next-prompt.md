@@ -2,72 +2,43 @@
 
 ## Context
 
-Phase 2.5 (Test Baseline) is complete. The E2E CI failure has been fixed:
+Phase 3 List View is complete and blueprint-compliant:
 
-- `playwright.config.ts` now builds the web app then starts the Bun server (port 31415)
-- `.github/workflows/test-e2e.yml` has a `postgres:16` service with `DATABASE_URL`
-- `tests/e2e/app.spec.ts` tests the actual Calypso UI (login screen + layout shell)
-- All workflow files updated from `master` → `main`
+- `packages/db/schema.sql` seeds all entity types (user, task, tag, github_link, channel, message)
+- `packages/core/types.ts` exports `Task`, `TaskStatus`, `TaskPriority`
+- `apps/server/src/api/tasks.ts` handles `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/:id`
+- `apps/web/src/components/TaskListView.tsx` — table with status cycling, New Task modal
+- Component tests run in headless Chromium via `playwright-component.config.ts`
+- API integration tests start server + Postgres in CI (`test-api.yml`)
+- `wait-on` added as dev dependency for server readiness check
 
-All four CI workflows should now be green on the next PR merge to `main`.
+## Next Task — Phase 3: Kanban View
 
-## Next Task — Phase 3: The Project Board (List View)
+Add a second view mode to the project board: a Kanban board with status columns.
 
-Implement the core task management interface in the 3/4 left pane.
+### 1. Add view toggle to App.tsx
 
-### Step 1 — Data Layer
+In the board header, add a segmented control (List / Kanban) that switches between
+`<TaskListView />` and `<KanbanView />`. Store as `boardView: 'list' | 'kanban'` state.
 
-In `packages/core/types.ts`, add a `Task` type:
+### 2. Build `apps/web/src/components/KanbanView.tsx`
 
-```ts
-export type TaskStatus = "todo" | "in_progress" | "done";
-export type TaskPriority = "low" | "medium" | "high";
+Three columns: **Todo**, **In Progress**, **Done** — each showing tasks filtered by status.
 
-export interface Task {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;
-  priority: TaskPriority;
-  status: TaskStatus;
-  estimateStart: string | null; // ISO date
-  estimatedDeliver: string | null; // ISO date
-  dependsOn: string[]; // Task IDs
-  tags: string[];
-  createdAt: string;
-}
-```
+Each task card shows: name, owner, priority badge, due date.
 
-In `packages/db/index.ts`, add a `tasks` table to the schema and `migrate()`.
+Clicking a card's status badge cycles it (same `PATCH /api/tasks/:id` call as the list view).
 
-### Step 2 — API
+No drag-and-drop yet — clicking the status badge moves the card to the next column.
 
-In `apps/server/src/api/tasks.ts`, implement:
+### 3. Component tests
 
-- `GET /api/tasks` — return all tasks as JSON
-- `POST /api/tasks` — create a task, return the created row
+Add `apps/web/tests/component/kanban.spec.ts` — Playwright tests in headless Chromium:
 
-Wire both into `apps/server/src/index.ts`.
-
-### Step 3 — UI
-
-Build `apps/web/src/components/TaskListView.tsx` — an Asana-style data table:
-
-- Columns: checkbox, Name, Owner, Priority, Status, Estimated Deliver
-- Inline status toggle (click status cell to cycle: todo → in_progress → done)
-- "New Task" button opens a minimal modal/form with required fields
-
-Replace the empty state in `apps/web/src/App.tsx` (Board Content section) with
-`<TaskListView />`.
-
-### Step 4 — Tests
-
-- `apps/server/tests/integration/api.test.ts`: test `GET /api/tasks` returns 200
-  with an array, `POST /api/tasks` creates a task and returns 201.
-- `apps/web/tests/component/App.test.tsx`: test that `<TaskListView />` renders a
-  table with expected column headers.
+- Kanban renders three column headers (Todo, In Progress, Done)
+- Creating a task and switching to Kanban shows it in the Todo column
+- Cycling status moves the card to the correct column
 
 ### Constraints
 
-TypeScript only. Bun for all scripts. No mocks. No forbidden packages (redux,
-zustand, prisma, etc.).
+TypeScript only. Bun for all scripts. No mocks. No forbidden packages.

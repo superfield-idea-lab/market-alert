@@ -49,8 +49,9 @@ The E2E workflow fails because:
 
 Implement the core task management interface with the required views.
 
-- [ ] **Task Creation & Editing:** Forms/modals to create tasks with the required semantic fields.
-- [ ] **View 1: List View:** Asana-style data table with inline editing and checkboxes.
+- [x] **Task Creation & Editing:** `POST /api/tasks` endpoint + New Task modal with name, owner, priority, due date fields.
+- [x] **View 1: List View:** `TaskListView` — Asana-style table with status cycling, priority color, due date. Wired into App.tsx. Blueprint-compliant component tests in headless Chromium (Playwright).
+- [x] **Blueprint compliance:** Component tests run in headless Chromium via `playwright-component.config.ts`. API integration tests start server + Postgres in CI. `wait-on` added as dev dep.
 - [ ] **View 2: Kanban View:** GitHub Projects-style drag-and-drop board based on customizable status columns.
 - [ ] **View 3: Gantt Waterfall:** Timeline view visualizing tasks based on `Estimate Start`, `Estimated Deliver`, and `Depends On` relationships.
 
