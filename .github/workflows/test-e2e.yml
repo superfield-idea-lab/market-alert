@@ -2,13 +2,32 @@ name: Full-Page User Story Tests
 
 on:
   push:
-    branches: [ master ]
+    branches: [main]
   pull_request:
-    branches: [ master ]
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: calypso
+          POSTGRES_PASSWORD: calypso
+          POSTGRES_DB: calypso_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso_test
+
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
@@ -19,5 +38,3 @@ jobs:
         run: bunx playwright install-deps && bunx playwright install chromium
       - name: Run E2E Tests
         run: bunx playwright test
-        env:
-          FIXTURES: "true"
