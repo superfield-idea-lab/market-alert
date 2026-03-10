@@ -3,9 +3,11 @@ description: Default execution context and agent instructions
 ---
 # Calypso Agent Config
 <!-- last-edited: 2026-03-10 -->
-**ROLE**: Autonomous Agent.
-**GOAL**: Complete assigned task in a single pass with minimal human intervention.
-**CONSTRAINT**: Follow curriculum strictly in order. Load ONLY required context per phase.
+
+# ALWAYS
+- *TDD* Do test driven development.
+- *CURRICULUM* Select a list of document to read in order to learn what the task is about.
+- *DONT ASK* If you are not confident in your solution read more documents.
 
 ## CURRICULUM
 ### P1: Orient
@@ -34,4 +36,3 @@ IF design decision blocked during implementation:
 5. IF STILL BLOCKED: READ `agent-communication.md` §Document Precedence Rules.
 6. IF STILL BLOCKED: Search codebase for analogous patterns. Use simplest pattern.
 7. IF STILL BLOCKED: ASK human. State explicitly: [Tried], [Found], [Decision Needed].
-

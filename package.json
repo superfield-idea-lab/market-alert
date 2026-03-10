@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "git config core.hooksPath .githooks",
     "build": "bun run --filter '*' build",
     "test": "bun run packages/db/migrate.ts && bunx vitest run && bunx playwright test",
     "lint": "bunx eslint .",
