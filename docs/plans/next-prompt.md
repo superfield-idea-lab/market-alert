@@ -2,27 +2,19 @@
 
 ## Context
 
-E2E tests now filter out expected 401/Unauthorized network errors (Playwright captures
-browser-level network failures as console errors; /api/auth/me correctly returns 401 for
-unauthenticated users).
+Integration tests are now fully self-contained: each suite spins up its own postgres:16 Docker
+container and server subprocess via `apps/server/tests/helpers/pg-container.ts` (DIY testcontainers
+pattern). No shared external infrastructure needed — works locally and in CI without a pre-started
+postgres service or server process. The CI `test-api.yml` workflow was simplified to remove the
+postgres service, Start Server, and Wait for Server steps.
 
-Both root `tsconfig.json` and `apps/web/tsconfig.json` now exclude `tests/component` so
-`expect.element()` (Vitest Browser Mode API) is never seen by standalone `tsc --noEmit`.
-
-E2E workflow now uses `bunx playwright install --with-deps chromium` (single command, chromium only)
-instead of `install-deps && install chromium` which downloaded all browser dependencies and hung.
-
-Root `tsconfig.json` excludes `apps/web/tests/component` — no custom `.d.ts` needed. The browser
-component tests are type-checked only by the vitest browser config at runtime.
-
-Component tests now use Vitest Browser Mode (`@vitest/browser` + playwright provider +
-`vitest-browser-react`). All 4 component tests pass in headless Chromium. No server or Postgres
-needed for component tests.
-
-- Config: `apps/web/vitest.browser.config.ts`
-- Tests: `apps/web/tests/component/task-list.test.tsx`
-- CI: `test-component.yml` runs `bun --bun vitest run --config apps/web/vitest.browser.config.ts`
-- Old `playwright-component.config.ts` deleted
+Key implementation details:
+- `startPostgres()` runs `docker run -d --rm -p 0:5432 postgres:16`, gets the ephemeral port via
+  `docker port`, and polls `pg_isready` + `psql SELECT 1` to guard against the "system is starting
+  up" race condition where pg_isready exits 0 prematurely.
+- Server is spawned with `cwd` set to repo root so Bun can resolve workspace packages (db, core).
+- Server now reads `process.env.PORT` (falls back to 31415) for configurable port binding.
+- Integration tests use port 31416 to avoid conflicts with a running dev server.
 
 ## Next Task — Phase 3: Kanban View
 
@@ -54,36 +46,6 @@ Add `apps/web/tests/component/kanban.test.tsx` using `vitest-browser-react` + mo
 ### Constraints
 
 TypeScript only. Bun for all scripts. No mocks in implementation code. No forbidden packages.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
 
 ---
 

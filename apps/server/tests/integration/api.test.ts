@@ -1,12 +1,37 @@
-import { test, expect, beforeAll } from 'vitest';
+import { test, expect, beforeAll, afterAll } from 'vitest';
+import type { Subprocess } from 'bun';
+import { startPostgres, type PgContainer } from '../helpers/pg-container';
 
-// The server (localhost:31415) is started by the CI workflow before this suite runs.
-// It calls migrate() on startup — no need to call it here.
-const BASE = 'http://localhost:31415';
+// Each test run gets its own isolated postgres container + server process.
+// No external infrastructure required — just Docker.
+
+const PORT = 31416; // separate from dev server (31415) to allow parallel use
+const BASE = `http://localhost:${PORT}`;
+const SERVER_READY_TIMEOUT_MS = 20_000;
+// Path relative to repo root — Bun needs to run from there to resolve workspace packages.
+const REPO_ROOT = new URL('../../../../', import.meta.url).pathname;
+const SERVER_ENTRY = 'apps/server/src/index.ts';
+
+let pg: PgContainer;
+let server: Subprocess;
 let authCookie = '';
 
 beforeAll(async () => {
-  // Register a test user and grab the session cookie
+  // 1. Start an isolated postgres container
+  pg = await startPostgres();
+
+  // 2. Start the server as a subprocess, pointed at the container
+  server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, DATABASE_URL: pg.url, PORT: String(PORT) },
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+
+  // 3. Wait until the server is accepting requests
+  await waitForServer(BASE);
+
+  // 4. Register a test user and capture the session cookie
   const username = `test_${Date.now()}`;
   const res = await fetch(`${BASE}/api/auth/register`, {
     method: 'POST',
@@ -15,7 +40,14 @@ beforeAll(async () => {
   });
   const setCookie = res.headers.get('set-cookie') ?? '';
   authCookie = setCookie.split(';')[0];
+}, 60_000);
+
+afterAll(async () => {
+  server?.kill();
+  await pg?.stop();
 });
+
+// ---------------------------------------------------------------------------
 
 test('GET /api/tasks returns 200 with an array', async () => {
   const res = await fetch(`${BASE}/api/tasks`, {
@@ -53,3 +85,19 @@ test('GET /api/tasks returns 401 when unauthenticated', async () => {
   const res = await fetch(`${BASE}/api/tasks`);
   expect(res.status).toBe(401);
 });
+
+// ---------------------------------------------------------------------------
+
+/** Poll the server's health until it responds or we time out. */
+async function waitForServer(base: string): Promise<void> {
+  const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      await fetch(`${base}/api/tasks`);
+      return; // any response (even 401) means the server is up
+    } catch {
+      await Bun.sleep(300);
+    }
+  }
+  throw new Error(`Server at ${base} did not become ready within ${SERVER_READY_TIMEOUT_MS}ms`);
+}

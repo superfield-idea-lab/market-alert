@@ -14,7 +14,7 @@ import { handleTasksRequest } from './api/tasks';
 await migrate();
 
 export default {
-  port: 31415,
+  port: Number(process.env.PORT) || 31415,
 
   /**
    * The core fetch handler for the Bun native HTTP server.
@@ -60,4 +60,4 @@ export default {
   },
 };
 
-console.log('Listening on http://localhost:31415');
+console.log(`Listening on http://localhost:${Number(process.env.PORT) || 31415}`);
