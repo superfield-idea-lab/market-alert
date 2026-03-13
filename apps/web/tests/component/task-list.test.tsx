@@ -1,7 +1,7 @@
 import React from 'react';
 import { render } from 'vitest-browser-react';
 import { commands } from '@vitest/browser/context';
-import { expect, test } from 'vitest';
+import { afterEach, expect, test } from 'vitest';
 import { TaskListView } from '../../src/components/TaskListView';
 import type { Task } from 'core';
 
@@ -21,11 +21,17 @@ const MOCK_TASK: Task = {
 
 async function setTasksFixture(tasks: Task[] = []) {
   await commands.setFixtureState({
-    tasks,
-    studioStatus: { active: false },
-    studioChatResponse: { reply: '' },
+    state: {
+      tasks,
+      studioStatus: { active: false },
+      studioChatResponse: { reply: '' },
+    },
   });
 }
+
+afterEach(async () => {
+  await commands.resetFixtureState({ fixtureId: 'default' });
+});
 
 test('renders empty state when there are no tasks', async () => {
   await setTasksFixture();

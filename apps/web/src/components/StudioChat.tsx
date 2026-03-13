@@ -20,7 +20,13 @@ interface StudioStatus {
 
 type StatusState = 'loading' | 'ready' | 'error';
 
-export function StudioChat() {
+function withFixtureId(path: string, fixtureId?: string) {
+  if (!fixtureId) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}fixtureId=${encodeURIComponent(fixtureId)}`;
+}
+
+export function StudioChat({ fixtureId }: { fixtureId?: string } = {}) {
   const [status, setStatus] = useState<StudioStatus>({ active: false });
   const [statusState, setStatusState] = useState<StatusState>('loading');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,7 +37,7 @@ export function StudioChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/studio/status')
+    fetch(withFixtureId('/studio/status', fixtureId))
       .then(async (r) => {
         if (!r.ok) throw new Error('status request failed');
         return r.json();
@@ -44,7 +50,7 @@ export function StudioChat() {
       .catch(() => {
         setStatusState('error');
       });
-  }, []);
+  }, [fixtureId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -58,7 +64,7 @@ export function StudioChat() {
     setMessages((m) => [...m, { role: 'user', content: text }]);
     setLoading(true);
     try {
-      const res = await fetch('/studio/chat', {
+      const res = await fetch(withFixtureId('/studio/chat', fixtureId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
@@ -79,7 +85,7 @@ export function StudioChat() {
     if (!confirm(`Roll back to commit ${hash.slice(0, 7)}? Commits after this point will be lost.`))
       return;
     setError(null);
-    const res = await fetch('/studio/rollback', {
+    const res = await fetch(withFixtureId('/studio/rollback', fixtureId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hash }),

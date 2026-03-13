@@ -1,30 +1,271 @@
 # Next Prompt
 
-Read `agent-context/index.md`, `agent-context/development/development-standards.md`, `agent-context/blueprints/testing-blueprint.md`, `agent-context/implementation-ts/testing-implementation.md`, `docs/plans/implementation-plan.md`, and `docs/plans/studio-test-coverage-plan.md` before making further Studio changes.
+## Context
 
-This branch already has an open PR and is above the preferred size threshold. Do not widen the Studio scope further on `feat/studio-mode` unless the change is directly required to make the existing Studio work mergeable.
+The repo layout is now consolidated to one retained `agent-context/` tree and
+one retained `.github/workflows/` tree. CI workflow drift has been corrected,
+and the flaky StudioChat component test has been reworked so it no longer
+depends on one shared fixture-state reset across files.
 
-If the next commit touches Studio:
+The remaining next priority is still the failing Studio API integration suite
+reported by the push hooks.
 
-1. Preserve the existing suite ownership:
-   - unit tests for pure helpers and parsing
-   - integration tests for `/studio` endpoint contracts and bootstrap/git behavior
-   - component tests for `StudioChat` browser states
-   - E2E tests for operator workflows
-2. Prefer isolated git checkouts for any destructive Studio verification. Do not mutate the live branch to prove rollback behavior.
-3. Run only the canonical suite commands for the layer you change:
-   - `bun --bun vitest run tests/unit apps/*/tests/unit`
-   - `bun run test:api`
-   - `bun --bun vitest run --config apps/web/vitest.browser.config.ts`
-   - `bun --bun vitest run --config tests/e2e/vitest.config.ts`
-4. Do not assume GitHub Actions PR checkouts have a local `main` branch or an existing git identity. If a Studio test depends on either, provision them explicitly inside the disposable clone.
-5. Update `docs/plans/implementation-plan.md` and this file in the same commit.
-6. If there is no additional Studio work required for merge, switch to the next highest-priority unchecked item in `docs/plans/implementation-plan.md` on a fresh or rebased branch.
+## Next Action
 
-Latest merge blocker fixes on `feat/studio-mode`:
+Read these files first:
 
-- `scripts/studio-start.ts` must probe `origin/main` / `main` candidates without exiting on the first missing ref.
-- Studio commit-list E2E coverage must use an isolated checkout with known session commits; do not depend on the PR checkout's commit topology.
-- `scripts/studio-start.ts` must force-add the ignored `.studio` sentinel before the bootstrap commit inside disposable test clones.
-- `scripts/studio-start.ts` must never auto-create `studio/session-*` branches; it must fail unless the current branch already matches the session pattern.
-- Studio bootstrap integration clones must derive the expected `studio/session-*` branch hash from the same `origin/main` → `main` ref precedence as `scripts/studio-start.ts`, and shared component fixtures must be reset between sequential browser tests.
+1. `apps/server/tests/integration/studio-api.test.ts`
+2. `apps/server/src/api/studio.ts`
+3. `apps/server/src/studio/agent.ts`
+4. `docs/plans/implementation-plan.md`
+5. this file
+
+Then do this next:
+
+1. Reproduce the failing Studio API integration tests.
+2. Determine whether each failure is in the tests or the implementation.
+3. Fix them without weakening coverage.
+4. After the Studio API suite is green, reconcile the remaining implementation companions to the current workflow YAMLs and release-gate model.
+
+After editing, update `docs/plans/implementation-plan.md` and overwrite this file with the next self-contained prompt.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed more than 20 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Size Warning
+
+This PR is above the 20-file warning threshold. Consider splitting follow-up work into smaller, focused PRs.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 39ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 17ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 121ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 2ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 1ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 39ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 17ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 121ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 2ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 1ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed 211 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Size Warning
+
+This PR has 211 files changed (limit: 20). Consider splitting into smaller, more focused PRs.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 38ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 13ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 126ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 1ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 1ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+---
+
+## Commit Size Warning
+
+The previous commit touched 116 files (limit: 10).
+Commits should be small and focused. If the next task touches many files, split it.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed 105 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Size Warning
+
+This PR has 105 files changed (limit: 20). Consider splitting into smaller, more focused PRs.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 41ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 16ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 125ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 1ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 1ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed 103 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed 29 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Size Warning
+
+This PR has 29 files changed (limit: 20). Consider splitting into smaller, more focused PRs.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 29ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 12ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 281ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 2ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 2ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.

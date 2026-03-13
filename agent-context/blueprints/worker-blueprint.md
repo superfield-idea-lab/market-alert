@@ -1,6 +1,6 @@
 # Worker Service Blueprint
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ──requires────────▶ blueprints/auth-blueprint.md (agent credential mechanics)
@@ -25,6 +25,10 @@ Different agent types have different capabilities, different task queue subscrip
 
 The cost of ignoring this blueprint is an agent-shaped hole in the application's security model. An agent with direct write access can bypass validation, silently corrupt records, act on stale reads without conflict detection, and exfiltrate data through any write surface it can reach. These outcomes are not hypothetical. They are the natural consequence of treating agents as trusted insiders rather than as externally-constrained service participants.
 
+Scope note: this blueprint is not limited to queue-consumer mechanics. It also defines how workers participate in consequential-operation flows and how they interact with sandbox twins without gaining permission to mutate production directly.
+
+This document is a policy blueprint. The worker implementation companion is a recommended reference contract for satisfying these policies, while Calypso's state machine controls deterministic gates that decide whether a worker path is compliant enough to advance.
+
 ---
 
 ## Threat Model
@@ -37,7 +41,7 @@ The cost of ignoring this blueprint is an agent-shaped hole in the application's
 | Agent acts on a task that has already been claimed or cancelled               | Task integrity — task queue must use atomic claim operations; acting on a stale task must produce a rejected API response               |
 | Delegated user token used by agent outlives the task it was issued for        | Authorization scope — delegated tokens must be single-use and task-scoped; a consumed token must not be reusable                        |
 | Agent submits a result that impersonates a different user                     | User identity integrity — the API layer must verify that the delegated token's user identity matches the task's owner                   |
-| Agent container gains shell access or package management capability           | Container security — worker containers are distroless; no shell, no package manager, no escalation path                                 |
+| Agent container gains shell access or package management capability           | Container security — worker containers are distroless-style: no shell, no package manager, and no runtime binary installation path      |
 | Agent type A accesses task types or data views belonging to agent type B      | Agent isolation — each agent type's DB role grants access only to its own task queue view; type claims are validated by the API         |
 | AI vendor API key leaked from worker container environment                    | Blast radius of key compromise — vendor API keys must be scoped to minimum permissions and rotated on schedule                          |
 | Agent spawns a vendor CLI binary that exfiltrates data via network            | Egress control — worker containers must have narrowly scoped network egress; vendor CLI calls must be audited via structured logging    |
@@ -57,6 +61,14 @@ Every live state change an agent produces is submitted as an authenticated reque
 ### Agent capability is declared at deployment, not at runtime
 
 An agent's task type subscription, its database role, its vendor API access, and its network egress rules are all declared in the agent's deployment manifest and enforced by the infrastructure. The agent does not self-select its capabilities at runtime. An agent that attempts to access a task queue view for a different agent type receives a database permission error. An agent that attempts to call a vendor API it was not granted receives a network error. The agent's judgment about what it needs is never the enforcement mechanism.
+
+### Distroless-style workers still need explicit runtime allowances
+
+The worker image is intentionally locked down, but not magical. A practical worker may still require a writable temporary directory, mounted CA bundles, vendor credential files, and a controlled config home for the CLI tools baked into the image. Those allowances must be explicit, minimal, and predeclared in the container contract. "Distroless-style" means no shell, no package manager, no ad hoc debugging tools, and no self-mutation at runtime. It does not mean pretending that vendor binaries have zero filesystem or trust-store needs.
+
+### Worker policy is enforced through deterministic gates
+
+Worker safety is not established by trusting the container image description. The Calypso workflow should define machine-checkable gates for write prohibition, image composition, allowed writable paths, vendor binary provenance, network egress constraints, and digital-twin isolation. If those checks cannot be evaluated deterministically, the worker path is relying on convention rather than policy.
 
 ### Delegated tokens are single-use and task-scoped
 

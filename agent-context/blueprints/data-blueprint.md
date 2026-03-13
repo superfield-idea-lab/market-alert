@@ -1,6 +1,6 @@
 # Data Blueprint
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ◀──implemented by── implementation-ts/data-implementation.md
@@ -25,6 +25,10 @@ Agents — automated processes that act on behalf of the system — are constrai
 Workers (AI task daemons, as defined in the Worker Blueprint) are a constrained exception to this principle. A worker's database role grants SELECT on task queue views only — rows are filtered to tasks assigned to that worker type. A worker does not have access to arbitrary customer records, analytics tables, or any transactional table other than the task queue. This exception is narrow, enforced at the PostgreSQL role layer, and not self-selected by the worker at runtime.
 
 The persistence layer is PostgreSQL from the first commit. Starting with an embedded database and planning to migrate later is a false economy — the migration cost is paid in full in downtime, schema rewrites, and bugs introduced during data transfer, and the security properties of the early-stage architecture are weaker in ways that matter before any customer data arrives. The three-database structure that the policy requires (transactional, analytics, audit) is available locally via Docker Compose from day one and on any managed PostgreSQL service in production. There is no architecture to migrate away from.
+
+Scope note: this blueprint assumes a serious enterprise deployment from the start. The transactional store, analytics tier, audit store, business journal, and twin-safe cloning model are part of the intended system shape. Some mechanisms in this document remain under active validation for implementation viability, but they are being validated as the target architecture, not as optional future upgrades.
+
+This document is a policy blueprint. Calypso's state machine controls advancement through deterministic gates that verify the required data guarantees. The implementation companion is a recommended realization of those guarantees, not a substitute for the policy itself.
 
 ---
 
@@ -88,6 +92,10 @@ Every read of sensitive data is logged before the read is executed — not after
 
 An append-only business journal answers "what accepted business facts changed state." An audit log answers "who read, attempted, denied, approved, failed, recovered, or administered the system." These are different questions with different consumers and different retention and access requirements. A ledger is not a substitute for the audit log; the audit log is not a substitute for the ledger. Enterprise systems require both.
 
+### Data policy is enforced through deterministic gates
+
+The important data guarantees must be machine-checkable. The Calypso workflow should define gates for journal append-only behavior, audit-before-access enforcement, encryption boundary checks, analytics isolation, privacy-budget handling, and twin isolation. If the system cannot deterministically prove one of these properties, it has not met the blueprint even if the intended architecture is documented.
+
 ### Digital twins are the safe simulation surface
 
 Consequential workflow experiments must not happen on production databases. The system provides sandboxed digital twins: isolated, short-lived clones of production-relevant state that humans and agents use to test transaction sequences, preview downstream events, and inspect rollback behavior without risking production mutation. Twin creation and teardown speed are product requirements because safe iteration is part of enterprise reliability, not an offline convenience.
@@ -140,7 +148,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Trade-offs:** Requires the registry to be consistent across all application instances. Rotation is handled per entity type.
 
-### Pattern 3: Aggregation-Tier Separation
+### Pattern 5: Aggregation-Tier Separation
 
 **Problem:** Running analytics queries against the transactional customer database creates a direct path from the analytics layer to raw customer records. A single query mistake, a permissive access grant, or a compromised analytics tool exposes individual customer data.
 
@@ -150,7 +158,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Event pipeline required properties:** The pipeline must provide at-least-once delivery — events must not be silently dropped. Duplicate events are acceptable and must be handled by the analytics store (idempotent writes keyed on event ID). The pipeline does not guarantee ordering within a session; the analytics store must tolerate out-of-order event arrival and must not depend on insertion order for correctness. Pipeline lag must be monitored: a lag alert threshold (recommended: 60 seconds for real-time analytics, 5 minutes for batch) must be configured before real customer data enters the system. Events that fail pseudonymization must be dropped with a structured log entry, never written to the analytics store with a raw identifier as a fallback.
 
-### Pattern 4: Session Pseudonymization
+### Pattern 6: Session Pseudonymization
 
 **Problem:** Attributing analytics events to permanent user identifiers (user IDs, emails) enables re-identification even when events are stored in a separate analytics tier.
 
@@ -158,7 +166,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Trade-offs:** Rotating pseudonyms make it impossible to build per-user behavioral timelines in the analytics tier — this limits certain product analytics use cases (e.g., funnel analysis per user). Teams that need user-level analytics must access the transactional tier through the audit-controlled, access-restricted path, not the analytics tier.
 
-### Pattern 5: Differential Privacy on Export
+### Pattern 7: Differential Privacy on Export
 
 **Problem:** Aggregated query results can leak information about individuals, especially in small groups. A query that returns "average salary for the 3-person engineering team" reveals meaningful information about each individual.
 
@@ -168,7 +176,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Budget management:** The privacy budget (epsilon) is a shared resource across the dataset. Each query against a dataset consumes a portion of the budget proportional to the sensitivity of the query and the noise level applied. Budget state is tracked in a persistent store keyed on dataset identifier; queries check and decrement the remaining budget atomically before executing. A query that would exceed the remaining budget is rejected with an explicit error — it does not execute with reduced noise. Budget ownership is a product-level decision: who sets the initial epsilon per dataset, who can reset it (and under what audit controls), and what the policy is for datasets that exhaust their budget before the reset interval. These decisions must be made before the DP mechanism is implemented, not after. For agent-initiated queries, budget exhaustion must return a structured error that the agent can surface to its operator — it must not cause the agent to retry with broader queries in an attempt to circumvent the limit.
 
-### Pattern 6: Signed Analytics at the Edge
+### Pattern 8: Signed Analytics at the Edge
 
 **Problem:** Analytics events generated client-side can be tampered with in transit — injecting false events, modifying values, or replaying old events to skew analytics.
 
@@ -176,7 +184,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Trade-offs:** Client-side signing requires key distribution and increases event payload size. A compromised client can still generate valid but misleading events (the signature proves origin, not truthfulness). This pattern protects against network-level tampering, not against a malicious client.
 
-### Pattern 7: Audit-Log-First
+### Pattern 9: Audit-Log-First
 
 **Problem:** Audit logs written after data access are vulnerable to suppression — an attacker who can read data can also prevent the log entry from being written. Asynchronous logging has the same failure mode under load shedding or crash.
 
@@ -184,7 +192,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Trade-offs:** Synchronous audit logging adds latency to every sensitive read — typically one additional write operation. The append-only log grows without bound and requires a retention and archival strategy. The separate storage backend is an additional infrastructure dependency. For high-throughput systems, the audit write can become a bottleneck; batching is not permitted because it breaks the "log before read" guarantee.
 
-### Pattern 8: Sandboxed Digital Twins
+### Pattern 10: Sandboxed Digital Twins
 
 **Problem:** Humans and agents need to test consequential transaction sequences, workflow transitions, and downstream effects against realistic state. Running these experiments against production is unsafe; reasoning about them without realistic state is unreliable.
 
@@ -192,7 +200,7 @@ Consequential workflow experiments must not happen on production databases. The 
 
 **Trade-offs:** Twin creation requires snapshot management, state slicing, and teardown logic. Full-fidelity clones are more expensive than narrow domain slices. The correct trade is to clone the smallest production-relevant state that still yields credible workflow simulation, not to copy the entire database by default.
 
-### Pattern 9: PII-Scrubbing Log Pipeline
+### Pattern 11: PII-Scrubbing Log Pipeline
 
 **Problem:** Application logs record errors, request traces, and system events. Under normal operation, logs may appear clean. Under error conditions — exceptions, serialization failures, validation errors — the full object that caused the error is frequently logged, and that object may contain decrypted PII, database rows, or request payloads with sensitive fields.
 

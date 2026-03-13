@@ -1,13 +1,19 @@
 # Agent Context Index
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ◀──referenced by── agent-communication.md §Document Discovery
 this ──indexes──────────▶ blueprints/_, implementation-ts/_, development/_, init/_
 
 > [!IMPORTANT]
-> This is the entry point for all agent-context documentation. Read this file first to determine which documents to load for your task.
+> `agent-context/` is the canonical Calypso agent documentation set. Read this file first to determine which documents to load for your task.
+
+> [!NOTE]
+> `agent-context/` is the only retained agent documentation tree in this repository.
+>
+> - Versioned predecessor copies were removed after consolidation.
+> - Active work MUST follow `agent-context/` only.
 
 ---
 

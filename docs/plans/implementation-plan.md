@@ -79,6 +79,28 @@ Implement the one-way synchronization for public issue tracking.
 - [ ] **Issue Mirroring:** When a new issue is detected, translate it into the Calypso `Task` schema and insert it into the database as a read-only item.
 - [ ] **State Updates:** Listen for "Issue Closed" events from GitHub to update the corresponding Calypso task status automatically.
 
+## Documentation Review
+
+- [x] Review v3 blueprint docs against prior revisions and add top-of-file editorial recommendations
+- [x] Review v3 `implementation-ts` docs against prior revisions and add top-of-file editorial recommendations
+- [x] Capture hook-driven formatting normalization and branch-size warnings after the review-note commit
+- [x] Reconcile the review-note commit onto the existing remote `docs-workflows-v2-v3-refactors` branch
+- [x] Re-review the post-rebase `v3` docs and correct stale review notes where current content is no longer equivalent to `v2`
+- [x] Convert repeated v3 review notes into concrete document edits so v3 is materially distinct from v2
+- [x] Add first-pass Calypso feature and deployment workflow YAMLs under `agent-context/workflows/`
+- [x] Add the Calypso CLI product specification and thread its core concepts back into process/deployment docs
+- [x] Add merge-queue role and queue-head merge execution to the feature workflow and Calypso CLI product spec
+- [x] Promote the retained v3 GitHub workflow YAMLs into `.github/workflows/` and delete duplicate workflow/archive trees
+- [x] Delete the working-only `docs/calypso-cli-product-spec.md` and `docs/plans/implementation-plan-v2.md` artifacts
+- [x] Fix CI workflow drift by pointing API tests at the real command and removing the nonexistent migration workflow
+- [x] Preserve hook-generated planning notices and formatting normalization after the workflow-spec commit
+- [x] Make `agent-context/` the canonical final v3 doc set and deprecate the v1/v2 versioned predecessors
+- [ ] Align the remaining implementation companions to the new workflow YAMLs, task catalog, and deployment gate model
+
+## Documentation and Workflow Refactors [DONE]
+
+- [x] Consolidate the repo to one live `agent-context/` tree and one live `.github/workflows/` tree.
+
 ## Studio Mode
 
 - [x] `bun run studio` script — proven working end-to-end
@@ -106,6 +128,7 @@ Implement the one-way synchronization for public issue tracking.
 - [x] Integration: successful `/studio/rollback` against a real isolated git checkout
 - [x] E2E: multi-turn Studio context, rollback cancel, and rollback success through the browser UI
 - [x] Fix: strict null checks for Bun subprocess `stdout`/`stderr` reads in isolated Studio tests and E2E harness
+- [x] Fix: component-test fixture state is isolated per StudioChat test namespace so shared fixture resets cannot race across files
 - [x] Fix: Studio commit-list resolution no longer assumes a local `main` ref on GitHub PR merge checkouts
 - [x] Fix: Studio bootstrap integration test now provisions git identity and a checked-out `main` branch in its disposable clone
 - [x] Fix: `scripts/studio-start.ts` now probes `origin/main` / `main` fallback refs without exiting on the first missing ref

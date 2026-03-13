@@ -1,6 +1,6 @@
 # Testing Blueprint
 
-<!-- last-edited: 2026-03-12 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ◀──implemented by── implementation-ts/testing-implementation.md
@@ -18,7 +18,9 @@ Tests are the only proof that software works. Code reviews catch style issues an
 
 In agent-built software, testing carries an additional burden: the agent that wrote the code is not the agent that will maintain it. A future agent — or the same agent in a new session — has no memory of the original intent. The test suite is the executable specification. It encodes what the code must do, under what conditions, and with what results. Without it, every future agent must reverse-engineer intent from implementation, which is how bugs become features and regressions become permanent.
 
-The testing strategy for agent-built software rejects mocking as a foundational practice. A mock replaces a real dependency with a fiction authored by the same developer who wrote the code under test. The mock confirms the developer's assumptions, not reality. When the real dependency behaves differently — and it will — the test passes and the production system fails. Instead, tests run against the real runtime, the real browser engine, and recorded fixtures of real API responses. The cost of ignoring this blueprint is a test suite that provides false confidence: green checkmarks that correspond to nothing in production.
+The testing strategy for agent-built software rejects hand-wavy substitutes for production behavior. A hand-authored mock replaces a real dependency with a controlled fiction and usually confirms the author's assumptions rather than reality. The preferred order is real dependency first, recorded fixture from a real dependency second, and a narrowly-scoped fake only when the boundary cannot be exercised credibly in automated tests. The cost of ignoring this blueprint is a test suite that provides false confidence: green checkmarks that correspond to nothing in production.
+
+This document is a policy blueprint. The implementation companion provides the recommended suite layout and tooling realization, while Calypso's state machine uses deterministic gates to decide whether the required verification surfaces have actually been exercised.
 
 ---
 
@@ -40,9 +42,9 @@ The testing strategy for agent-built software rejects mocking as a foundational 
 
 ## Core Principles
 
-### Never mock anything
+### Prefer real systems; permit only bounded test doubles
 
-A mock is a lie agreed upon between the test author and the test runner. It replaces a real dependency with a controlled fiction, guaranteeing that the test confirms the author's assumptions rather than reality. Instead of mocks, use the real dependency: the real database, the real browser engine, the real file system. For external APIs that cannot be called on every test run, use recorded fixtures captured from real production traffic — not fabricated response objects.
+A hand-authored mock is a fiction authored by the same person or agent that wrote the code under test. It usually confirms assumptions rather than reality. The default order of preference is: real dependency, recorded fixture captured from a real dependency, then a narrowly-scoped fake written only for a boundary that cannot be exercised credibly in automated tests. The burden of proof is on the fake. A fake that drifts from production behavior is a defect in the test architecture, not a harmless convenience.
 
 ### Fixtures are files, not environment variables
 
@@ -68,9 +70,13 @@ Developer-machine test invocation must match CI invocation for each suite. CI is
 
 When a test fails, the failure message must identify which suite, which test, and which assertion failed — without requiring the reader to parse log output or cross-reference multiple files. CI workflows are organized one-per-suite so that a red check immediately names the broken category.
 
-### Replay, recovery, and simulation are test surfaces
+### Replay, recovery, and simulation are primary test surfaces
 
-For enterprise systems, correctness is not limited to request/response behavior. The system must prove that it can replay durable facts into correct state, recover from clean backups, and create isolated sandbox twins that do not leak mutations into production. If these properties are not tested, they are aspirational, not architectural.
+For Calypso's target environment, correctness is not limited to request/response behavior. The system must prove that it can replay durable facts into correct state, recover from clean backups, and create isolated sandbox twins that do not leak mutations into production. These are not optional resilience extras; they are part of the core verification surface for autonomous enterprise software.
+
+### Testing policy is enforced through deterministic gates
+
+The existence of tests is not enough. The Calypso workflow should define machine-checkable gates for suite pass/fail, local-CI command parity, fixture provenance, replay coverage, recovery coverage, and twin lifecycle verification. A repository that merely contains candidate tests but cannot prove these gates is not yet compliant with the blueprint.
 
 ---
 
@@ -92,7 +98,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 **Trade-offs:** More workflow files to maintain. Shared setup steps (installing dependencies, building the project) are duplicated across workflows. The duplication is acceptable because it guarantees independence — a change to the component test setup cannot break the unit test workflow.
 
-### Pattern 5: Local-CI Command Parity
+### Pattern 3: Local-CI Command Parity
 
 **Problem:** Tests pass locally but fail in CI because local and CI use different commands, runners, or environment setup.
 
@@ -100,7 +106,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 **Trade-offs:** Slight duplication between local scripts and CI workflow steps. The duplication is intentional because parity is the correctness guarantee.
 
-### Pattern 3: Headless Browser Testing
+### Pattern 4: Headless Browser Testing
 
 **Problem:** Browser code must be tested in a browser, but development environments for AI agents have no display server, no GUI, and no way to open a visible browser window.
 
@@ -108,7 +114,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 **Trade-offs:** Headless mode cannot test certain display-dependent behaviors (scroll position on physical monitors, GPU-accelerated animations). These edge cases are rare and acceptable to exclude from automated testing.
 
-### Pattern 4: Separate Quality Gate + Test Suites
+### Pattern 5: Separate Quality Gate + Test Suites
 
 **Problem:** Mixing code-quality checks with every test workflow duplicates work and increases CI runtime, but skipping quality checks entirely lets formatting/lint/build failures leak into merge gates.
 
@@ -116,7 +122,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 **Trade-offs:** Adds one required workflow and enforces explicit branch-protection configuration. In return, CI avoids duplicated lint/format work and test workflow outcomes remain behavior-focused.
 
-### Pattern 5: Ledger Replay and Recovery Verification
+### Pattern 6: Ledger Replay and Recovery Verification
 
 **Problem:** A ledgered system can appear correct in normal request handling while still failing the enterprise requirements that matter most during incidents: replay, restore, divergence detection, and compensating rollback.
 
@@ -124,7 +130,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 **Trade-offs:** Replay and recovery tests are slower than unit tests and require more setup. That cost is acceptable because disaster recovery guarantees cannot be established by fast tests alone.
 
-### Pattern 6: Digital Twin Lifecycle Testing
+### Pattern 7: Digital Twin Lifecycle Testing
 
 **Problem:** A digital twin feature is only safe if clone creation is fast, isolation is real, and teardown reliably removes mutable state and credentials. Without explicit tests, a twin becomes an unverified production-adjacent environment.
 
@@ -136,7 +142,7 @@ For enterprise systems, correctness is not limited to request/response behavior.
 
 ## Plausible Architectures
 
-### Architecture A: Single-Host Full Suite (solo agent, early-stage)
+### Architecture A: Single-Cluster Sequential Gate
 
 ```
 ┌───────────────────────────────────────────────────────┐
@@ -157,11 +163,11 @@ For enterprise systems, correctness is not limited to request/response behavior.
 CI mirrors this exactly on runners, spinning up a local K8s cluster (e.g., kind or minikube) for integration tests.
 ```
 
-**When appropriate:** Early-stage projects with a single agent. All tests run on the same host. Fast feedback loop.
+**When appropriate:** Enterprise projects whose full gate is still short enough that one runner can execute the complete suite sequentially without harming throughput.
 
 **Trade-offs:** No parallelism. Full suite runs sequentially. Acceptable when total test time is under five minutes.
 
-### Architecture B: Parallel CI Suites (team, mid-stage)
+### Architecture B: Parallel CI Suites
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -186,7 +192,7 @@ CI mirrors this exactly on runners, spinning up a local K8s cluster (e.g., kind 
 └─────────────────────────────────────────────────┘
 ```
 
-**When appropriate:** Projects with enough tests that sequential execution is too slow. Each suite runs on its own runner in parallel. Failure is immediately localized.
+**When appropriate:** Projects with enough suite volume or enough required environments that sequential execution is too slow. Each suite runs on its own runner in parallel. Failure is immediately localized.
 
 **Trade-offs:** Higher CI cost (four runners instead of one). Setup duplication across workflows. Worth it when total test time exceeds five minutes.
 

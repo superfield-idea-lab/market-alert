@@ -1,6 +1,6 @@
 # Data — Calypso TypeScript Implementation
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ──implements──▶ blueprints/data-blueprint.md

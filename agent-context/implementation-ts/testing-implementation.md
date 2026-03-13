@@ -1,6 +1,6 @@
 # Testing — Calypso TypeScript Implementation
 
-<!-- last-edited: 2026-03-12 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ──implements──▶ blueprints/testing-blueprint.md
@@ -8,7 +8,7 @@ this ◀──referenced by── index.md
 
 > Implements: Testing Blueprint (`agent-context/blueprints/testing-blueprint.md`)
 
-The principles, threat model, and patterns in that document apply equally to other stacks. This document only defines TypeScript execution details and tooling constraints.
+The principles, threat model, and patterns in that document apply equally to other stacks. This document defines the mandatory TypeScript reference implementation for Calypso: execution details, suite layout, and tooling constraints.
 
 TypeScript rule of execution:
 
@@ -38,10 +38,12 @@ Notes:
 ```
 .github/workflows/
   quality-gate.yml
+  release.yml
   test-unit.yml
-  test-integration.yml
+  test-api.yml
   test-component.yml
   test-e2e.yml
+  test-pg-container.yml
 ```
 
 `quality-gate.yml`:
@@ -51,13 +53,17 @@ Notes:
 3. Runs format check
 4. Runs build verification
 
-Test workflows (`test-unit.yml`, `test-integration.yml`, `test-component.yml`, `test-e2e.yml`):
+Current test workflows (`test-unit.yml`, `test-api.yml`, `test-component.yml`, `test-e2e.yml`, `test-pg-container.yml`):
 
 1. Install runtime dependencies for the suite
 2. Run the suite's canonical test command only
 3. Report pass/fail independently
 
-Merge is blocked unless quality gate and all test workflows pass.
+Release builds must also pass the release workflow gates before tagged publication.
+
+Merge is blocked unless quality gate and all required test workflows pass.
+
+Schema-upgrade compatibility remains a required release doctrine in the deployment blueprint, but this repository does not yet ship a canonical `test-schema-upgrade-compatibility` CI workflow. Do not claim that workflow exists until the suite and its entrypoint actually exist in the repo.
 
 Local invocation must use the exact same per-suite commands as CI. CI cannot use alternate runners or alternate suite entrypoints.
 

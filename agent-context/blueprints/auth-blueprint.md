@@ -1,6 +1,6 @@
 # Authentication & Authorization Blueprint
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ◀──implemented by── implementation-ts/auth-implementation.md
@@ -21,6 +21,10 @@ Calypso treats authentication as owned infrastructure. Identity verification, to
 Agents — AI systems that act on behalf of the platform — are first-class participants in the authorization model, but they are not peers of human users. An agent receives scoped, short-lived credentials that grant access only to the specific resources its task requires. No agent holds a master key, and no agent credential outlives a single working day without explicit renewal. This constraint is not a limitation to be relaxed as the system matures; it is a permanent architectural boundary.
 
 The cost of ignoring this blueprint is familiar and predictable: a single compromised credential grants unlimited lateral movement, a token algorithm mismatch enables forgery, a long-lived API key leaks into a log file and is not rotated for months, and an external provider outage locks every user out of a system that is otherwise fully operational. These are not exotic failure modes. They are the default outcome of treating authentication as a peripheral concern.
+
+Scope note: this blueprint is intentionally broader than user login. It defines four credential domains that must remain distinct: end-user authentication, worker or service identity, delegated authority for consequential actions, and sandbox-only credentials for digital twins. Treating these as one undifferentiated auth system is the design error this blueprint is intended to eliminate.
+
+This document is a policy blueprint. Calypso enforces progression through deterministic gates owned by the workflow state machine. The implementation companion is a recommended reference path for satisfying those policies; it is not the source of truth for what the platform must guarantee.
 
 ---
 
@@ -58,6 +62,14 @@ Session tokens are stored in HTTP-only, secure, same-site-strict cookies and are
 Every agent credential carries explicit scope claims and expires within 24 hours. An agent that needs access to analytics data receives a token that grants read access to the analytics schema and nothing else. An agent that needs to write transformation code receives a token scoped to that operation. Broad, long-lived agent tokens are not issued, regardless of convenience. The blast radius of a compromised agent credential is bounded by both scope and time: a leaked token grants narrow access for hours, not broad access forever.
 
 Worker daemon service accounts are a distinct credential category from per-task agent tokens. A worker container's service identity token — used to authenticate API calls for claiming tasks and submitting results — is a long-lived credential stored as a Kubernetes Secret. It must be scoped to the minimum API surface the worker requires (task claim and result submission only), must be rotatable without container restart (the application reads it from the mounted secret path, which Kubernetes updates in-place), and must be rotated on a documented schedule (rotation tested and automated). The short-lived constraint in this principle applies to per-task delegated user tokens, not to worker service identity tokens.
+
+### Credential domains stay separate
+
+The platform uses different credential classes for different security facts, and those classes must not collapse into one another. End-user session credentials prove identity. Worker service credentials prove which daemon is speaking. Delegated authority tokens prove which principal authorized a task-scoped or operation-scoped action. Twin credentials prove that an action occurred inside a sandbox and are invalid outside that sandbox boundary. Reusing one token category for another domain weakens auditability and makes incident response ambiguous.
+
+### Authentication policy is enforced through deterministic gates
+
+Credential policy is not satisfied by prose alone. The Calypso workflow must define machine-checkable gates for the important auth invariants: accepted credential classes, allowed signing algorithms, revocation behavior, privileged-operation approval requirements, and sandbox boundary separation. If a team cannot express or verify one of these invariants through deterministic checks, the auth posture is incomplete even if the design sounds correct on paper.
 
 ### Authority and execution are separate security facts
 

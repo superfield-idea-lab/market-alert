@@ -36,18 +36,22 @@ type FixtureState = {
   studioRollbackResponse?: StudioRollbackResponse | FixtureResponse<StudioRollbackResponse>;
 };
 
-function loadState(path: string): FixtureState {
+type FixtureStore = Record<string, FixtureState>;
+
+function loadState(path: string): FixtureStore {
   if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as FixtureState;
+    return JSON.parse(readFileSync(path, 'utf8')) as FixtureStore;
   } catch {
     return {};
   }
 }
 
 export async function handleFixtureRequest(req: Request, statePath: string): Promise<Response> {
-  const state = loadState(statePath);
   const url = new URL(req.url);
+  const store = loadState(statePath);
+  const fixtureId = url.searchParams.get('fixtureId') ?? 'default';
+  const state = store[fixtureId] ?? {};
 
   if (req.method === 'GET' && url.pathname === '/api/tasks') {
     return json(state.tasks ?? []);

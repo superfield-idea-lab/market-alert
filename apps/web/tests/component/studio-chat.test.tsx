@@ -23,10 +23,12 @@ type FixtureResponse<T> = {
 };
 
 async function setStudioFixture({
+  fixtureId,
   status,
   chatResponse,
   rollbackResponse,
 }: {
+  fixtureId: string;
   status: StudioStatus | FixtureResponse<StudioStatus>;
   chatResponse?: StudioChatResponse | FixtureResponse<StudioChatResponse>;
   rollbackResponse?:
@@ -36,22 +38,31 @@ async function setStudioFixture({
       }>;
 }) {
   await commands.setFixtureState({
-    studioStatus: status,
-    studioChatResponse: chatResponse ?? { reply: '' },
-    studioRollbackResponse: rollbackResponse ?? { commits: [] },
+    fixtureId,
+    state: {
+      studioStatus: status,
+      studioChatResponse: chatResponse ?? { reply: '' },
+      studioRollbackResponse: rollbackResponse ?? { commits: [] },
+    },
   });
+}
+
+function currentFixtureId() {
+  const name = expect.getState().currentTestName ?? 'studio-chat';
+  return `studio-chat:${name}`;
 }
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await commands.resetFixtureState();
+  await commands.resetFixtureState({ fixtureId: currentFixtureId() });
 });
 
 test.sequential('shows the inactive state when studio mode is not active', async () => {
-  await setStudioFixture({ status: { active: false } });
-  await commands.waitForStudioStatus({ active: false });
+  const fixtureId = currentFixtureId();
+  await setStudioFixture({ fixtureId, status: { active: false } });
+  await commands.waitForStudioStatus({ fixtureId, active: false });
 
-  const screen = render(<StudioChat />);
+  const screen = render(<StudioChat fixtureId={fixtureId} />);
 
   await expect.element(screen.getByText('Studio mode is not active.')).toBeVisible();
   await expect.element(screen.getByText(/bun run studio/)).toBeVisible();
@@ -59,8 +70,10 @@ test.sequential('shows the inactive state when studio mode is not active', async
 
 test.sequential('does not roll back when the operator cancels confirmation', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const fixtureId = currentFixtureId();
 
   await setStudioFixture({
+    fixtureId,
     status: {
       status: 200,
       body: {
@@ -74,9 +87,9 @@ test.sequential('does not roll back when the operator cancels confirmation', asy
     },
   });
 
-  await commands.waitForStudioStatus({ active: true, minCommits: 1 });
+  await commands.waitForStudioStatus({ fixtureId, active: true, minCommits: 1 });
 
-  const screen = render(<StudioChat />);
+  const screen = render(<StudioChat fixtureId={fixtureId} />);
   const revertButton = screen.getByRole('button', { name: 'Rollback commit' });
 
   await expect.element(revertButton).toBeVisible();

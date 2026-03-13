@@ -20,6 +20,18 @@ function ensureFixtureStateFile() {
   }
 }
 
+type FixtureStore = Record<string, unknown>;
+
+function readFixtureStore() {
+  ensureFixtureStateFile();
+  return JSON.parse(readFileSync(FIXTURE_STATE_PATH, 'utf8')) as FixtureStore;
+}
+
+function writeFixtureStore(store: FixtureStore) {
+  ensureFixtureStateFile();
+  writeFileSync(FIXTURE_STATE_PATH, JSON.stringify(store, null, 2));
+}
+
 export default defineConfig({
   plugins: [react()],
   root: new URL('.', import.meta.url).pathname,
@@ -38,14 +50,22 @@ export default defineConfig({
       headless: true,
       name: 'chromium',
       commands: {
-        setFixtureState: async (_, state: unknown) => {
-          ensureFixtureStateFile();
-          writeFileSync(FIXTURE_STATE_PATH, JSON.stringify(state, null, 2));
+        setFixtureState: async (_, payload: { fixtureId?: string; state: unknown }) => {
+          const fixtureId = payload.fixtureId ?? 'default';
+          const store = readFixtureStore();
+          store[fixtureId] = payload.state;
+          writeFixtureStore(store);
         },
-        waitForStudioStatus: async (_, expected: { active: boolean; minCommits?: number }) => {
+        waitForStudioStatus: async (
+          _,
+          expected: { fixtureId?: string; active: boolean; minCommits?: number },
+        ) => {
+          const fixtureId = expected.fixtureId ?? 'default';
           const deadline = Date.now() + 5_000;
           while (Date.now() < deadline) {
-            const response = await fetch(`http://127.0.0.1:${FIXTURE_PORT}/studio/status`);
+            const response = await fetch(
+              `http://127.0.0.1:${FIXTURE_PORT}/studio/status?fixtureId=${encodeURIComponent(fixtureId)}`,
+            );
             const body = (await response.json()) as {
               active?: boolean;
               commits?: { hash: string; message: string }[];
@@ -67,13 +87,20 @@ export default defineConfig({
             `Timed out waiting for studio status active=${expected.active} minCommits=${expected.minCommits ?? 0}`,
           );
         },
-        getFixtureState: async () => {
-          ensureFixtureStateFile();
-          return JSON.parse(readFileSync(FIXTURE_STATE_PATH, 'utf8'));
+        getFixtureState: async (_, payload?: { fixtureId?: string }) => {
+          const fixtureId = payload?.fixtureId ?? 'default';
+          const store = readFixtureStore();
+          return store[fixtureId] ?? {};
         },
-        resetFixtureState: async () => {
-          rmSync(FIXTURE_STATE_PATH, { force: true });
-          ensureFixtureStateFile();
+        resetFixtureState: async (_, payload?: { fixtureId?: string }) => {
+          if (!payload?.fixtureId) {
+            rmSync(FIXTURE_STATE_PATH, { force: true });
+            ensureFixtureStateFile();
+            return;
+          }
+          const store = readFixtureStore();
+          delete store[payload.fixtureId];
+          writeFixtureStore(store);
         },
       },
     },

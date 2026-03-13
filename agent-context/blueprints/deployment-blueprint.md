@@ -1,6 +1,6 @@
 # Deployment Blueprint
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-13 -->
 
 CONTEXT MAP
 this ◀──implemented by── implementation-ts/deployment-implementation.md
@@ -19,6 +19,10 @@ Deployment is the moment a codebase becomes a system. Code that passes every tes
 The deployment strategy for agent-built software has two fundamental requirements that traditional deployments lack. First, an AI agent must be able to diagnose a production issue by reading logs, not by watching dashboards or receiving pages. Second, human-convenience tooling like hot-reloading (`vite dev`) optimizes for incremental human thought, but agents write full files and prefer exact reproduction. By building the code exactly as it will run in production and running it in a background container for dev previews, we eliminate hybrid environment bugs and drastically reduce the toolchain complexity across environments.
 
 The cost of ignoring this blueprint is a system that works in development and fails in production in ways no one can diagnose. Environments that drift. Errors that repeat ten thousand times and fill the disk while the root cause remains invisible. Deployments that require tribal knowledge that no agent can access. Containerized deployment is not overhead — it is the discipline that makes the system identically operable by any agent in any session, from local dev to enterprise Kubernetes.
+
+This document is a policy blueprint. Calypso should treat deployment as a controlled release workflow with deterministic gates, ordered artifact publication, and ordered rollout phases. The implementation companion provides the recommended GitHub Actions, GHCR, and Kubernetes realization of that policy.
+
+Within the broader Calypso CLI product model, deployment is one of several explicit state machines managed by the orchestrator. Release promotion, GitHub release publication, GHCR image publication, Kubernetes signaling, rollout approval, rollout execution, and rollback targeting all belong to tracked deployment state rather than ad hoc operator memory.
 
 ---
 
@@ -59,6 +63,18 @@ A single user action — clicking a button, submitting a form — generates a tr
 ### Deployment is a build, not a ceremony
 
 Deploying a new version means building the code, stopping the old process, starting the new process, and verifying it is healthy. These steps are scripted, idempotent, and non-interactive. No SSH session, no manual file copy, no "run these five commands in this order." An agent or a CI pipeline can deploy without human assistance.
+
+### Releases are cut from tagged main commits only
+
+A release begins from a commit already on `main`, not from an arbitrary branch tip. That commit must have all required CI checks green before it may receive a release tag. The tag format is semver plus the six-digit PR hash so the release remains traceable to the review unit that produced it. A tag that points at an unqualified commit is not a release candidate; it is a process violation.
+
+### Schema upgrades must be forward-compatible across the rollout window
+
+Database migration safety is not established by applying migrations successfully once. New application code must be compatible with both the previous schema and the new schema during the rollout window, because migrations and application rollout do not become visible to every running component at the exact same instant. The release process therefore requires a thorough schema-upgrade compatibility check using plausible fixtures before a release may proceed.
+
+### Rollouts are ordered and health-gated
+
+Once a release is built and published, rollout does not happen all at once. The sequence is: database migrations, frontend application rollout, worker rollout, and static web rollout last. Each phase must prove the running system is healthy before the next phase begins. A failed phase blocks the release; it does not merely log a warning for later.
 
 ### Secrets are runtime configuration, not build artifacts
 
