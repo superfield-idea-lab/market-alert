@@ -9,6 +9,7 @@
 import { migrate } from 'db';
 import { handleAuthRequest } from './api/auth';
 import { handleTasksRequest } from './api/tasks';
+import { handleStudioRequest } from './api/studio';
 
 // Ensure Postgres tables exist before answering traffic
 await migrate();
@@ -45,6 +46,11 @@ export default {
     if (url.pathname.startsWith('/api/tasks')) {
       const tasksRes = await handleTasksRequest(req, url);
       if (tasksRes) return tasksRes;
+    }
+
+    if (url.pathname.startsWith('/studio')) {
+      const studioRes = await handleStudioRequest(req, url);
+      if (studioRes) return studioRes;
     }
 
     // Serve static assets — path is relative to this file, not process cwd

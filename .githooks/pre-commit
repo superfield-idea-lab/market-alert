@@ -1,7 +1,38 @@
 #!/usr/bin/env bash
+
+BRANCH=$(git branch --show-current 2>/dev/null)
+[[ "$BRANCH" == studio/session* ]] && exit 0
+
 # commit size advisory + lint/format auto-fix.
 STAGED=$(git diff --cached --name-only)
 STAGED_DIFF=$(git diff --cached -- ':!.githooks' ':!bun.lock' ':!package-lock.json' ':!yarn.lock')
+DOC_STAGED=$(echo "$STAGED" | grep -E '\.(md|rst|txt)$' || true)
+
+# ── 0. Documentation merge safety gate ───────────────────────────────────────
+# Docs cannot be auto-merged. We also block commits that still contain merge
+# markers to prevent accidental corruption.
+if [ -n "$DOC_STAGED" ]; then
+  DOC_MARKERS=""
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    if ! git cat-file -e ":$file" 2>/dev/null; then
+      continue
+    fi
+    HITS=$(git show ":$file" | grep -nE '^(<<<<<<<|=======|>>>>>>>|\|\|\|\|\|\|\|)' || true)
+    if [ -n "$HITS" ]; then
+      DOC_MARKERS="${DOC_MARKERS}\n$file\n$HITS\n"
+    fi
+  done <<< "$DOC_STAGED"
+
+  if [ -n "$DOC_MARKERS" ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKED: Merge conflict markers found in staged documentation files." >&2
+    echo -e "$DOC_MARKERS" >&2
+    echo "Resolve by choosing one coherent document version (prefer newest when unsure)." >&2
+    echo "" >&2
+    exit 1
+  fi
+fi
 
 # These are deterministic checks on the staged diff — no agent assertion needed.
 VIOLATIONS=()

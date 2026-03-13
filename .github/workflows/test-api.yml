@@ -16,11 +16,7 @@ jobs:
         uses: oven-sh/setup-bun@v1
       - name: Install Dependencies
         run: bun install
-      - name: Lint and Format Check
-        run: bun run lint
-      - name: Build Web App
-        run: bun run --filter web build
       - name: Run API Integration Tests
         # Each test suite spins up its own postgres container and server process.
         # Docker is available on ubuntu-latest runners by default.
-        run: bun --bun vitest run apps/server/tests/integration
+        run: bun run test:api

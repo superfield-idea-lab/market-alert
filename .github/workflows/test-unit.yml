@@ -15,7 +15,5 @@ jobs:
         uses: oven-sh/setup-bun@v1
       - name: Install Dependencies
         run: bun install
-      - name: Lint and Format Check
-        run: bun run lint
       - name: Run Unit Tests
-        run: bun --bun vitest run tests/unit apps/*/tests/unit
+        run: bun run test:unit

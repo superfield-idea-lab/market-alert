@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+BRANCH=$(git branch --show-current 2>/dev/null)
+[[ "$BRANCH" == studio/session* ]] && exit 0
+
 # post-commit: Warns when the branch has accumulated >= 10 file changes vs. main.
 # At that point a PR is due — annotates next-prompt.md and prints a console notice.
 

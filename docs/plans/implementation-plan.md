@@ -30,22 +30,21 @@ Establish a green CI baseline before adding features. All four CI workflows must
 
 ### Root Cause Analysis
 
-The E2E workflow fails because:
+The Vitest-driven E2E workflow fails because:
 
-1. `webServer.command` in `playwright.config.ts` is `bun run dev`, which starts a Vite dev server on port 5173 — but the config waits on port 31415 (the Bun server port), so Playwright times out.
-2. The Bun server calls `await migrate()` on startup, which requires a live Postgres connection — not provided in the E2E CI workflow.
-3. The E2E test (`tests/e2e/app.spec.ts`) tests the old journalism scaffold app (registration, drafts, SQLite) — incompatible with the current Calypso UI.
+1. The previous Playwright runner (`playwright.config.ts`) could not coordinate building the web assets and launching the Bun API server with a PostgreSQL container in the same process.
+2. The Bun server calls `await migrate()` on startup, which requires a live Postgres connection — the old workflow did not spawn the container that the API expected.
+3. `tests/e2e/full.spec.ts` now exercises the Calypso login, registration, and StudioChat flows through the Vitest harness.
 
 ### Fixes Required
 
 - [x] **Fix post-commit and pre-push hooks:** Run `bunx prettier --write docs/plans/next-prompt.md` after appending to avoid blocking the next push.
 - [x] **Rebase onto starter/main:** Force-rebased `feat/scaffold` onto `dot-matrix-labs/calypso-starter:main` to establish shared history for PR creation.
 - [x] **tsconfig excludes for browser tests:** Both root and `apps/web` tsconfigs exclude `tests/component` so `expect.element()` is never seen by standalone `tsc --noEmit`.
-- [x] **Playwright CI install:** Use `bunx playwright install --with-deps chromium` (not `install-deps && install`) in both E2E and component workflows to avoid downloading all browser deps.
-- [x] **Fix `playwright.config.ts` webServer:** Changed command to `bun run --filter web build && bun run apps/server/src/index.ts`. Uses `url:` (not `port:`) with 60s timeout.
-- [x] **Fix `.github/workflows/test-e2e.yml`:** Added `postgres:16` service with `DATABASE_URL`. Fixed branch refs (`master` → `main`) in all four workflow files.
+- [x] **Vitest E2E orchestration:** The suite now lives under `tests/e2e/vitest.config.ts` and uses `tests/e2e/environment.ts` to build the frontend, spin up a dockerized Postgres container, and host the Bun API/server process while Playwright drives the browser.
+- [x] **Fix `.github/workflows/test-e2e.yml`:** Moved E2E to Vitest-driven execution and removed fixed Postgres service wiring from CI. E2E infrastructure is provisioned by Bun-side Vitest setup. Fixed branch refs (`master` → `main`) in workflow files.
 - [x] **E2E console error filter:** Filter out 401/Unauthorized network errors from E2E console error checks — Playwright captures browser-level network failures as console errors; /api/auth/me returning 401 is expected and handled gracefully.
-- [x] **Rewrite `tests/e2e/app.spec.ts`:** Two smoke tests — (1) login screen renders, (2) register → Calypso layout shell visible (Main Project + Team Chat). Selectors match actual Login.tsx markup.
+- [x] **Rewrite `tests/e2e/full.spec.ts`:** Combined Calypso login, registration, and StudioChat tests, exercising the real `/studio` endpoints with the Claude CLI fixture.
 - [x] **Verify unit and component tests pass:** All three test stubs are clean (no stale journalism references).
 
 ## Phase 3: The Project Board (3/4 View)
@@ -79,3 +78,36 @@ Implement the one-way synchronization for public issue tracking.
 - [ ] **GitHub API Service:** Build the server-side service to poll or receive webhooks from designated public GitHub repositories.
 - [ ] **Issue Mirroring:** When a new issue is detected, translate it into the Calypso `Task` schema and insert it into the database as a read-only item.
 - [ ] **State Updates:** Listen for "Issue Closed" events from GitHub to update the corresponding Calypso task status automatically.
+
+## Studio Mode
+
+- [x] `bun run studio` script — proven working end-to-end
+- [x] Studio mode server detection via `.studio` file
+- [x] `StudioChat.tsx` — chat panel with commit list and rollback
+- [x] `POST /studio/chat` endpoint with claude CLI subprocess
+- [x] Agent system prompt and `changes.md` maintenance
+- [x] Shared `packages/db/pg-container.ts` + test suite + CI job
+- [x] Fix: run migrate as subprocess to avoid early db pool initialisation
+- [x] Fix: exclude component tests from regular vitest run (vite.config.ts test.exclude)
+- [x] Fix: pre-push hook uses bun --bun vitest run instead of bun test
+- [x] Resolve pg-container.ts conflict with main (identical code, formatting only)
+- [x] Fix E2E test: use getByRole for Studio heading to avoid strict mode violation
+- [x] Hardening: create studio branch automatically, run migrations against container DB, retry docker port detection, avoid overwriting changes.md, and scope initial commit
+- [x] Tests: studio branch parsing + docker port parsing helpers
+- [x] Fix: studio runs Vite dev server and proxies `/studio` to the Bun API in dev
+- [x] Fix: studio uses dedicated web port via `STUDIO_PORT`, with API expected on `STUDIO_API_PORT`
+- [x] Relax studio branch/worktree enforcement for testing (`STUDIO_ENFORCE_BRANCH=1` to re-enable)
+- [x] E2E: studio chat workflow with fixture Claude CLI and server prompt assertion
+- [x] Component: StudioChat UI states + send flow coverage
+- [x] CI topology: quality gate is a separate workflow from suite test workflows
+- [x] Unit: Studio helper parsing, prompt construction, and validation coverage
+- [x] Integration: `/studio/status`, `/studio/chat`, `/studio/reset`, and `/studio/rollback` contract coverage
+- [x] Integration: `bun run studio` bootstrap coverage with `STUDIO_ENFORCE_BRANCH=1` in an isolated checkout
+- [x] Integration: successful `/studio/rollback` against a real isolated git checkout
+- [x] E2E: multi-turn Studio context, rollback cancel, and rollback success through the browser UI
+- [x] Fix: strict null checks for Bun subprocess `stdout`/`stderr` reads in isolated Studio tests and E2E harness
+- [x] Fix: Studio commit-list resolution no longer assumes a local `main` ref on GitHub PR merge checkouts
+- [x] Fix: Studio bootstrap integration test now provisions git identity and a checked-out `main` branch in its disposable clone
+- [x] Fix: `scripts/studio-start.ts` now probes `origin/main` / `main` fallback refs without exiting on the first missing ref
+- [x] Fix: Studio commit-list E2E uses an isolated checkout with real session commits instead of depending on PR checkout history
+- [x] Fix: Studio bootstrap force-adds the ignored `.studio` sentinel so disposable clones can commit session metadata during CI

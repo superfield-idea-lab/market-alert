@@ -1,63 +1,28 @@
 # Next Prompt
 
-## Context
+Read `agent-context/index.md`, `agent-context/development/development-standards.md`, `agent-context/blueprints/testing-blueprint.md`, `agent-context/implementation-ts/testing-implementation.md`, `docs/plans/implementation-plan.md`, and `docs/plans/studio-test-coverage-plan.md` before making further Studio changes.
 
-Integration tests are now fully self-contained: each suite spins up its own postgres:16 Docker
-container and server subprocess via `apps/server/tests/helpers/pg-container.ts` (DIY testcontainers
-pattern). No shared external infrastructure needed — works locally and in CI without a pre-started
-postgres service or server process. The CI `test-api.yml` workflow was simplified to remove the
-postgres service, Start Server, and Wait for Server steps.
+This branch already has an open PR and is above the preferred size threshold. Do not widen the Studio scope further on `feat/studio-mode` unless the change is directly required to make the existing Studio work mergeable.
 
-Key implementation details:
-- `startPostgres()` runs `docker run -d --rm -p 0:5432 postgres:16`, gets the ephemeral port via
-  `docker port`, and polls `pg_isready` + `psql SELECT 1` to guard against the "system is starting
-  up" race condition where pg_isready exits 0 prematurely.
-- Server is spawned with `cwd` set to repo root so Bun can resolve workspace packages (db, core).
-- Server now reads `process.env.PORT` (falls back to 31415) for configurable port binding.
-- Integration tests use port 31416 to avoid conflicts with a running dev server.
+If the next commit touches Studio:
 
-## Next Task — Phase 3: Kanban View
+1. Preserve the existing suite ownership:
+   - unit tests for pure helpers and parsing
+   - integration tests for `/studio` endpoint contracts and bootstrap/git behavior
+   - component tests for `StudioChat` browser states
+   - E2E tests for operator workflows
+2. Prefer isolated git checkouts for any destructive Studio verification. Do not mutate the live branch to prove rollback behavior.
+3. Run only the canonical suite commands for the layer you change:
+   - `bun --bun vitest run tests/unit apps/*/tests/unit`
+   - `bun run test:api`
+   - `bun --bun vitest run --config apps/web/vitest.browser.config.ts`
+   - `bun --bun vitest run --config tests/e2e/vitest.config.ts`
+4. Do not assume GitHub Actions PR checkouts have a local `main` branch or an existing git identity. If a Studio test depends on either, provision them explicitly inside the disposable clone.
+5. Update `docs/plans/implementation-plan.md` and this file in the same commit.
+6. If there is no additional Studio work required for merge, switch to the next highest-priority unchecked item in `docs/plans/implementation-plan.md` on a fresh or rebased branch.
 
-Add a second view mode to the project board: a Kanban board with status columns.
+Latest merge blocker fixes on `feat/studio-mode`:
 
-### 1. Add view toggle to App.tsx
-
-In the board header, add a segmented control (List / Kanban) that switches between
-`<TaskListView />` and `<KanbanView />`. Store as `boardView: 'list' | 'kanban'` state.
-
-### 2. Build `apps/web/src/components/KanbanView.tsx`
-
-Three columns: **Todo**, **In Progress**, **Done** — each showing tasks filtered by status.
-
-Each task card shows: name, owner, priority badge, due date.
-
-Clicking a card's status badge cycles it (same `PATCH /api/tasks/:id` call as the list view).
-
-No drag-and-drop yet — clicking the status badge moves the card to the next column.
-
-### 3. Component tests
-
-Add `apps/web/tests/component/kanban.test.tsx` using `vitest-browser-react` + mocked fetch:
-
-- Kanban renders three column headers (Todo, In Progress, Done)
-- Task with status "todo" appears in the Todo column
-- Cycling status moves the card to In Progress column
-
-### Constraints
-
-TypeScript only. Bun for all scripts. No mocks in implementation code. No forbidden packages.
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-```
-
-```
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
+- `scripts/studio-start.ts` must probe `origin/main` / `main` candidates without exiting on the first missing ref.
+- Studio commit-list E2E coverage must use an isolated checkout with known session commits; do not depend on the PR checkout's commit topology.
+- `scripts/studio-start.ts` must force-add the ignored `.studio` sentinel before the bootstrap commit inside disposable test clones.

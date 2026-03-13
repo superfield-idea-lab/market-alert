@@ -19,4 +19,4 @@ jobs:
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
       - name: Run Component Tests
-        run: bun --bun vitest run --config apps/web/vitest.browser.config.ts
+        run: bun run test:component

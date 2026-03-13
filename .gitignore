@@ -38,3 +38,7 @@ coverage/
 
 # Deprecated agent contexts
 .agent-context-deprecated-*
+.studio
+
+# Studio cleanup sentinel
+.calypso-db

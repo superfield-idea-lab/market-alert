@@ -2,7 +2,11 @@
   "name": "core",
   "private": true,
   "main": "index.ts",
+  "type": "module",
   "scripts": {
     "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
   }
 }

@@ -8,11 +8,18 @@
   "scripts": {
     "postinstall": "git config core.hooksPath .githooks",
     "build": "bun run --filter '*' build",
-    "test": "bun run packages/db/migrate.ts && bun --bun vitest run && bunx playwright test",
+    "test": "bun run test:unit && bun run test:api && bun run test:component && bun run test:e2e",
+    "test:unit": "bun --bun vitest run tests/unit apps/*/tests/unit",
+    "test:api": "for f in apps/server/tests/integration/*.test.ts; do bun --bun vitest run \"$f\" || exit 1; done",
+    "test:pg-container": "bun --bun vitest run apps/server/tests/integration/pg-container.test.ts",
+    "test:component": "bun --bun vitest run --config apps/web/vitest.browser.config.ts",
+    "test:e2e": "bun --bun vitest run --config tests/e2e/vitest.config.ts",
     "lint": "bunx eslint .",
     "format": "bunx prettier --write .",
+    "format:check": "bunx prettier --check .",
     "dev": "bun run --filter '*' dev",
-    "update-agent-context": "bun run scripts/update-agent-context.ts"
+    "update-agent-context": "bun run scripts/update-agent-context.ts",
+    "studio": "bun run scripts/studio-start.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

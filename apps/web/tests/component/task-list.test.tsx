@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from 'vitest-browser-react';
-import { expect, test, vi, beforeEach } from 'vitest';
+import { commands } from '@vitest/browser/context';
+import { expect, test } from 'vitest';
 import { TaskListView } from '../../src/components/TaskListView';
 import type { Task } from 'core';
 
@@ -18,35 +19,22 @@ const MOCK_TASK: Task = {
   createdAt: new Date().toISOString(),
 };
 
-function mockFetch(tasks: Task[] = []) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
-      if (options?.method === 'POST') {
-        const body = JSON.parse(options.body as string);
-        const created: Task = { ...MOCK_TASK, id: 'task-new', ...body, status: 'todo' };
-        return { ok: true, json: async () => created };
-      }
-      if (options?.method === 'PATCH') {
-        const body = JSON.parse(options.body as string);
-        return { ok: true, json: async () => ({ ...MOCK_TASK, ...body }) };
-      }
-      // GET /api/tasks
-      return { ok: true, json: async () => tasks };
-    }),
-  );
+async function setTasksFixture(tasks: Task[] = []) {
+  await commands.setFixtureState({
+    tasks,
+    studioStatus: { active: false },
+    studioChatResponse: { reply: '' },
+  });
 }
 
-beforeEach(() => {
-  mockFetch();
-});
-
 test('renders empty state when there are no tasks', async () => {
+  await setTasksFixture();
   const screen = render(<TaskListView />);
   await expect.element(screen.getByText(/No tasks yet/)).toBeVisible();
 });
 
 test('opens New Task modal when empty state button is clicked', async () => {
+  await setTasksFixture();
   const screen = render(<TaskListView />);
   await screen.getByRole('button', { name: /New Task/i }).click();
   await expect.element(screen.getByRole('heading', { name: 'New Task' })).toBeVisible();
@@ -54,7 +42,7 @@ test('opens New Task modal when empty state button is clicked', async () => {
 });
 
 test('renders column headers when tasks exist', async () => {
-  mockFetch([MOCK_TASK]);
+  await setTasksFixture([MOCK_TASK]);
   const screen = render(<TaskListView />);
   // Wait for the task name to appear (confirms fetch resolved and table rendered)
   await expect.element(screen.getByRole('cell', { name: 'Fix the bug' })).toBeVisible();
@@ -67,7 +55,7 @@ test('renders column headers when tasks exist', async () => {
 });
 
 test('renders task row with correct data', async () => {
-  mockFetch([MOCK_TASK]);
+  await setTasksFixture([MOCK_TASK]);
   const screen = render(<TaskListView />);
   await expect.element(screen.getByRole('cell', { name: 'Fix the bug' })).toBeVisible();
   await expect.element(screen.getByRole('cell', { name: 'alice' })).toBeVisible();

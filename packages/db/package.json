@@ -3,6 +3,10 @@
   "private": true,
   "main": "index.ts",
   "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./pg-container": "./pg-container.ts"
+  },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },

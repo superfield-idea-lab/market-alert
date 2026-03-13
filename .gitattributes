@@ -1,0 +1,3 @@
+*.md merge=binary
+*.rst merge=binary
+*.txt merge=binary

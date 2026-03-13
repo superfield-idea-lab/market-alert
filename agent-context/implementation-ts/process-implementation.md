@@ -1,6 +1,6 @@
 # Process — Calypso TypeScript Implementation
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-12 -->
 
 CONTEXT MAP
 this ──implements──▶ blueprints/process-blueprint.md
@@ -65,6 +65,18 @@ Written in second person. Self-contained. Includes context about what was just c
 ## Pre-Commit Hook Enforcement
 
 The git pre-commit hook (defined in `git-standards.md`) verifies that both `docs/plans/implementation-plan.md` and `docs/plans/next-prompt.md` are included in the commit's staged files. If either is missing, the commit is rejected.
+
+## Documentation Merge Enforcement
+
+Documentation files are merge-protected and require explicit agent resolution.
+
+Implementation details:
+
+1. `.gitattributes` marks documentation-like files (`*.md`, `*.rst`, `*.txt`) with `merge=binary`, preventing automatic line-level merges.
+2. `.githooks/pre-commit` scans staged documentation files and blocks commits containing merge conflict markers.
+3. Merge protocol: read older and newer docs, produce one coherent result, and prefer the newer document when uncertain.
+
+This combination is intended to prevent unintentional document corruption and accidental conflict-marker commits.
 
 ## Scaffold Checklist (Stage 0)
 

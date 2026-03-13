@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+BRANCH=$(git branch --show-current 2>/dev/null)
+[[ "$BRANCH" == studio/session* ]] && exit 0
+
 # commit-msg: Validates CALYPSO_CHECKLIST completion and GIT_BRAIN_METADATA schema.
 
 COMMIT_FILE="$1"

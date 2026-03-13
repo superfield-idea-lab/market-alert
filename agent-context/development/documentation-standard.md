@@ -1,6 +1,6 @@
 # Documentation Standard (Business Application)
 
-<!-- last-edited: 2026-03-10 -->
+<!-- last-edited: 2026-03-12 -->
 
 CONTEXT MAP
 this ──governs─────────▶ docs/ and README.md files within the PROJECT BEING BUILT
@@ -59,6 +59,19 @@ Every directory in the project should contain a `README.md` that explains:
 - Key files and their purposes
 - How it relates to other parts of the project
 
+### 6. Documentation Merge Protocol (No Auto-Merge)
+
+Automated line-level merges for documentation files are not allowed.
+
+When a documentation merge conflict occurs:
+
+1. Read both versions completely (older and newer).
+2. Propose a single coherent merged document version.
+3. If uncertain, defer to the newest source document.
+4. Resolve the conflict by staging one final document, not a line-spliced mash of both sides.
+
+The outcome must be one intentional document chosen by an agent, with clear narrative continuity.
+
 ## Benefits for Agents
 
 1. **O(1) Navigation**: An agent entering any directory can read `README.md` to understand the context immediately.
@@ -67,38 +80,12 @@ Every directory in the project should contain a `README.md` that explains:
 
 ## Enforcement
 
-To enforce this standard, create a `pre-push` git hook at `.git/hooks/pre-push`:
+This repository enforces documentation safety with both merge strategy and hooks:
 
-```bash
-#!/bin/sh
+1. `.gitattributes` sets docs-like extensions (`.md`, `.rst`, `.txt`) to `merge=binary`, which disables automatic line-level merge for these files and forces explicit human/agent resolution.
+2. `.githooks/pre-commit` blocks commits when staged documentation files still contain merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`, `|||||||`).
+3. Existing hook checks continue to enforce planning-document staging and repository standards.
 
-# Pre-push hook to enforce documentation standard
-# Prevents pushing documentation files outside of ./docs/ directory
+Operational note:
 
-while read local_ref local_sha remote_ref remote_sha; do
-    if [ "$remote_ref" = "refs/heads/"* ]; then
-        if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
-            range="$remote_sha"
-        else
-            range="$remote_sha..$local_sha"
-        fi
-
-        invalid_docs=$(git diff --name-only $range 2>/dev/null | grep -E '\.(md|txt|rst)$' | grep -v '^docs/' | grep -v '/README.md$' | grep -v '^README.md$' || true)
-
-        if [ -n "$invalid_docs" ]; then
-            echo "ERROR: Documentation files detected outside of ./docs/ directory."
-            echo ""
-            echo "The following documentation files would be pushed outside of ./docs/:"
-            echo "$invalid_docs"
-            echo ""
-            echo "Per the Documentation Fractal standard, all documentation files"
-            echo "(other than README.md in each directory) must be placed in ./docs/"
-            exit 1
-        fi
-    fi
-done
-
-exit 0
-```
-
-Make it executable: `chmod +x .git/hooks/pre-push`
+- If the repository uses `core.hooksPath=.githooks`, hooks are versioned at `.githooks/*` and do not use `.git/hooks/*` directly.
