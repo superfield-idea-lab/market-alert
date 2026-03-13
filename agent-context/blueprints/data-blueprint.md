@@ -60,6 +60,8 @@ Four layers protect data at rest: disk encryption, database-level encryption, ap
 
 The domain model is not stable. Business needs evolve, agents discover new entities, and relationships change daily. Relational schemas encoded as DDL (Data Definition Language) become a bottleneck if every change requires a migration, downtime, and coordination. Instead, the system uses a **Property Graph on PostgreSQL** model: a fixed, three-table schema that treats the data model itself as data. Adding a new entity type or property is an `INSERT` or `UPDATE` to the type registry, not a structural alteration of the database. Type schema versioning replaces migrations. When a property is added, existing entities without it remain valid. When a property is removed, the application stops reading it; existing values become inert.
 
+This principle governs the evolving business domain model. It does not prohibit dedicated relational integrity subsystems where the requirements are different. Append-only ledgers, replay checkpoints, nonce stores, and other transaction-integrity infrastructure may use explicit relational tables when total ordering, row locking, deterministic replay, or cryptographic verification are required. These are sanctioned infrastructure exceptions, not drift away from the graph model.
+
 ### PostgreSQL is the database — use standard SQL with Graph patterns
 
 The stack uses PostgreSQL across all stores. This provides proven security (RBAC, RLS), encryption, and operational maturity. Rather than a separate graph database, the system implements property graph patterns—entities, relations, and type registries—directly on PostgreSQL using JSONB for flexible properties and recursive CTEs for traversal. This combines the flexibility of a graph with the reliability of a 30-year-old relational engine.
@@ -68,9 +70,9 @@ The stack uses PostgreSQL across all stores. This provides proven security (RBAC
 
 Every field persisted is a field that can be breached, subpoenaed, or misused. The decision to collect a field requires justification: what product function depends on it, how long must it be retained, and what is the plan for deletion. The type registry enforces this for each entity type. Fields collected "for future use" are liabilities with no offsetting value. Retention policies are enforced by automated deletion, not by human discipline.
 
-### Agents operate on aggregated data only
+### Agents operate on bounded data, not arbitrary production data
 
-No agent process — whether it runs recommendations, generates reports, or performs background analysis — has a code path to the transactional customer store. Agents read from the analytics tier, which contains pseudonymous, aggregated, differentially private data. This is not a permissions check; it is an architectural boundary. An agent that could, in principle, read raw customer records is an agent that will, eventually, read raw customer records.
+No agent process — whether it runs recommendations, generates reports, or performs background analysis — has arbitrary read access to the transactional customer store. The default path is the analytics tier, which contains pseudonymous, aggregated, differentially private data. Narrow exceptions exist for worker task queues, task-scoped operational context, and sandboxed digital twins used for simulation. These exceptions are structurally constrained by role, scope, and environment isolation. An agent that could freely browse production records is an agent that will, eventually, exfiltrate or misuse them.
 
 ### Keys and data live on separate infrastructure
 
@@ -81,6 +83,14 @@ The KMS is a hard dependency for encryption and decryption — if it is unavaila
 ### Audit precedes access
 
 Every read of sensitive data is logged before the read is executed — not after, not asynchronously, not "when the batch job runs." The audit log uses a separate encryption key and a separate storage path from the data it protects. If the audit write fails, the data read is denied. This ordering guarantee transforms the audit log from a forensic afterthought into an active control.
+
+### Business journals and audit logs are distinct systems
+
+An append-only business journal answers "what accepted business facts changed state." An audit log answers "who read, attempted, denied, approved, failed, recovered, or administered the system." These are different questions with different consumers and different retention and access requirements. A ledger is not a substitute for the audit log; the audit log is not a substitute for the ledger. Enterprise systems require both.
+
+### Digital twins are the safe simulation surface
+
+Consequential workflow experiments must not happen on production databases. The system provides sandboxed digital twins: isolated, short-lived clones of production-relevant state that humans and agents use to test transaction sequences, preview downstream events, and inspect rollback behavior without risking production mutation. Twin creation and teardown speed are product requirements because safe iteration is part of enterprise reliability, not an offline convenience.
 
 ---
 
@@ -113,6 +123,14 @@ Every read of sensitive data is logged before the read is executed — not after
 **Solution:** The application layer validates every write against the schema defined in `entity_types`. This registry is live metadata that the validation layer and the `FieldEncryptor` use to decide how to handle each property.
 
 **Trade-offs:** Validation logic moves from the database engine to the application tier. This increases application complexity but allows for more expressive validation and versioned schema evolution without DDL.
+
+### Pattern 3A: Append-Only Business Journal
+
+**Problem:** Flexible graph storage is well-suited to evolving business entities, but it is not sufficient on its own for consequential state transitions that require total order, compensating rollback, deterministic replay, and cryptographic verification.
+
+**Solution:** Use a dedicated append-only journal for consequential business operations. The journal stores accepted transaction facts, links compensations to the transactions they reverse, and supports deterministic reconstruction of materialized state. The graph model remains the default for business-domain flexibility; the journal is the integrity layer for operations that must be attributable, replayable, and recoverable.
+
+**Trade-offs:** This introduces a second modeling style inside the transactional tier. The cost is justified because the journal is not modeling arbitrary business entities — it is modeling integrity-critical state transitions. The system gains replay, compensation, and provable ordering at the cost of some additional schema and validator complexity.
 
 ### Pattern 4: Key-Per-Type Encryption
 
@@ -166,7 +184,15 @@ Every read of sensitive data is logged before the read is executed — not after
 
 **Trade-offs:** Synchronous audit logging adds latency to every sensitive read — typically one additional write operation. The append-only log grows without bound and requires a retention and archival strategy. The separate storage backend is an additional infrastructure dependency. For high-throughput systems, the audit write can become a bottleneck; batching is not permitted because it breaks the "log before read" guarantee.
 
-### Pattern 8: PII-Scrubbing Log Pipeline
+### Pattern 8: Sandboxed Digital Twins
+
+**Problem:** Humans and agents need to test consequential transaction sequences, workflow transitions, and downstream effects against realistic state. Running these experiments against production is unsafe; reasoning about them without realistic state is unreliable.
+
+**Solution:** Create sandboxed digital twins of production-relevant state. A twin is an isolated, short-lived clone produced from a recent snapshot, a replay checkpoint, or a minimal domain slice with referential integrity preserved. The twin runs the same validator, policy, and event logic as production but with separate credentials, separate mutable storage, and hard write isolation. All twin actions are audit-marked as sandbox actions.
+
+**Trade-offs:** Twin creation requires snapshot management, state slicing, and teardown logic. Full-fidelity clones are more expensive than narrow domain slices. The correct trade is to clone the smallest production-relevant state that still yields credible workflow simulation, not to copy the entire database by default.
+
+### Pattern 9: PII-Scrubbing Log Pipeline
 
 **Problem:** Application logs record errors, request traces, and system events. Under normal operation, logs may appear clean. Under error conditions — exceptions, serialization failures, validation errors — the full object that caused the error is frequently logged, and that object may contain decrypted PII, database rows, or request payloads with sensitive fields.
 
@@ -320,6 +346,10 @@ See [`agent-context/implementation-ts/data-implementation.md`](../implementation
 - [ ] KMS backed by hardware security module (HSM); no software-only key storage in production
 - [ ] Automated key rotation operational on schedule; zero-downtime rekeying verified under load
 - [ ] Immutable audit log replicated to cold storage; retention policy enforced
+- [ ] Consequential business journal operational for integrity-critical writes; replay and compensation verified
+- [ ] Journal and audit log are independently queryable and retained; one cannot be mistaken for the other
+- [ ] Digital twin creation tested: production-relevant state cloned into an isolated sandbox in seconds
+- [ ] Digital twin isolation verified: sandbox writes cannot mutate `calypso_app`, `calypso_analytics`, or `calypso_audit`
 - [ ] Full differential privacy pipeline active: noise calibration, budget tracking, budget exhaustion rejection
 - [ ] Agent access restricted to analytics tier; no code path from agent processes to `calypso_app` (verified by architecture review and integration test)
 - [ ] Penetration test completed against data layer; findings remediated

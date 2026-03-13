@@ -1,6 +1,14 @@
 import { sql } from 'db';
 import type { Task, TaskProperties } from 'core';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
+import { applyTaskPatchThroughBoundary } from '../policies/task-write-service';
+
+// Starter task note:
+// Task CRUD currently mutates entity rows directly. That is acceptable for the
+// current scaffold features, but it is below the target enterprise posture for
+// consequential operations. Future state changes that carry financial,
+// approval, or agentic workflow significance should move behind a journaled
+// write boundary with dual attribution and replay support.
 
 function rowToTask(row: { id: string; properties: TaskProperties; created_at: string }): Task {
   const p = row.properties;
@@ -94,13 +102,16 @@ export async function handleTasksRequest(req: Request, url: URL): Promise<Respon
     `;
     if (!existing) return json({ error: 'Not found' }, 404);
 
-    const updated: TaskProperties = { ...existing.properties, ...body };
-    const [row] = await sql<{ id: string; properties: TaskProperties; created_at: string }[]>`
-      UPDATE entities
-      SET properties = ${sql.json(updated as never)}, updated_at = NOW()
-      WHERE id = ${id} AND type = 'task'
-      RETURNING id, properties, created_at
-    `;
+    const row = await applyTaskPatchThroughBoundary({
+      taskId: id,
+      current: existing.properties,
+      patch: body,
+      principal: {
+        id: user.id,
+        kind: 'human',
+      },
+      reason: 'task.patch',
+    });
 
     return json(rowToTask(row));
   }

@@ -1,6 +1,12 @@
 import { sql } from 'db';
 import { signJwt, verifyJwt } from '../auth/jwt';
 
+// Starter auth note:
+// These routes are intentionally simple so the current app can register and log
+// in during development. They do not satisfy the full blueprint posture yet:
+// passkeys, dual attribution for consequential actions, separate audit writes,
+// and scoped sandbox credentials are all still future implementation work.
+
 // Helper to parse cookies from headers
 export function parseCookies(cookieHeader: string | null): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -82,7 +88,9 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
         password_hash: hash,
       };
 
-      // Insert new user entity
+      // Starter implementation: identity material still lives in the generic
+      // entities table. The target posture separates auth controls, audit, and
+      // sensitive-data handling more explicitly.
       await sql`
                 INSERT INTO entities (id, type, properties, tenant_id) 
                 VALUES (${id}, 'user', ${sql.json(properties)}, null)
@@ -95,6 +103,8 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
+          // Starter cookie settings are intentionally minimal. The blueprint
+          // target is HTTP-only secure cookies with stricter session controls.
           'Set-Cookie': `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
         },
       });
@@ -173,6 +183,8 @@ export async function handleAuthRequest(req: Request, url: URL): Promise<Respons
 
   // 4. POST /api/auth/logout
   if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
+    // TODO(calypso-blueprint): add revocation-store support so logout is not
+    // just cookie deletion in the browser.
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: {

@@ -8,25 +8,66 @@ const PORT = 31417;
 const BASE = `http://localhost:${PORT}`;
 const SERVER_READY_TIMEOUT_MS = 20_000;
 const REPO_ROOT = new URL('../../../../', import.meta.url).pathname;
-const SERVER_ENTRY = 'apps/server/src/index.ts';
+const CLONE_ROOT = join('/tmp', `calypso-studio-api-${Date.now()}`);
+const SERVER_ENTRY = join(REPO_ROOT, 'apps/server/src/index.ts');
 const CLAUDE_STUB_DIR = join(REPO_ROOT, 'tests', 'fixtures');
-const CLAUDE_LOG_PATH = join(REPO_ROOT, 'tests', 'fixtures', 'claude-integration.log');
-const STUDIO_FILE_PATH = join(REPO_ROOT, '.studio');
-const STUDIO_BRANCH = 'studio-session-integration';
-const STUDIO_SESSION_ID = 'itest';
-const SESSION_DIR = join(REPO_ROOT, 'docs', 'studio-sessions', STUDIO_BRANCH);
-const CHANGES_PATH = join(SESSION_DIR, 'changes.md');
+const CLAUDE_LOG_PATH = join(CLONE_ROOT, 'tests', 'fixtures', 'claude-integration.log');
 
 let pg: PgContainer;
 let server: Subprocess;
+let studioBranch = '';
+let studioFilePath = '';
+let sessionDir = '';
+let changesPath = '';
 
 beforeAll(async () => {
+  const clone = Bun.spawnSync(['git', 'clone', REPO_ROOT, CLONE_ROOT], {
+    cwd: REPO_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  expect(clone.exitCode).toBe(0);
+
+  Bun.spawnSync(['git', 'config', 'user.name', 'Studio API Test'], {
+    cwd: CLONE_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  Bun.spawnSync(['git', 'config', 'user.email', 'studio-api-test@example.com'], {
+    cwd: CLONE_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  Bun.spawnSync(['git', 'branch', '-f', 'main', 'HEAD'], {
+    cwd: CLONE_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const mainHash = Bun.spawnSync(['git', 'rev-parse', '--short', 'main'], {
+    cwd: CLONE_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  expect(mainHash.exitCode).toBe(0);
+
+  studioBranch = `studio/session-${(mainHash.stdout ?? new Uint8Array()).toString().trim()}-itest`;
+  Bun.spawnSync(['git', 'checkout', '-b', studioBranch], {
+    cwd: CLONE_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  studioFilePath = join(CLONE_ROOT, '.studio');
+  sessionDir = join(CLONE_ROOT, 'docs', 'studio-sessions', studioBranch);
+  changesPath = join(sessionDir, 'changes.md');
+
   pg = await startPostgres();
-  mkdirSync(CLAUDE_STUB_DIR, { recursive: true });
-  mkdirSync(SESSION_DIR, { recursive: true });
+  mkdirSync(join(CLONE_ROOT, 'tests', 'fixtures'), { recursive: true });
+  mkdirSync(sessionDir, { recursive: true });
   writeFileSync(
-    CHANGES_PATH,
-    `# Studio Session — ${STUDIO_BRANCH}
+    changesPath,
+    `# Studio Session — ${studioBranch}
 **Started:** ${new Date().toISOString()}
 
 ## Changes
@@ -35,9 +76,10 @@ beforeAll(async () => {
   );
 
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
-    cwd: REPO_ROOT,
+    cwd: CLONE_ROOT,
     env: {
       ...process.env,
+      CALYPSO_REPO_ROOT: CLONE_ROOT,
       DATABASE_URL: pg.url,
       PORT: String(PORT),
       PATH: `${CLAUDE_STUB_DIR}${delimiter}${process.env.PATH ?? ''}`,
@@ -55,14 +97,15 @@ afterAll(async () => {
   cleanupStudioArtifacts();
   rmSync(CLAUDE_LOG_PATH, { force: true });
   await pg?.stop();
+  rmSync(CLONE_ROOT, { recursive: true, force: true });
 });
 
 beforeEach(() => {
   cleanupStudioArtifacts();
-  mkdirSync(SESSION_DIR, { recursive: true });
+  mkdirSync(sessionDir, { recursive: true });
   writeFileSync(
-    CHANGES_PATH,
-    `# Studio Session — ${STUDIO_BRANCH}
+    changesPath,
+    `# Studio Session — ${studioBranch}
 **Started:** ${new Date().toISOString()}
 
 ## Changes
@@ -88,8 +131,8 @@ describe('Studio API integration', () => {
 
     expect(res.status).toBe(200);
     expect(body.active).toBe(true);
-    expect(body.sessionId).toBe(STUDIO_SESSION_ID);
-    expect(typeof body.branch).toBe('string');
+    expect(body.sessionId).toBe('itest');
+    expect(body.branch).toBe(studioBranch);
     expect(Array.isArray(body.commits)).toBe(true);
   });
 
@@ -192,11 +235,11 @@ describe('Studio API integration', () => {
 
 function writeStudioFile() {
   writeFileSync(
-    STUDIO_FILE_PATH,
+    studioFilePath,
     JSON.stringify(
       {
-        sessionId: STUDIO_SESSION_ID,
-        branch: STUDIO_BRANCH,
+        sessionId: 'itest',
+        branch: studioBranch,
         startedAt: new Date().toISOString(),
       },
       null,
@@ -206,8 +249,8 @@ function writeStudioFile() {
 }
 
 function cleanupStudioArtifacts() {
-  rmSync(STUDIO_FILE_PATH, { force: true });
-  rmSync(SESSION_DIR, { recursive: true, force: true });
+  rmSync(studioFilePath, { force: true });
+  rmSync(sessionDir, { recursive: true, force: true });
 }
 
 async function waitForServer(base: string): Promise<void> {

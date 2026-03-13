@@ -52,7 +52,7 @@ The agent's database role grants read access to a curated set of views — the t
 
 ### All agent writes are user-authenticated API transactions
 
-Every state change an agent produces is submitted as an authenticated request to the application API, using a delegated credential issued by the user who owns the task. The API processes the request identically to a human-initiated write: it validates input, checks authorization, enforces business rules, and writes through the standard data layer. The agent cannot choose a different path. The database is not reachable. The API is the only write surface.
+Every live state change an agent produces is submitted as an authenticated request to the application API, using a delegated credential issued by the user or system principal that owns the task. The API processes the request identically to a human-initiated write: it validates input, checks authorization, enforces business rules, and writes through the standard data layer. For consequential operations, the worker may submit a signed transaction intent rather than a direct mutation payload; the validator remains the only acceptance gate. The database is not reachable. The API is the only production write surface.
 
 ### Agent capability is declared at deployment, not at runtime
 
@@ -61,6 +61,10 @@ An agent's task type subscription, its database role, its vendor API access, and
 ### Delegated tokens are single-use and task-scoped
 
 When a user creates a task, the API issues a short-lived, task-scoped delegated token and includes it in the task record. The agent reads the token as part of the task, uses it to submit the result, and the token is invalidated on first use. If the agent fails before submitting, the token expires by TTL. A delegated token cannot be used to submit results for a different task, to read data outside its scope, or to initiate a new task. The token's scope is the task's scope.
+
+### Simulation happens in digital twins, not on production
+
+Agents must not use production databases as an experimentation surface. When a task requires trying transaction sequences, simulating downstream effects, or evaluating rollback behavior, the worker executes that workflow inside a sandboxed digital twin. Twin execution may produce proposals, diffs, and predicted events, but it does not itself mutate production state. Promotion from simulation to live submission is a separate, explicitly authorized step.
 
 ### Agent types are isolated from each other
 
@@ -94,7 +98,7 @@ Claim flow:
 
 **Problem:** Agent-submitted results must be authorized as actions of the user who created the task, not as actions of a generic service identity. A service token that grants write access on behalf of any user is too broad; an agent with no user context cannot produce audit-attributable writes.
 
-**Solution:** At task creation, the API generates a single-use, task-scoped capability token derived from the creating user's identity. The token encodes: the task ID it is valid for, the user ID it acts on behalf of, the specific API endpoints it may call, and an expiry time. The token is stored in the task record (encrypted at rest). The agent receives the token as part of the claimed task payload. When submitting a result, the agent presents the token; the API verifies the token's scope against the operation being requested, executes the write on behalf of the encoded user, and invalidates the token.
+**Solution:** At task creation, the API generates a single-use, task-scoped capability token derived from the creating user's identity. The token encodes: the task ID it is valid for, the user ID it acts on behalf of, the specific API endpoints it may call, and an expiry time. The token is stored in the task record (encrypted at rest). The agent receives the token as part of the claimed task payload. When submitting a result, the agent presents the token; the API verifies the token's scope against the operation being requested, executes the write on behalf of the encoded user, records the worker identity as the executor, and invalidates the token.
 
 ```
 Token claims:
@@ -106,6 +110,14 @@ Token claims:
 ```
 
 **Trade-offs:** Token invalidation requires server-side state (a used-token log or a task status check). Stateless token validation is not sufficient for single-use semantics. This is an acceptable cost — the alternative is replayable tokens, which is not acceptable. If the agent crashes after claiming the token but before submitting, the task must be designed to be retried with a new claim (which issues a new token).
+
+### Pattern 2A: Signed Transaction Intent Submission
+
+**Problem:** Some agent tasks produce consequential business actions where the platform must preserve both what the agent proposed and what the system ultimately accepted.
+
+**Solution:** The worker submits a signed transaction intent to the API instead of writing state directly. The API authenticates the delegated authority, verifies the worker identity, and hands the intent to the validator. The validator checks policy, business rules, and current state, then appends the accepted transaction through the standard write path. The committed record preserves both principal authority and execution provenance.
+
+**Trade-offs:** Intent submission adds another step between task completion and final state mutation. That cost is intentional: enterprise-grade business actions require a visible validation boundary, not direct mutation from worker output.
 
 ### Pattern 3: Vendor Binary Execution via Process Spawn
 
@@ -127,6 +139,14 @@ Incorrect: spawn(["sh", "-c", `claude --print "${prompt}"`])
 **Solution:** Every agent execution — task claim, vendor API call, vendor CLI invocation, result submission — is logged to a structured audit table via the API (not directly). The log entry includes: task ID, agent type, operation type, input hash (not plaintext, to avoid logging sensitive prompts), output hash, token used, timestamp, and result status. The actual prompt and response content may be stored in the task record itself (subject to the data blueprint's encryption and retention policies) but are never written directly by the agent — they are submitted with the result payload and stored by the API layer.
 
 **Trade-offs:** Hashing inputs and outputs enables tamper detection but prevents content inspection without the original. For debugging this is inconvenient; for compliance it is necessary. The task record, accessible via the API to authorized users, contains the full content where policy permits.
+
+### Pattern 4A: Sandboxed Digital Twin Execution
+
+**Problem:** An agent needs to test a consequential transaction sequence or workflow before it is safe to ask the platform to commit it. Doing that exploration against production state is unsafe; doing it against fabricated data is misleading.
+
+**Solution:** The worker requests or is assigned a sandboxed digital twin. The twin contains only the production-relevant slice of state needed for the task, runs with isolated credentials, and is torn down automatically after execution. The worker uses the twin to simulate transactions, observe downstream events, and produce a structured artifact: proposed transaction sequence, state diff, emitted events, and invariant results. Only a later authorized submission may affect production.
+
+**Trade-offs:** Twin orchestration increases worker complexity and requires fast clone creation infrastructure. The payoff is that agent experimentation becomes a supported platform capability instead of an unsafe improvisation.
 
 ### Pattern 5: Per-Agent-Type Database Role
 
@@ -330,6 +350,10 @@ async function submitResult(apiBase: string, task: AgentTask, result: TaskResult
 - [ ] Agent network policy verified: worker container cannot reach the database port directly (tested via `kubectl exec` attempt)
 - [ ] Vendor CLI binary invoked without shell; `Bun.spawn` call uses array form, not string-with-shell
 - [ ] Structured execution log entries written to audit table via API on every vendor invocation
+- [ ] Signed transaction intent path tested: worker proposal accepted only through validator, never by direct mutation
+- [ ] Dual attribution verified on consequential writes: principal authority and executing worker both present in resulting records
+- [ ] Digital twin mode tested: worker receives sandbox credentials, executes simulation, and returns structured diff artifact
+- [ ] Twin promotion boundary tested: sandbox execution alone cannot commit production state without separate authorization
 - [ ] Agent service token distinct from user tokens and from frontend tokens; each has non-overlapping scope claims
 - [ ] Per-agent-type database roles verified to be isolated: agent_coding cannot SELECT from task_queue_view_analysis (tested)
 - [ ] Delegated token TTL enforced: token presented after expiry returns 401 regardless of use count

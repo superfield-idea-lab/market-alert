@@ -12,6 +12,7 @@ const SERVER_READY_TIMEOUT_MS = 20_000;
 const SERVER_ENTRY = join(REPO_ROOT, 'apps/server/src/index.ts');
 const BRANCH = 'studio/session-test-rollback-a1b2';
 const SESSION_ID = 'a1b2';
+const SOURCE_BRANCH = currentBranch(REPO_ROOT);
 
 let pg: PgContainer;
 let server: Subprocess | null = null;
@@ -107,6 +108,7 @@ Added a rollback target change.
     cwd: CLONE_ROOT,
     env: {
       ...process.env,
+      CALYPSO_REPO_ROOT: CLONE_ROOT,
       DATABASE_URL: pg.url,
       PORT: String(PORT),
     },
@@ -163,6 +165,7 @@ test('POST /studio/rollback resets the isolated branch to the requested commit a
   );
   expect(changesContent).not.toContain('Added a rollback target change.');
   expect(changesContent).toContain('Initial studio session.');
+  expect(currentBranch(REPO_ROOT)).toBe(SOURCE_BRANCH);
 }, 90_000);
 
 async function waitForServer() {
@@ -176,4 +179,13 @@ async function waitForServer() {
     }
   }
   throw new Error(`Server at ${BASE} did not become ready within ${SERVER_READY_TIMEOUT_MS}ms`);
+}
+
+function currentBranch(cwd: string) {
+  const branch = Bun.spawnSync(['git', 'branch', '--show-current'], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  return (branch.stdout ?? new Uint8Array()).toString().trim();
 }

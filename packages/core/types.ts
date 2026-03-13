@@ -20,6 +20,10 @@ export interface Relation {
 }
 
 // Calypso Specific semantic properties mapped from the Entity JSONB
+// Policy note: this starter app stores password hashes inside the generic user
+// entity payload. The target blueprint posture replaces this with passkey-first
+// auth, dedicated auth/audit controls, and stricter separation between identity
+// material and general business entities.
 export interface UserProperties {
   username: string;
   password_hash: string;
@@ -53,6 +57,10 @@ export interface TaskProperties {
   dependsOn: string[];
   tags: string[];
 }
+
+// Policy note: a starter-level task update is still modeled as a mutable entity
+// rewrite. Consequential future workflows should move to a journaled write
+// boundary so state changes can be replayed, compensated, and attributed.
 
 export interface GithubLinkProperties {
   issueNumber: number;

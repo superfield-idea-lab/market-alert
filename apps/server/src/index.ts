@@ -11,7 +11,11 @@ import { handleAuthRequest } from './api/auth';
 import { handleTasksRequest } from './api/tasks';
 import { handleStudioRequest } from './api/studio';
 
-// Ensure Postgres tables exist before answering traffic
+// Starter behavior:
+// the server boot path auto-runs a local schema initializer for convenience.
+// The target enterprise posture keeps this repo on PostgreSQL, but production
+// deployments should promote controlled migrations, journal checkpoint setup,
+// and recovery validation ahead of serving traffic.
 await migrate();
 
 export default {

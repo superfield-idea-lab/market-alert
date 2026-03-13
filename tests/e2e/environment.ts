@@ -13,10 +13,7 @@ const ISOLATED_SERVER_PORT = SERVER_BASE_PORT + WORKER_ID + 100;
 const SERVER_READY_TIMEOUT_MS = 20_000;
 const BUN_BIN =
   process.env.BUN_BIN ?? (existsSync('/usr/local/bin/bun') ? '/usr/local/bin/bun' : 'bun');
-const CLAUDE_LOG_PATH = join(REPO_ROOT, 'tests', 'fixtures', 'claude-e2e.log');
 const CLAUDE_STUB_DIR = join(REPO_ROOT, 'tests', 'fixtures');
-const STUDIO_BRANCH = 'studio-session-e2e';
-const STUDIO_SESSION_ID = 'e2e';
 
 export type StudioSession = {
   branch: string;
@@ -31,6 +28,7 @@ export type E2EEnvironment = {
   baseUrl: string;
   claudeLogPath: string;
   studioSession: StudioSession;
+  cloneRoot: string;
 };
 
 export type IsolatedRollbackEnvironment = E2EEnvironment & {
@@ -38,20 +36,24 @@ export type IsolatedRollbackEnvironment = E2EEnvironment & {
 };
 
 export async function startE2EServer(): Promise<E2EEnvironment> {
+  const cloneRoot = join('/tmp', `calypso-e2e-studio-${Date.now()}`);
+  await cloneRepo(cloneRoot);
   await runBuild();
   const pg = await startPostgres();
-  const studioSession = setupStudioSession(pg);
-  rmSync(CLAUDE_LOG_PATH, { force: true });
+  const studioSession = setupStudioSession(cloneRoot, pg);
+  const claudeLogPath = join(cloneRoot, 'tests', 'fixtures', 'claude-e2e.log');
+  rmSync(claudeLogPath, { force: true });
 
   const envPath = `${CLAUDE_STUB_DIR}${delimiter}${process.env.PATH ?? ''}`;
-  const server = Bun.spawn([BUN_BIN, 'run', SERVER_ENTRY], {
-    cwd: REPO_ROOT,
+  const server = Bun.spawn([BUN_BIN, 'run', SERVER_ENTRY_ABS], {
+    cwd: cloneRoot,
     env: {
       ...process.env,
+      CALYPSO_REPO_ROOT: cloneRoot,
       DATABASE_URL: pg.url,
       PORT: String(SERVER_PORT),
       PATH: envPath,
-      CLAUDE_E2E_LOG_PATH: CLAUDE_LOG_PATH,
+      CLAUDE_E2E_LOG_PATH: claudeLogPath,
     },
     stdout: 'inherit',
     stderr: 'inherit',
@@ -63,47 +65,22 @@ export async function startE2EServer(): Promise<E2EEnvironment> {
     pg,
     server,
     baseUrl: `http://localhost:${SERVER_PORT}`,
-    claudeLogPath: CLAUDE_LOG_PATH,
+    claudeLogPath,
     studioSession,
+    cloneRoot,
   };
 }
 
 export async function stopE2EServer(context: E2EEnvironment): Promise<void> {
   context.server.kill();
   await context.pg.stop();
-  cleanupStudioSession(context.studioSession);
-  rmSync(context.claudeLogPath, { force: true });
+  rmSync(context.cloneRoot, { recursive: true, force: true });
 }
 
 export async function startIsolatedRollbackServer(): Promise<IsolatedRollbackEnvironment> {
-  await runBuild();
   const cloneRoot = join('/tmp', `calypso-e2e-rollback-${Date.now()}`);
-  const clone = Bun.spawnSync(['git', 'clone', REPO_ROOT, cloneRoot], {
-    cwd: REPO_ROOT,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  if (clone.exitCode !== 0) {
-    throw new Error(
-      `Failed to clone repo for isolated rollback test: ${(clone.stderr ?? new Uint8Array()).toString()}`,
-    );
-  }
-
-  Bun.spawnSync(['git', 'config', 'user.name', 'Studio E2E Test'], {
-    cwd: cloneRoot,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  Bun.spawnSync(['git', 'config', 'user.email', 'studio-e2e@example.com'], {
-    cwd: cloneRoot,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  Bun.spawnSync(['git', 'branch', '-f', 'main', 'HEAD'], {
-    cwd: cloneRoot,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  await cloneRepo(cloneRoot);
+  await runBuild();
 
   const branch = 'studio/session-e2e-rollback-a1b2';
   const sessionId = 'a1b2';
@@ -170,14 +147,16 @@ Added a rollback target change.
 
   const pg = await startPostgres();
   const envPath = `${CLAUDE_STUB_DIR}${delimiter}${process.env.PATH ?? ''}`;
+  const claudeLogPath = join(cloneRoot, 'tests', 'fixtures', 'claude-e2e.log');
   const server = Bun.spawn([BUN_BIN, 'run', SERVER_ENTRY_ABS], {
     cwd: cloneRoot,
     env: {
       ...process.env,
+      CALYPSO_REPO_ROOT: cloneRoot,
       DATABASE_URL: pg.url,
       PORT: String(ISOLATED_SERVER_PORT),
       PATH: envPath,
-      CLAUDE_E2E_LOG_PATH: CLAUDE_LOG_PATH,
+      CLAUDE_E2E_LOG_PATH: claudeLogPath,
     },
     stdout: 'inherit',
     stderr: 'inherit',
@@ -189,7 +168,7 @@ Added a rollback target change.
     pg,
     server,
     baseUrl: `http://localhost:${ISOLATED_SERVER_PORT}`,
-    claudeLogPath: CLAUDE_LOG_PATH,
+    claudeLogPath,
     studioSession: {
       branch,
       sessionId,
@@ -206,6 +185,35 @@ export async function stopIsolatedRollbackServer(
   context.server.kill();
   await context.pg.stop();
   rmSync(context.cloneRoot, { recursive: true, force: true });
+}
+
+async function cloneRepo(cloneRoot: string): Promise<void> {
+  const clone = Bun.spawnSync(['git', 'clone', REPO_ROOT, cloneRoot], {
+    cwd: REPO_ROOT,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (clone.exitCode !== 0) {
+    throw new Error(
+      `Failed to clone repo for isolated studio test: ${(clone.stderr ?? new Uint8Array()).toString()}`,
+    );
+  }
+
+  Bun.spawnSync(['git', 'config', 'user.name', 'Studio E2E Test'], {
+    cwd: cloneRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  Bun.spawnSync(['git', 'config', 'user.email', 'studio-e2e@example.com'], {
+    cwd: cloneRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  Bun.spawnSync(['git', 'branch', '-f', 'main', 'HEAD'], {
+    cwd: cloneRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
 }
 
 async function runBuild(): Promise<void> {
@@ -233,14 +241,22 @@ async function waitForServer(port = SERVER_PORT): Promise<void> {
   throw new Error(`Server at ${base} did not become ready within ${SERVER_READY_TIMEOUT_MS}ms`);
 }
 
-function setupStudioSession(pg: PgContainer): StudioSession {
-  const sessionDir = join(REPO_ROOT, 'docs', 'studio-sessions', STUDIO_BRANCH);
+function setupStudioSession(repoRoot: string, pg: PgContainer): StudioSession {
+  const branch = 'studio/session-e2e-a1b2';
+  const sessionId = 'a1b2';
+  Bun.spawnSync(['git', 'checkout', '-b', branch], {
+    cwd: repoRoot,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const sessionDir = join(repoRoot, 'docs', 'studio-sessions', branch);
   mkdirSync(sessionDir, { recursive: true });
   const changesPath = join(sessionDir, 'changes.md');
   if (!existsSync(changesPath)) {
     writeFileSync(
       changesPath,
-      `# Studio Session — ${STUDIO_BRANCH}
+      `# Studio Session — ${branch}
 **Started:** ${new Date().toISOString()}
 
 ## Changes
@@ -250,23 +266,18 @@ function setupStudioSession(pg: PgContainer): StudioSession {
   }
 
   const studioInfo = {
-    sessionId: STUDIO_SESSION_ID,
-    branch: STUDIO_BRANCH,
+    sessionId,
+    branch,
     startedAt: new Date().toISOString(),
     databaseUrl: pg.url,
     containerId: pg.containerId,
   };
-  writeFileSync(join(REPO_ROOT, '.studio'), JSON.stringify(studioInfo, null, 2));
+  writeFileSync(join(repoRoot, '.studio'), JSON.stringify(studioInfo, null, 2));
 
   return {
-    branch: STUDIO_BRANCH,
-    sessionId: STUDIO_SESSION_ID,
+    branch,
+    sessionId,
     sessionDir,
     changesPath,
   };
-}
-
-function cleanupStudioSession(session: StudioSession): void {
-  rmSync(join(REPO_ROOT, '.studio'), { force: true });
-  rmSync(session.sessionDir, { recursive: true, force: true });
 }

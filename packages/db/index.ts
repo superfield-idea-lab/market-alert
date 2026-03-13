@@ -2,6 +2,11 @@ import postgres from 'postgres';
 import { join } from 'path';
 import { readFileSync } from 'fs';
 
+// Starter implementation note:
+// This package currently exposes a single connection pool bound to calypso_app.
+// The target blueprint posture splits transactional, analytics, and audit paths
+// across separate roles / databases so business journals, analytics, and audit
+// writes cannot be conflated at runtime.
 function maskDbUrl(dbUrl: string): string {
   return dbUrl.replace(/:[^:@]+@/, ':***@');
 }
@@ -26,6 +31,11 @@ export interface MigrateOptions {
 /**
  * Initializes the database tables by executing the native raw SQL schema.
  * This function should be called at server startup to ensure tables exist.
+ *
+ * Policy note:
+ * This is a starter bootstrap migration path, not the final enterprise data
+ * posture. Future work should separate graph schema setup from ledger / journal
+ * migrations, audit-store setup, and digital-twin checkpoint infrastructure.
  */
 export async function migrate(options: MigrateOptions = {}) {
   console.log('[db] Initializing PostgreSQL database schema...');

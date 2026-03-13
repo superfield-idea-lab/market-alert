@@ -68,6 +68,10 @@ Developer-machine test invocation must match CI invocation for each suite. CI is
 
 When a test fails, the failure message must identify which suite, which test, and which assertion failed — without requiring the reader to parse log output or cross-reference multiple files. CI workflows are organized one-per-suite so that a red check immediately names the broken category.
 
+### Replay, recovery, and simulation are test surfaces
+
+For enterprise systems, correctness is not limited to request/response behavior. The system must prove that it can replay durable facts into correct state, recover from clean backups, and create isolated sandbox twins that do not leak mutations into production. If these properties are not tested, they are aspirational, not architectural.
+
 ---
 
 ## Design Patterns
@@ -111,6 +115,22 @@ When a test fails, the failure message must identify which suite, which test, an
 **Solution:** Use one dedicated quality-gate workflow that runs lint, format check, and build verification. Keep test workflows focused on executing their test suite commands only. Merge gating requires both the quality-gate workflow and all test-suite workflows to pass.
 
 **Trade-offs:** Adds one required workflow and enforces explicit branch-protection configuration. In return, CI avoids duplicated lint/format work and test workflow outcomes remain behavior-focused.
+
+### Pattern 5: Ledger Replay and Recovery Verification
+
+**Problem:** A ledgered system can appear correct in normal request handling while still failing the enterprise requirements that matter most during incidents: replay, restore, divergence detection, and compensating rollback.
+
+**Solution:** Add dedicated tests that start from durable ledger facts and prove the system can rebuild state deterministically. The suite must cover replay from genesis, replay from checkpoints, restore from backup into a clean environment, comparison of rebuilt state to materialized state, and rollback or compensation misuse scenarios. These tests run against a real PostgreSQL environment and real validator logic.
+
+**Trade-offs:** Replay and recovery tests are slower than unit tests and require more setup. That cost is acceptable because disaster recovery guarantees cannot be established by fast tests alone.
+
+### Pattern 6: Digital Twin Lifecycle Testing
+
+**Problem:** A digital twin feature is only safe if clone creation is fast, isolation is real, and teardown reliably removes mutable state and credentials. Without explicit tests, a twin becomes an unverified production-adjacent environment.
+
+**Solution:** Add a twin lifecycle suite that provisions a sandboxed twin from production-relevant inputs, executes a realistic transaction sequence inside it, asserts on the produced diff and events, verifies that production state is unchanged, and confirms that teardown revokes access and removes mutable state. These tests must use the real twin orchestration path, not a mocked clone service.
+
+**Trade-offs:** Twin lifecycle tests require infrastructure support and can be more operationally involved than ordinary integration tests. That is appropriate because the twin feature itself is operational infrastructure exposed as a product capability.
 
 ---
 
@@ -219,6 +239,10 @@ See [`agent-context/implementation-ts/testing-implementation.md`](../implementat
 - [ ] Test-suite CI workflows execute tests only (no duplicated quality checks)
 - [ ] Merge gate configured: all workflows must pass before merge
 - [ ] Test stubs exist for all planned feature areas (failing is expected; missing is not)
+- [ ] Ledger replay tests exist: genesis replay, checkpoint replay, and materialized-state comparison
+- [ ] Backup restore test exists: clean environment restored and replayed to current state
+- [ ] Digital twin lifecycle test exists: clone creation, sandbox execution, teardown, and proof that production state is unchanged
+- [ ] Consequential transaction tests cover dual attribution, delegated authority, and compensation paths
 - [ ] No mocks in any test file; grep for `mock`, `jest.fn`, `vi.fn` returns zero results in test code
 - [ ] Fixture refresh pipeline runs on schedule; schema drift alerts configured
 - [ ] All four test suites run in under five minutes total in CI

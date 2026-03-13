@@ -1,6 +1,12 @@
 const JWT_SECRET_KEY = process.env.JWT_SECRET || 'calypso-dev-secret-super-secure';
 const ENCODER = new TextEncoder();
 
+// Policy note:
+// This JWT helper is a starter implementation for the current app shell. The
+// blueprint target is stricter: passkey-first auth, pinned algorithms by
+// deployment, revocation checks, delegated authority for consequential actions,
+// and sandbox-only credentials for digital twins.
+
 /**
  * Encodes a string to a Base64 URL Safe string.
  */
@@ -81,6 +87,10 @@ export async function verifyJwt<T>(token: string): Promise<T> {
   if (!isValid) {
     throw new Error('Invalid signature');
   }
+
+  // The implementation uses a fixed HS256 header today. Consequential
+  // transaction signatures should follow the blueprint rule instead: pin the
+  // accepted algorithm per deployment / ledger domain, not per request.
 
   const payloadStr = base64UrlDecode(encodedPayload);
   const payload = JSON.parse(payloadStr);

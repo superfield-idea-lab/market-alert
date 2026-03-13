@@ -59,6 +59,10 @@ Every agent credential carries explicit scope claims and expires within 24 hours
 
 Worker daemon service accounts are a distinct credential category from per-task agent tokens. A worker container's service identity token — used to authenticate API calls for claiming tasks and submitting results — is a long-lived credential stored as a Kubernetes Secret. It must be scoped to the minimum API surface the worker requires (task claim and result submission only), must be rotatable without container restart (the application reads it from the mounted secret path, which Kubernetes updates in-place), and must be rotated on a documented schedule (rotation tested and automated). The short-lived constraint in this principle applies to per-task delegated user tokens, not to worker service identity tokens.
 
+### Authority and execution are separate security facts
+
+Enterprise systems must preserve the difference between the principal that had authority to perform an action and the actor that executed it. For agent-originated business operations, authorization may belong to a user, service role, or policy-approved system principal, while execution provenance belongs to the worker or agent that assembled and submitted the request. The system records both facts. "The agent acted on behalf of the user" is not the same statement as "the user executed the action personally," and the architecture must not collapse them.
+
 ### No single actor authorizes privileged operations
 
 Operations that touch root key material, trigger bulk data exports, or modify the authentication infrastructure itself require M-of-N approval from distinct human operators. No administrator account, no matter how trusted, can unilaterally perform these operations. This is not a workflow preference — it is a cryptographic constraint enforced through secret sharing. A single compromised admin account is a serious incident; it must not be a total compromise.
@@ -69,7 +73,7 @@ The critical login path — credential verification, token issuance, session cre
 
 ### Algorithm is pinned, not negotiated
 
-Token verification accepts exactly one signing algorithm. The algorithm is configured at deployment time and is not read from the token header. Algorithm negotiation — where the server accepts whatever algorithm the token claims to use — is the root cause of algorithm confusion attacks, including the `alg: none` bypass and symmetric/asymmetric key substitution. Pinning the algorithm makes these attacks structurally impossible rather than relying on validation logic to catch them.
+Token verification accepts exactly one signing algorithm. The algorithm is configured at deployment time and is not read from the token header. Algorithm negotiation — where the server accepts whatever algorithm the token claims to use — is the root cause of algorithm confusion attacks, including the `alg: none` bypass and symmetric/asymmetric key substitution. Pinning the algorithm makes these attacks structurally impossible rather than relying on validation logic to catch them. The same rule applies to consequential transaction signatures: pin an algorithm per ledger domain or deployment, not per request.
 
 ---
 
@@ -95,9 +99,25 @@ Token verification accepts exactly one signing algorithm. The algorithm is confi
 
 **Problem:** AI agents need programmatic access to platform resources, but granting them the same credentials as human users creates an unacceptable blast radius — a compromised agent credential would have the same access as a compromised user account, without the behavioral signals that help detect human account compromise.
 
-**Solution:** Agents authenticate through a dedicated issuance path that produces tokens with explicit scope claims. Each scope claim names a resource and an operation (e.g., `analytics:read`, `transformations:write`). The token has a maximum TTL of 24 hours. Server-side middleware validates scope claims on every request, not just at issuance. An agent requesting access outside its declared scope receives a 403 regardless of token validity. Agent registration is a human-operator action; agents cannot self-register or request scope escalation.
+**Solution:** Agents authenticate through a dedicated issuance path that produces tokens with explicit scope claims. Each scope claim names a resource and an operation (e.g., `analytics:read`, `transformations:write`, `twin:execute`). The token has a maximum TTL of 24 hours. Server-side middleware validates scope claims on every request, not just at issuance. An agent requesting access outside its declared scope receives a 403 regardless of token validity. Agent registration is a human-operator action; agents cannot self-register or request scope escalation.
 
 **Trade-offs:** Short-lived, narrowly scoped tokens require agents to re-authenticate frequently and may need multiple tokens for multi-resource workflows. This adds latency and operational complexity to agent orchestration. For workflows that span many resources, the temptation is to issue a broader token — but that temptation is precisely what this pattern exists to resist.
+
+### Pattern 3A: Delegated Transaction Authority with Dual Attribution
+
+**Problem:** An agent may be permitted to assemble and submit a consequential business transaction, but attributing the resulting action solely to the user or solely to the agent is dishonest and weakens both authorization clarity and forensic accountability.
+
+**Solution:** Use delegated authority plus dual attribution. A delegated credential binds the action to the principal on whose behalf it is allowed. The request or ledger entry separately records the executing agent or worker identity. Validation checks both: the principal must have authority for the action, and the executing agent must be registered, scoped, and currently permitted to act in that mode. The accepted transaction records both identities and any relevant policy or delegation reference.
+
+**Trade-offs:** Dual attribution adds schema and logging complexity because more than one actor identity must be carried through the request path. That cost is worth paying: an enterprise system must be able to answer both "who had authority?" and "which automation executed it?"
+
+### Pattern 3B: Sandbox Credentials for Digital Twins
+
+**Problem:** A digital twin used for simulation needs real authentication and authorization boundaries, but those credentials must not be reusable against production.
+
+**Solution:** Issue sandbox-only credentials for twin creation and execution. These credentials carry explicit twin scope, are time-bounded, and are valid only against isolated twin resources. They cannot be exchanged for production write authority, cannot target production endpoints, and are revoked automatically when the twin expires or is destroyed.
+
+**Trade-offs:** Sandbox credentials add a second class of short-lived token to the auth system. This is an acceptable cost because production and simulation must never share interchangeable authority.
 
 ### Pattern 4: M-of-N Privileged Operations
 
@@ -282,6 +302,9 @@ See [`agent-context/implementation-ts/auth-implementation.md`](../implementation
 - [ ] Agent authentication implemented with scoped tokens; agent tokens carry explicit scope claims
 - [ ] Agent scope validated on every request by middleware, not just at token issuance
 - [ ] Agent token TTL enforced at a maximum of 24 hours
+- [ ] Dual attribution supported for consequential actions: principal authority and executing agent are recorded separately
+- [ ] Consequential transaction signature algorithm pinned per ledger domain or deployment; request-level algorithm negotiation rejected
+- [ ] Sandbox-only credentials implemented for digital twin creation and execution; sandbox tokens cannot access production endpoints
 - [ ] Rate limiting active on authentication endpoints (registration, assertion, token refresh)
 - [ ] Authentication events (login, logout, failed attempt, registration) written to audit log
 - [ ] Key recovery flow implemented and tested end-to-end: passphrase + second factor re-enrolls a new passkey
