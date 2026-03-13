@@ -2,7 +2,7 @@
 /**
  * studio — Starts a disposable Postgres container, writes the .studio
  * sentinel file, and launches the dev server with the correct DATABASE_URL.
- * Set STUDIO_ENFORCE_BRANCH=1 to enforce studio branch naming + clean worktree.
+ * Studio only runs from an existing studio/session-{mainHash}-{sessionId} branch.
  *
  * Run from the repo root: bun run studio
  */
@@ -11,16 +11,11 @@ import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { startPostgres } from '../packages/db/pg-container';
 import { migrate } from '../packages/db/index';
-import {
-  buildStudioBranchName,
-  generateSessionId,
-  resolveStudioSession,
-} from '../packages/core/studio-session';
+import { resolveStudioSession } from '../packages/core/studio-session';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const STUDIO_API_PORT = Number(process.env.STUDIO_API_PORT ?? 31415);
 const STUDIO_PORT = Number(process.env.STUDIO_PORT ?? 5174);
-const ENFORCE_STUDIO_BRANCH = process.env.STUDIO_ENFORCE_BRANCH === '1';
 const EXIT_AFTER_BOOTSTRAP = process.env.STUDIO_EXIT_AFTER_BOOTSTRAP === '1';
 const SKIP_PUSH = process.env.STUDIO_SKIP_PUSH === '1';
 
@@ -39,15 +34,6 @@ function tryRun(cmd: string[]): string | null {
   const proc = Bun.spawnSync(cmd, { cwd: REPO_ROOT, stdout: 'pipe', stderr: 'pipe' });
   if (proc.exitCode !== 0) return null;
   return new TextDecoder().decode(proc.stdout).trim();
-}
-
-function hasGitRef(ref: string): boolean {
-  const proc = Bun.spawnSync(['git', 'show-ref', '--verify', '--quiet', ref], {
-    cwd: REPO_ROOT,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  return proc.exitCode === 0;
 }
 
 function getCurrentBranch(): string {
@@ -80,17 +66,6 @@ function ensureGitIdentity(): void {
   }
 }
 
-function ensureCleanWorktree(): void {
-  const status = run(['git', 'status', '--porcelain']);
-  if (status) {
-    console.error('\n❌ Error: Working tree is not clean.');
-    console.error('  Studio sessions must start from a clean, dedicated worktree.');
-    console.error('  Create one with:');
-    console.error('    git worktree add ../calypso-studio origin/main');
-    process.exit(1);
-  }
-}
-
 function ensureStudioBranch(): { branch: string; sessionId: string; mainHash: string } {
   const currentBranch = getCurrentBranch();
   if (!currentBranch) {
@@ -98,35 +73,9 @@ function ensureStudioBranch(): { branch: string; sessionId: string; mainHash: st
     process.exit(1);
   }
 
-  const { ref, hash: mainHash } = getMainRefAndHash();
-  const resolution = resolveStudioSession({
-    currentBranch,
-    mainHash,
-    enforceStudioBranch: ENFORCE_STUDIO_BRANCH,
-  });
-
-  if (!resolution.needsNewBranch) {
-    return { branch: resolution.branch, sessionId: resolution.sessionId, mainHash };
-  }
-
-  if (ENFORCE_STUDIO_BRANCH) {
-    ensureCleanWorktree();
-  }
-
-  let { sessionId, branch } = resolution;
-  let attempts = 0;
-  while (hasGitRef(`refs/heads/${branch}`) && attempts < 5) {
-    sessionId = generateSessionId();
-    branch = buildStudioBranchName(mainHash, sessionId);
-    attempts += 1;
-  }
-  if (hasGitRef(`refs/heads/${branch}`)) {
-    console.error('\n❌ Error: Could not generate a unique studio branch name.');
-    process.exit(1);
-  }
-  console.log(`  Creating studio branch: ${branch}`);
-  run(['git', 'checkout', '-b', branch, ref]);
-  return { branch, sessionId, mainHash };
+  const { hash: mainHash } = getMainRefAndHash();
+  const resolution = resolveStudioSession({ currentBranch, mainHash });
+  return { branch: resolution.branch, sessionId: resolution.sessionId, mainHash };
 }
 
 async function runStudio() {

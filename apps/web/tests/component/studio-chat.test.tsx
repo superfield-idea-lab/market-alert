@@ -1,7 +1,7 @@
 import React from 'react';
 import { render } from 'vitest-browser-react';
 import { commands } from '@vitest/browser/context';
-import { expect, test, vi } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { StudioChat } from '../../src/components/StudioChat';
 
 type StudioStatus = {
@@ -42,7 +42,12 @@ async function setStudioFixture({
   });
 }
 
-test('shows the inactive state when studio mode is not active', async () => {
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await commands.resetFixtureState();
+});
+
+test.sequential('shows the inactive state when studio mode is not active', async () => {
   await setStudioFixture({ status: { active: false } });
   await commands.waitForStudioStatus({ active: false });
 
@@ -52,7 +57,7 @@ test('shows the inactive state when studio mode is not active', async () => {
   await expect.element(screen.getByText(/bun run studio/)).toBeVisible();
 });
 
-test('does not roll back when the operator cancels confirmation', async () => {
+test.sequential('does not roll back when the operator cancels confirmation', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(false);
 
   await setStudioFixture({

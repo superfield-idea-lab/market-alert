@@ -35,7 +35,7 @@ Closed in this branch:
 
 - unit coverage for Studio parsing, prompt construction, and validation helpers
 - integration coverage for `/studio/status`, `/studio/chat`, `/studio/reset`, and `/studio/rollback`
-- integration coverage for `bun run studio` bootstrap behavior with `STUDIO_ENFORCE_BRANCH=1`
+- integration coverage for `bun run studio` bootstrap behavior on a pre-created `studio/session-*` branch and failure on invalid branches
 - integration coverage for successful rollback against a real isolated git checkout
 - component coverage for inactive state, loading/error behavior, send flow, and rollback-cancel behavior
 - E2E coverage for availability, send/receive, server prompt receipt, multi-turn context, rollback cancel, and rollback success through the browser UI against an isolated checkout

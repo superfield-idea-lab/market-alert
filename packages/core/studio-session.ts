@@ -31,43 +31,24 @@ export function generateSessionId(randomBytes?: Uint8Array): string {
 type ResolveStudioSessionOptions = {
   currentBranch: string;
   mainHash: string;
-  enforceStudioBranch: boolean;
-  generateSessionIdFn?: () => string;
 };
 
 type ResolveStudioSessionResult = {
   branch: string;
   sessionId: string;
-  needsNewBranch: boolean;
 };
 
 export function resolveStudioSession({
   currentBranch,
   mainHash,
-  enforceStudioBranch,
-  generateSessionIdFn = generateSessionId,
 }: ResolveStudioSessionOptions): ResolveStudioSessionResult {
   const parsed = parseStudioBranchName(currentBranch, mainHash);
-  if (parsed) {
-    return {
-      branch: currentBranch,
-      sessionId: parsed.sessionId,
-      needsNewBranch: false,
-    };
-  }
-
-  const sessionId = generateSessionIdFn();
-  if (!enforceStudioBranch) {
-    return {
-      branch: currentBranch,
-      sessionId,
-      needsNewBranch: false,
-    };
+  if (!parsed) {
+    throw new Error(`Studio requires a branch named studio/session-${mainHash}-<session-id>.`);
   }
 
   return {
-    branch: buildStudioBranchName(mainHash, sessionId),
-    sessionId,
-    needsNewBranch: true,
+    branch: currentBranch,
+    sessionId: parsed.sessionId,
   };
 }

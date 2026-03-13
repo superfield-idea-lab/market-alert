@@ -37,44 +37,20 @@ describe('studio session branching', () => {
     const resolution = resolveStudioSession({
       currentBranch: 'studio/session-abc123-a1b2',
       mainHash: 'abc123',
-      enforceStudioBranch: true,
-      generateSessionIdFn: () => 'zzzz',
     });
 
     expect(resolution).toEqual({
       branch: 'studio/session-abc123-a1b2',
       sessionId: 'a1b2',
-      needsNewBranch: false,
     });
   });
 
-  it('creates a new studio branch when enforcement is enabled and branch is not a session', () => {
-    const resolution = resolveStudioSession({
-      currentBranch: 'feature/landing',
-      mainHash: 'abc123',
-      enforceStudioBranch: true,
-      generateSessionIdFn: () => 'wxyz',
-    });
-
-    expect(resolution).toEqual({
-      branch: 'studio/session-abc123-wxyz',
-      sessionId: 'wxyz',
-      needsNewBranch: true,
-    });
-  });
-
-  it('uses the current branch when enforcement is disabled', () => {
-    const resolution = resolveStudioSession({
-      currentBranch: 'feature/landing',
-      mainHash: 'abc123',
-      enforceStudioBranch: false,
-      generateSessionIdFn: () => 'lmno',
-    });
-
-    expect(resolution).toEqual({
-      branch: 'feature/landing',
-      sessionId: 'lmno',
-      needsNewBranch: false,
-    });
+  it('rejects a non-session branch', () => {
+    expect(() =>
+      resolveStudioSession({
+        currentBranch: 'feature/landing',
+        mainHash: 'abc123',
+      }),
+    ).toThrowError('Studio requires a branch named studio/session-abc123-<session-id>.');
   });
 });

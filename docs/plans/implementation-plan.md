@@ -92,17 +92,17 @@ Implement the one-way synchronization for public issue tracking.
 - [x] Fix: pre-push hook uses bun --bun vitest run instead of bun test
 - [x] Resolve pg-container.ts conflict with main (identical code, formatting only)
 - [x] Fix E2E test: use getByRole for Studio heading to avoid strict mode violation
-- [x] Hardening: create studio branch automatically, run migrations against container DB, retry docker port detection, avoid overwriting changes.md, and scope initial commit
+- [x] Hardening: require a pre-created `studio/session-*` branch, run migrations against container DB, retry docker port detection, avoid overwriting changes.md, and scope initial commit
 - [x] Tests: studio branch parsing + docker port parsing helpers
 - [x] Fix: studio runs Vite dev server and proxies `/studio` to the Bun API in dev
 - [x] Fix: studio uses dedicated web port via `STUDIO_PORT`, with API expected on `STUDIO_API_PORT`
-- [x] Relax studio branch/worktree enforcement for testing (`STUDIO_ENFORCE_BRANCH=1` to re-enable)
+- [x] Fix: `bun run studio` now fails immediately outside a `studio/session-*` branch instead of creating one
 - [x] E2E: studio chat workflow with fixture Claude CLI and server prompt assertion
 - [x] Component: StudioChat UI states + send flow coverage
 - [x] CI topology: quality gate is a separate workflow from suite test workflows
 - [x] Unit: Studio helper parsing, prompt construction, and validation coverage
 - [x] Integration: `/studio/status`, `/studio/chat`, `/studio/reset`, and `/studio/rollback` contract coverage
-- [x] Integration: `bun run studio` bootstrap coverage with `STUDIO_ENFORCE_BRANCH=1` in an isolated checkout
+- [x] Integration: `bun run studio` bootstrap coverage on a pre-created `studio/session-*` branch plus failure coverage on `main`
 - [x] Integration: successful `/studio/rollback` against a real isolated git checkout
 - [x] E2E: multi-turn Studio context, rollback cancel, and rollback success through the browser UI
 - [x] Fix: strict null checks for Bun subprocess `stdout`/`stderr` reads in isolated Studio tests and E2E harness
@@ -111,3 +111,5 @@ Implement the one-way synchronization for public issue tracking.
 - [x] Fix: `scripts/studio-start.ts` now probes `origin/main` / `main` fallback refs without exiting on the first missing ref
 - [x] Fix: Studio commit-list E2E uses an isolated checkout with real session commits instead of depending on PR checkout history
 - [x] Fix: Studio bootstrap force-adds the ignored `.studio` sentinel so disposable clones can commit session metadata during CI
+- [x] Fix: Studio bootstrap integration clone skips `git apply --index` when the working tree already matches `HEAD`, so CI clones do not fail on empty patches
+- [x] Fix: Studio component tests reset shared fixture state and run sequentially to avoid browser-mode races around `/studio/status`

@@ -26,3 +26,5 @@ Latest merge blocker fixes on `feat/studio-mode`:
 - `scripts/studio-start.ts` must probe `origin/main` / `main` candidates without exiting on the first missing ref.
 - Studio commit-list E2E coverage must use an isolated checkout with known session commits; do not depend on the PR checkout's commit topology.
 - `scripts/studio-start.ts` must force-add the ignored `.studio` sentinel before the bootstrap commit inside disposable test clones.
+- `scripts/studio-start.ts` must never auto-create `studio/session-*` branches; it must fail unless the current branch already matches the session pattern.
+- Studio bootstrap integration clones must derive the expected `studio/session-*` branch hash from the same `origin/main` → `main` ref precedence as `scripts/studio-start.ts`, and shared component fixtures must be reset between sequential browser tests.
