@@ -2,10 +2,11 @@
 
 ## Context
 
-The repo layout is now consolidated to one retained `agent-context/` tree and
-one retained `.github/workflows/` tree. CI workflow drift has been corrected,
-and the flaky StudioChat component test has been reworked so it no longer
-depends on one shared fixture-state reset across files.
+The repo now sources the canonical blueprint docs from the `./calypso-blueprint`
+git submodule while `.github/workflows/` and `agent-context/workflows/` remain
+localized workflow trees. CI workflow drift has already been corrected, and
+the flaky StudioChat component test no longer depends on one shared
+fixture-state reset across files.
 
 The remaining next priority is still the failing Studio API integration suite
 reported by the push hooks.
@@ -257,6 +258,60 @@ They must be **checked, fixed, or rewritten. Never ignore or skip them.**
    × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
    × Studio API integration > POST /studio/reset clears prior session context 1ms
    × Studio API integration > POST /studio/rollback returns 400 when hash is missing 2ms
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 400 when message is missing
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/reset clears prior session context
+ FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/rollback returns 400 when hash is missing
+```
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+---
+
+# PR Size Warning
+
+This PR has 35 files changed (limit: 20). Consider splitting into smaller, more focused PRs.
+
+---
+
+# PR Due — Open Before Continuing
+
+This branch has changed 36 files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure lint and types are clean.
+2. Push the branch: `git push`
+3. Open a PR: `gh pr create`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+
+---
+
+# PR Size Warning
+
+This PR has 36 files changed (limit: 20). Consider splitting into smaller, more focused PRs.
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+```
+   × Studio API integration > GET /studio/status returns inactive when .studio is absent 40ms
+   × Studio API integration > GET /studio/status returns session metadata when .studio is present 18ms
+   × Studio API integration > POST /studio/chat returns 403 when studio mode is inactive 100ms
+   × Studio API integration > POST /studio/chat returns 400 when message is missing 1ms
+   × Studio API integration > POST /studio/chat preserves prior turns across a multi-turn session 1ms
+   × Studio API integration > POST /studio/reset clears prior session context 1ms
+   × Studio API integration > POST /studio/rollback returns 400 when hash is missing 1ms
  FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns inactive when .studio is absent
  FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > GET /studio/status returns session metadata when .studio is present
  FAIL |server|  tests/integration/studio-api.test.ts > Studio API integration > POST /studio/chat returns 403 when studio mode is inactive

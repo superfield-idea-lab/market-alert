@@ -94,12 +94,14 @@ Implement the one-way synchronization for public issue tracking.
 - [x] Delete the working-only `docs/calypso-cli-product-spec.md` and `docs/plans/implementation-plan-v2.md` artifacts
 - [x] Fix CI workflow drift by pointing API tests at the real command and removing the nonexistent migration workflow
 - [x] Preserve hook-generated planning notices and formatting normalization after the workflow-spec commit
-- [x] Make `agent-context/` the canonical final v3 doc set and deprecate the v1/v2 versioned predecessors
+- [x] Make `calypso-blueprint/` the canonical final v3 doc set and deprecate the v1/v2 versioned predecessors
 - [ ] Align the remaining implementation companions to the new workflow YAMLs, task catalog, and deployment gate model
 
 ## Documentation and Workflow Refactors [DONE]
 
-- [x] Consolidate the repo to one live `agent-context/` tree and one live `.github/workflows/` tree.
+- [x] Consolidate the repo so the canonical reference docs live under `calypso-blueprint/` while `.github/workflows/` and `agent-context/workflows/` remain the repo-specific workflow trees.
+- [x] Import canonical blueprint docs via the `./calypso-blueprint` git submodule while preserving local `agent-context/workflows/`
+- [x] Exclude the imported `./calypso-blueprint` submodule from root Prettier checks so push gates do not lint external vendored content
 
 ## Studio Mode
 

@@ -1,0 +1,3 @@
+[submodule "calypso-blueprint"]
+	path = calypso-blueprint
+	url = https://github.com/dot-matrix-labs/calypso-blueprint.git

@@ -20,7 +20,6 @@
     "format": "bunx prettier --write .",
     "format:check": "bunx prettier --check .",
     "dev": "bun run --filter '*' dev",
-    "update-agent-context": "bun run scripts/update-agent-context.ts",
     "studio": "bun run scripts/studio-start.ts"
   },
   "devDependencies": {
