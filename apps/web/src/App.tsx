@@ -72,22 +72,21 @@ function App() {
         {/* Full-width Project Board Panel */}
         <div className="flex-1 flex flex-col bg-white">
           {/* Board Header */}
-          <header className="h-14 px-6 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-white">
-            <div className="flex items-center gap-3">
-              <h1 className="text-base font-semibold tracking-tight text-zinc-900">Main Project</h1>
-              <span className="text-zinc-300">·</span>
-              <span className="text-xs text-zinc-400 font-medium">
-                github.com/dot-matrix-labs/calypso
-              </span>
+          <header className="h-12 px-5 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-white shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 ring-2 ring-indigo-100" />
+              <h1 className="text-sm font-semibold tracking-tight text-zinc-900">Main Project</h1>
+              <span className="text-zinc-200 font-light text-base leading-none">/</span>
+              <span className="text-xs text-zinc-400 font-medium">dot-matrix-labs/calypso</span>
             </div>
             <button
               onClick={() => {
                 const event = new CustomEvent('calypso:new-task');
                 window.dispatchEvent(event);
               }}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-md transition-colors flex items-center gap-1.5"
             >
-              <Plus size={15} strokeWidth={2.5} />
+              <Plus size={13} strokeWidth={2.5} />
               New Task
             </button>
           </header>
