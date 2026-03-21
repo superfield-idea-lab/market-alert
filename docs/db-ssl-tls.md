@@ -15,12 +15,12 @@ against most managed providers.
 
 ## Modes
 
-| `DB_SSL` value | Behaviour |
-|---|---|
-| unset or `"disable"` | No TLS — for local k8s-internal Postgres |
-| `"require"` | TLS enabled, server certificate **not** verified |
-| `"verify-full"` | TLS enabled, server cert verified against `DB_CA_CERT` |
-| anything else | Warning logged, no TLS |
+| `DB_SSL` value       | Behaviour                                              |
+| -------------------- | ------------------------------------------------------ |
+| unset or `"disable"` | No TLS — for local k8s-internal Postgres               |
+| `"require"`          | TLS enabled, server certificate **not** verified       |
+| `"verify-full"`      | TLS enabled, server cert verified against `DB_CA_CERT` |
+| anything else        | Warning logged, no TLS                                 |
 
 For `verify-full`, the `DB_CA_CERT` environment variable must contain the PEM certificate.
 If `DB_CA_CERT` is missing, it logs a warning and falls back to `require` mode.

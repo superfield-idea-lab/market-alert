@@ -69,6 +69,7 @@ pending ←── (any claimed task past claim_expires_at)
 ```
 
 Valid transitions:
+
 - `pending → claimed` — atomic claim by a worker
 - `claimed → running` — worker begins execution
 - `running → submitting` — worker is sending result

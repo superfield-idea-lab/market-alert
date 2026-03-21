@@ -18,6 +18,7 @@ hardcoded values, init job pattern for DB setup).
 ### `k8s/app.yaml`
 
 Deployment + Service for the application container:
+
 - Image tag parameterised via `deploy.sh` (not hardcoded).
 - All environment variables sourced from the `calypso-secrets` Secret.
 - Liveness/readiness probes on `GET /healthz`.
@@ -26,6 +27,7 @@ Deployment + Service for the application container:
 ### `k8s/postgres.yaml`
 
 StatefulSet + PersistentVolumeClaim for self-hosted PostgreSQL:
+
 - Single replica (for development/small deployments).
 - Persistent storage via PVC.
 - Credentials sourced from a Secret.
@@ -33,6 +35,7 @@ StatefulSet + PersistentVolumeClaim for self-hosted PostgreSQL:
 ### `k8s/db-init-job.yaml`
 
 One-shot Kubernetes Job that runs `init-remote.ts`:
+
 - `restartPolicy: OnFailure` — retries until the genesis init succeeds.
 - Runs before the first app Deployment is applied.
 - Uses `SUPERUSER_DATABASE_URL` from the Secret.

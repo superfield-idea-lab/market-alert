@@ -26,15 +26,15 @@ The cleanup timer calls `.unref()` so it does not prevent process exit.
 
 ## Singleton instances
 
-| Instance | Window | Max | Key |
-|---|---|---|---|
-| `globalLimiter` | 60s | 100 | IP |
-| `loginIpLimiter` | 15min | 10 | IP |
-| `loginUserLimiter` | 15min | 10 | username |
-| `registerIpLimiter` | 60min | 5 | IP |
-| `forgotPasswordIpLimiter` | 15min | 3 | IP |
-| `forgotPasswordEmailLimiter` | 60min | 3 | email |
-| `resetPasswordIpLimiter` | 15min | 5 | IP |
+| Instance                     | Window | Max | Key      |
+| ---------------------------- | ------ | --- | -------- |
+| `globalLimiter`              | 60s    | 100 | IP       |
+| `loginIpLimiter`             | 15min  | 10  | IP       |
+| `loginUserLimiter`           | 15min  | 10  | username |
+| `registerIpLimiter`          | 60min  | 5   | IP       |
+| `forgotPasswordIpLimiter`    | 15min  | 3   | IP       |
+| `forgotPasswordEmailLimiter` | 60min  | 3   | email    |
+| `resetPasswordIpLimiter`     | 15min  | 5   | IP       |
 
 ## Response on limit exceeded
 

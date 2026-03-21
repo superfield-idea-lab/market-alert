@@ -18,6 +18,7 @@ enc:v1:<base64-iv>:<base64-ciphertext+auth-tag>
 ```
 
 This format is self-describing:
+
 - The `enc:v1:` prefix makes encrypted values identifiable in any tool.
 - Values not starting with `enc:v1:` pass through `decryptField` unchanged — safe migration
   path for existing plaintext rows.

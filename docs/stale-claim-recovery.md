@@ -37,17 +37,18 @@ RETURNING id, status, attempt, agent_type, job_type;
 ```
 
 Each recovered row is emitted to the audit log:
+
 - `action: 'task.stale_recovery'` if reset to `pending`
 - `action: 'task.dead'` if transitioned to `dead`
 
 ## Exponential backoff
 
 | Attempt | Delay before re-queuing |
-|---------|------------------------|
-| 1       | 2 seconds              |
-| 2       | 4 seconds              |
-| 3       | 8 seconds              |
-| N       | 2^N seconds            |
+| ------- | ----------------------- |
+| 1       | 2 seconds               |
+| 2       | 4 seconds               |
+| 3       | 8 seconds               |
+| N       | 2^N seconds             |
 
 `next_retry_at` is respected by the poll query:
 `WHERE status = 'pending' AND (next_retry_at IS NULL OR next_retry_at <= NOW())`

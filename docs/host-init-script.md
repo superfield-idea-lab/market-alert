@@ -36,6 +36,7 @@ skips all prompts. This enables use in CI/CD pipelines.
 ## Idempotency
 
 Running the script a second time on the same host:
+
 - Skips k3s installation (already installed).
 - Does not regenerate secrets that already exist in the Kubernetes Secret.
 - Re-applies manifests (`kubectl apply` is idempotent).

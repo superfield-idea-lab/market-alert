@@ -16,13 +16,16 @@ server-side session storage) and effective for single-origin SPAs.
 
 1. On successful login, the server generates a random 32-byte hex token and sets it as a
    cookie:
+
    ```
    __Host-csrf-token=<token>; HttpOnly=false; SameSite=Strict; Secure; Path=/
    ```
+
    `HttpOnly=false` is intentional — the browser JS must be able to read this cookie to
    include it in the header.
 
 2. All state-mutating requests (POST, PUT, PATCH, DELETE) must include the token in:
+
    ```
    X-CSRF-Token: <token>
    ```

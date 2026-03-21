@@ -39,8 +39,8 @@ Two implementations:
 `bootstrap.ts` is the new server entrypoint:
 
 ```ts
-await initSecrets();          // loads all known secrets into synchronous cache
-const server = await import('./index.js');  // DB pools created here — env vars are ready
+await initSecrets(); // loads all known secrets into synchronous cache
+const server = await import('./index.js'); // DB pools created here — env vars are ready
 export default server.default;
 ```
 
@@ -52,12 +52,12 @@ the in-memory cache — no async overhead on the hot path.
 
 ## Configuration
 
-| Env var | Purpose |
-|---|---|
-| `VAULT_ADDR` | Vault server URL. If unset, uses `EnvSecretsProvider`. |
-| `VAULT_TOKEN` | Vault token. Required if `VAULT_ADDR` is set. |
-| `VAULT_SECRET_PATH` | KV v2 path (default: `secret/data/calypso`) |
-| `VAULT_TTL_MS` | Cache TTL in milliseconds (default: 300000) |
+| Env var             | Purpose                                                |
+| ------------------- | ------------------------------------------------------ |
+| `VAULT_ADDR`        | Vault server URL. If unset, uses `EnvSecretsProvider`. |
+| `VAULT_TOKEN`       | Vault token. Required if `VAULT_ADDR` is set.          |
+| `VAULT_SECRET_PATH` | KV v2 path (default: `secret/data/calypso`)            |
+| `VAULT_TTL_MS`      | Cache TTL in milliseconds (default: 300000)            |
 
 ## Source reference (rinzler)
 

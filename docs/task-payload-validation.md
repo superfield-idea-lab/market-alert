@@ -36,10 +36,21 @@ interface TaskPayload {
 
 ```ts
 const PAYLOAD_PII_DENYLIST = new Set([
-  'email', 'name', 'address', 'phone', 'ssn',
-  'content', 'body', 'message', 'text',
-  'description', 'title', 'subject',
-  'password', 'secret', 'token',
+  'email',
+  'name',
+  'address',
+  'phone',
+  'ssn',
+  'content',
+  'body',
+  'message',
+  'text',
+  'description',
+  'title',
+  'subject',
+  'password',
+  'secret',
+  'token',
 ]);
 
 function validateTaskPayload(payload: unknown): void {
@@ -49,7 +60,7 @@ function validateTaskPayload(payload: unknown): void {
   for (const key of Object.keys(payload)) {
     if (PAYLOAD_PII_DENYLIST.has(key.toLowerCase())) {
       throw new ValidationError(
-        `payload key "${key}" is not allowed — use a resource ID reference instead`
+        `payload key "${key}" is not allowed — use a resource ID reference instead`,
       );
     }
   }

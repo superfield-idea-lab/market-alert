@@ -9,6 +9,7 @@ All writes from workers reach the database exclusively through authenticated API
 ## Why it's needed
 
 An AI agent with direct write access to a database can:
+
 - Corrupt records without an audit trail
 - Bypass API-layer schema validation and business rules
 - Exfiltrate data through write surfaces not designed for PII handling

@@ -40,8 +40,7 @@ Browser
 
 ```ts
 app.use((req, res, next) => {
-  req.traceId = req.headers['x-trace-id'] as string
-    ?? crypto.randomUUID();
+  req.traceId = (req.headers['x-trace-id'] as string) ?? crypto.randomUUID();
   res.setHeader('X-Trace-Id', req.traceId);
   next();
 });
@@ -109,7 +108,7 @@ await emitAuditEvent({
   action: 'task.create',
   entity_type: 'task',
   entity_id: task.id,
-  correlation_id: req.traceId,  // ← trace linkage
+  correlation_id: req.traceId, // ← trace linkage
   after: task,
 });
 ```

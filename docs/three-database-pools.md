@@ -21,11 +21,11 @@ credentials it holds.
 
 ## Pool configuration
 
-| Export | Database | Role | Max connections | Env var |
-|---|---|---|---|---|
-| `sql` | `calypso_app` | `app_rw` | 10 | `DATABASE_URL` |
-| `auditSql` | `calypso_audit` | `audit_w` | 5 | `AUDIT_DATABASE_URL` |
-| `analyticsSql` | `calypso_analytics` | `analytics_w` | 3 | `ANALYTICS_DATABASE_URL` |
+| Export         | Database            | Role          | Max connections | Env var                  |
+| -------------- | ------------------- | ------------- | --------------- | ------------------------ |
+| `sql`          | `calypso_app`       | `app_rw`      | 10              | `DATABASE_URL`           |
+| `auditSql`     | `calypso_audit`     | `audit_w`     | 5               | `AUDIT_DATABASE_URL`     |
+| `analyticsSql` | `calypso_analytics` | `analytics_w` | 3               | `ANALYTICS_DATABASE_URL` |
 
 All three pools share the same SSL options from `buildSslOptions()`.
 

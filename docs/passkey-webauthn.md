@@ -102,20 +102,22 @@ In `apps/web/src/components/Login.tsx`:
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 
 // Registration button click
-const options = await fetch('/api/auth/passkey/register/begin').then(r => r.json());
+const options = await fetch('/api/auth/passkey/register/begin').then((r) => r.json());
 const response = await startRegistration(options);
 await fetch('/api/auth/passkey/register/complete', {
-  method: 'POST', body: JSON.stringify(response),
-  headers: { 'Content-Type': 'application/json' }
+  method: 'POST',
+  body: JSON.stringify(response),
+  headers: { 'Content-Type': 'application/json' },
 });
 
 // Login button click
-const options = await fetch('/api/auth/passkey/login/begin').then(r => r.json());
+const options = await fetch('/api/auth/passkey/login/begin').then((r) => r.json());
 const response = await startAuthentication(options);
 const { token } = await fetch('/api/auth/passkey/login/complete', {
-  method: 'POST', body: JSON.stringify(response),
-  headers: { 'Content-Type': 'application/json' }
-}).then(r => r.json());
+  method: 'POST',
+  body: JSON.stringify(response),
+  headers: { 'Content-Type': 'application/json' },
+}).then((r) => r.json());
 ```
 
 ## Source reference (rinzler)

@@ -10,6 +10,7 @@ database, API, and network policy layers.
 ## Why it's needed
 
 Without agent type isolation:
+
 - A compromised agent of any type has access to all task types and all users' data
 - An agent that misbehaves can interfere with other agent types' work queues
 - Vendor API key rotation for one agent type requires coordinating all agents
@@ -63,6 +64,7 @@ if (delegatedToken.agent_type !== claimedByAgentType) {
 ## Deployment isolation
 
 Each agent type is a separate Kubernetes Deployment with:
+
 - Its own environment variables (including vendor API keys)
 - Its own network policy (only the specific API endpoints it needs)
 - Its own DB secret (`AGENT_DATABASE_URL` with the per-type role credentials)

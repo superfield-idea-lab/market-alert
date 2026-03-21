@@ -22,12 +22,12 @@ requests.
 
 ```ts
 interface DelegatedTokenPayload {
-  sub: string;        // user_id (task owner)
-  task_id: string;    // UUID of the specific task
+  sub: string; // user_id (task owner)
+  task_id: string; // UUID of the specific task
   agent_type: string; // must match the task's agent_type
-  jti: string;        // unique token ID (for revocation)
+  jti: string; // unique token ID (for revocation)
   iat: number;
-  exp: number;        // short TTL: iat + 15 minutes
+  exp: number; // short TTL: iat + 15 minutes
   scope: 'task_result'; // restricts which endpoints accept this token
 }
 ```
@@ -66,7 +66,7 @@ function issueDelegatedToken(task: Task): string {
       scope: 'task_result',
     },
     process.env.JWT_SECRET!,
-    { expiresIn: '15m' }
+    { expiresIn: '15m' },
   );
 }
 ```

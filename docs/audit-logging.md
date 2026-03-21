@@ -8,6 +8,7 @@ state-mutating operation writes an audit entry before the primary write complete
 ## Why it's needed
 
 Without an audit log there is no way to answer:
+
 - "Who created / modified / deleted this record and when?"
 - "Has the audit log been tampered with?"
 - Compliance questions (GDPR right to erasure, SOC 2 CC6.x, etc.)
@@ -37,6 +38,7 @@ CREATE TABLE audit_events (
 ## Hash chain
 
 Each row's `hash` is:
+
 ```
 SHA-256(prev_hash + JSON.stringify({ actor_id, action, entity_type, entity_id, before, after, ts }))
 ```
@@ -46,6 +48,7 @@ value generated at deployment time.
 
 `GET /api/audit/verify` (superuser only) reads all rows in insertion order, recomputes each
 hash, and returns:
+
 ```json
 { "valid": true }
 // or
@@ -79,7 +82,7 @@ interface AuditEvent {
   user_agent?: string;
 }
 
-export async function emitAuditEvent(event: AuditEvent): Promise<void>
+export async function emitAuditEvent(event: AuditEvent): Promise<void>;
 ```
 
 ## Dependency

@@ -9,6 +9,7 @@ release is known-good before it reaches users.
 ## Why it's needed
 
 The current release workflow creates a GitHub release and runs tests, but:
+
 - A broken migration is not caught until the container starts in production.
 - The container is not tested after it is built.
 - Re-running the workflow on the same tag fails due to duplicate asset upload errors.
@@ -31,9 +32,9 @@ Unit, API, E2E, component, and migration test stages run in parallel (no shared 
 
 ```yaml
 jobs:
-  test-unit:     ...
-  test-api:      ...
-  test-e2e:      ...
+  test-unit: ...
+  test-api: ...
+  test-e2e: ...
   test-component: ...
   test-migration: ...
 
@@ -83,6 +84,7 @@ duplicate assets.
 ### Digest-pinned base image
 
 The Dockerfile uses a digest-pinned Bun base image:
+
 ```dockerfile
 FROM oven/bun:1.1@sha256:<digest>
 ```

@@ -18,10 +18,10 @@ using an admin connection — which only exists during the initial setup.
 
 ## Two-phase initialisation
 
-| Phase | Script | Runs as | When |
-|---|---|---|---|
-| **Genesis** | `init-remote.ts` | superuser | Once, before first deploy (k8s Job) |
-| **Migration** | `migrate()` | `app_rw` | Every startup (idempotent) |
+| Phase         | Script           | Runs as   | When                                |
+| ------------- | ---------------- | --------- | ----------------------------------- |
+| **Genesis**   | `init-remote.ts` | superuser | Once, before first deploy (k8s Job) |
+| **Migration** | `migrate()`      | `app_rw`  | Every startup (idempotent)          |
 
 Separating the phases means production containers never hold superuser credentials.
 

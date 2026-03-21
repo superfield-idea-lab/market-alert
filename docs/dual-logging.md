@@ -68,10 +68,13 @@ function log(level: LogLevel, message: string, context: object = {}) {
   const key = deduplicationKey(entry);
   if (!seen.has(key)) {
     seen.add(key);
-    appendFileSync('logs/uniques.log', JSON.stringify({
-      ...entry,
-      first_seen: entry.ts,
-    }) + '\n');
+    appendFileSync(
+      'logs/uniques.log',
+      JSON.stringify({
+        ...entry,
+        first_seen: entry.ts,
+      }) + '\n',
+    );
   }
 }
 ```
@@ -96,12 +99,12 @@ Old log files beyond 30 days are deleted on startup.
 
 ## Files written
 
-| File | Purpose | Retention |
-|---|---|---|
-| `logs/app.log` | Complete chronological record | 30 days |
-| `logs/uniques.log` | Deduplicated diagnostic entry point | 30 days |
-| `logs/app.YYYY-MM-DD.log` | Rotated daily | 30 days |
-| `logs/uniques.YYYY-MM-DD.log` | Rotated daily | 30 days |
+| File                          | Purpose                             | Retention |
+| ----------------------------- | ----------------------------------- | --------- |
+| `logs/app.log`                | Complete chronological record       | 30 days   |
+| `logs/uniques.log`            | Deduplicated diagnostic entry point | 30 days   |
+| `logs/app.YYYY-MM-DD.log`     | Rotated daily                       | 30 days   |
+| `logs/uniques.YYYY-MM-DD.log` | Rotated daily                       | 30 days   |
 
 ## Blueprint references
 

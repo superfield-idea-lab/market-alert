@@ -8,6 +8,7 @@ image, and runs a smoke test against it. On failure, it automatically opens a Gi
 ## Why it's needed
 
 A published container image can become broken between releases without anyone noticing:
+
 - Base image security patches can change runtime behaviour.
 - Package registry changes can affect builds.
 - Infrastructure drift can cause the latest image to fail on the current cluster config.
@@ -21,8 +22,8 @@ A nightly sanity check catches these regressions before users encounter them.
 ```yaml
 on:
   schedule:
-    - cron: '0 4 * * *'     # 04:00 UTC daily
-  workflow_dispatch:          # allow manual trigger
+    - cron: '0 4 * * *' # 04:00 UTC daily
+  workflow_dispatch: # allow manual trigger
 
 jobs:
   nightly-sanity:

@@ -9,6 +9,7 @@ phase begins. A failed phase aborts the rollout rather than continuing to the ne
 ## Why it's needed
 
 Deploying all components simultaneously risks:
+
 - Workers starting before the schema migration is complete, hitting missing columns
 - API server starting with the old schema while workers expect the new one
 - Static web assets pointing to API endpoints that don't exist yet
@@ -95,6 +96,7 @@ wait_for_healthz() {
 
 During the rollout window, new API code runs against both the old and new schema. Migrations
 must be forward-compatible:
+
 - New columns must have `DEFAULT` values or be `NULLABLE`
 - Old columns must not be dropped in the same migration as new columns are added
 - Renaming is always done as add + deprecate + later drop across separate releases

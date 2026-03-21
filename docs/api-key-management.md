@@ -35,11 +35,11 @@ CREATE TABLE api_keys (
 
 ## Endpoints
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| `POST` | `/api/admin/keys` | superuser | Generate a new key |
-| `GET` | `/api/admin/keys` | superuser | List keys (metadata only, no raw value) |
-| `DELETE` | `/api/admin/keys/:id` | superuser | Revoke a key |
+| Method   | Path                  | Auth      | Purpose                                 |
+| -------- | --------------------- | --------- | --------------------------------------- |
+| `POST`   | `/api/admin/keys`     | superuser | Generate a new key                      |
+| `GET`    | `/api/admin/keys`     | superuser | List keys (metadata only, no raw value) |
+| `DELETE` | `/api/admin/keys/:id` | superuser | Revoke a key                            |
 
 ## Audit logging
 

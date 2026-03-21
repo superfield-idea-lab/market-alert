@@ -21,7 +21,7 @@ const ajv = new Ajv({ allErrors: true });
 
 export function validate<T>(
   schema: object,
-  data: unknown
+  data: unknown,
 ): { valid: true; data: T } | { valid: false; errors: Ajv.ErrorObject[] } {
   const isValid = ajv.validate(schema, data);
   if (isValid) return { valid: true, data: data as T };
@@ -49,6 +49,7 @@ actionable for both humans and clients.
 ## Schema location
 
 Entity schemas are defined in `packages/core/types.ts` and exported for use in:
+
 - Server-side validation (via `validate()`)
 - Integration test fixtures
 - Future: `GET /api/schema` introspection endpoint

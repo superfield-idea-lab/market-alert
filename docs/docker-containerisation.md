@@ -17,6 +17,7 @@ build artifact.
 ### `Dockerfile.dev`
 
 Used by `docker-compose.yml` for local development:
+
 - Installs dependencies.
 - Mounts source directory as a volume for hot-reload.
 - Entrypoint: `scripts/dev-entrypoint.sh`.
@@ -24,6 +25,7 @@ Used by `docker-compose.yml` for local development:
 ### `Dockerfile`
 
 Production image:
+
 - Two-stage build (deps layer → app layer).
 - Uses a digest-pinned Bun base image to prevent silent upstream changes.
 - Entrypoint: `bun run bootstrap.ts` (secrets init before server start).
@@ -31,6 +33,7 @@ Production image:
 ### `Dockerfile.release`
 
 Release image (built by CI):
+
 - Bakes the frontend `apps/web/dist` (Vite build output) into the image.
 - Used for the published GHCR image.
 
@@ -40,7 +43,7 @@ Release image (built by CI):
 services:
   app:
     build: { context: ., dockerfile: Dockerfile.dev }
-    volumes: [".:/app"]
+    volumes: ['.:/app']
     depends_on: [postgres]
     environment:
       DATABASE_URL: postgres://app_rw:app_rw_password@postgres:5432/calypso_app
@@ -57,6 +60,7 @@ services:
 ### `scripts/dev-entrypoint.sh`
 
 Container startup sequence:
+
 1. Wait for PostgreSQL to accept connections (TCP loop).
 2. Run `bun run migrate` (idempotent).
 3. If a sentinel file does not exist, run seed script and create sentinel.
