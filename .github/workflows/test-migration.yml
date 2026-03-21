@@ -1,0 +1,30 @@
+name: Migration Smoke Tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history so we can access main branch's schema
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install Dependencies
+        run: bun install
+
+      - name: Run Migration Smoke Tests
+        run: |
+          if [ -f apps/server/vitest.migration.config.ts ]; then
+            bun --bun vitest run --config apps/server/vitest.migration.config.ts
+          else
+            echo "::notice::vitest.migration.config.ts not found — skipping (feature not yet landed)"
+          fi
