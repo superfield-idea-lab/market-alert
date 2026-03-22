@@ -18,7 +18,11 @@ import { handleAuditRequest } from './api/audit';
 // deployments should promote controlled migrations, journal checkpoint setup,
 // and recovery validation ahead of serving traffic.
 await migrate();
-await migrateAudit();
+try {
+  await migrateAudit();
+} catch (err) {
+  console.warn('[db] Audit schema migration skipped — audit database unavailable:', err);
+}
 
 export interface AppState {
   sql: typeof sql;

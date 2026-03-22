@@ -44,8 +44,12 @@ export async function emitAuditEvent(event: AuditEventInput): Promise<AuditEvent
     const prevHash = latestRows[0]?.hash ?? resolveGenesisHash();
     const hash = await computeAuditHash(prevHash, event);
 
-    const beforeJson = event.before !== null ? JSON.stringify(event.before) : null;
-    const afterJson = event.after !== null ? JSON.stringify(event.after) : null;
+    // Pass before/after as JS objects (not JSON strings) so postgres.js sends
+    // them with the correct type oid and PostgreSQL stores them as JSONB objects.
+    // Using JSON.stringify() here would cause postgres.js to store a JSON string
+    // value inside JSONB, breaking hash-chain verification on readback.
+    const beforeVal = event.before;
+    const afterVal = event.after;
 
     const insertRows = (await reserved.unsafe(
       `INSERT INTO audit_events
@@ -57,8 +61,8 @@ export async function emitAuditEvent(event: AuditEventInput): Promise<AuditEvent
         event.action,
         event.entity_type,
         event.entity_id,
-        beforeJson,
-        afterJson,
+        beforeVal,
+        afterVal,
         event.ip ?? null,
         event.user_agent ?? null,
         event.ts,
