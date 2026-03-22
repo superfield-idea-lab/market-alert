@@ -187,7 +187,7 @@ chore/{issue-number}-{short-slug}
 Create the branch and a linked worktree from main:
 
 ```bash
-git worktree add .agents/worktrees/chore-{issue-number}-{short-slug} \
+git worktree add /tmp/calypso-worktrees/$(basename $(git rev-parse --show-toplevel))/chore-{issue-number}-{short-slug} \
   -b chore/{issue-number}-{short-slug} \
   main
 ```
@@ -199,7 +199,7 @@ git worktree add .agents/worktrees/chore-{issue-number}-{short-slug} \
 Apply the saved patch in the new worktree:
 
 ```bash
-cd .agents/worktrees/chore-{issue-number}-{short-slug}
+cd /tmp/calypso-worktrees/$(basename $(git rev-parse --show-toplevel))/chore-{issue-number}-{short-slug}
 git apply /tmp/calypso-patch-extract.diff
 ```
 
@@ -255,7 +255,7 @@ Report to the user:
   create a separate issue and PR per distinct concern, each with its own worktree
 - **Current branch must be clean after extraction** — `git checkout main -- {files}`
   always runs, and a revert commit is added if needed
-- **Worktrees live in `.agents/worktrees/`**
+- **Worktrees live in `/tmp/calypso-worktrees/<repo-name>/`**
 - **`gh` CLI only** for all GitHub operations
 - **1:1:1:1:1 invariant** — one issue, one branch, one PR, one worktree per extraction
 - **Low-risk autonomy first** — choose the straightforward path without asking when the extraction boundary is obvious from the diff

@@ -101,7 +101,9 @@ issue_branch_name() {
 
 issue_worktree_path() {
   local branch_name="$1"
-  printf '%s/.agents/worktrees/%s\n' "$(repo_root)" "${branch_name//\//-}"
+  local repo_name
+  repo_name="$(basename "$(repo_root)")"
+  printf '/tmp/calypso-worktrees/%s/%s\n' "$repo_name" "${branch_name//\//-}"
 }
 
 managed_issue_branch_regex() {
@@ -109,7 +111,9 @@ managed_issue_branch_regex() {
 }
 
 worktree_root() {
-  printf '%s/.agents/worktrees\n' "$(repo_root)"
+  local repo_name
+  repo_name="$(basename "$(repo_root)")"
+  printf '/tmp/calypso-worktrees/%s\n' "$repo_name"
 }
 
 issue_payload() {
