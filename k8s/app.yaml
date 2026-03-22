@@ -1,0 +1,109 @@
+# Deployment + Service for the Calypso application container.
+#
+# Image tag is set at deploy time via deploy.sh — never hardcoded here.
+# All environment variables are sourced from the `calypso-secrets` Secret.
+#
+# Apply order:
+#   kubectl apply -f k8s/secrets.yaml
+#   kubectl apply -f k8s/postgres.yaml
+#   kubectl apply -f k8s/db-init-job.yaml
+#   kubectl wait --for=condition=complete job/calypso-db-init
+#   kubectl apply -f k8s/app.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calypso-app
+  labels:
+    app: calypso-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-app
+  template:
+    metadata:
+      labels:
+        app: calypso-app
+    spec:
+      containers:
+        - name: app
+          # Image tag is set via deploy.sh: kubectl set image deployment/calypso-app app=ghcr.io/<owner>/calypso-starter-ts:<tag>
+          image: ghcr.io/<owner>/calypso-starter-ts:latest
+          ports:
+            - containerPort: 31415
+          env:
+            - name: PORT
+              value: '31415'
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: DATABASE_URL
+            - name: AUDIT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: AUDIT_DATABASE_URL
+            - name: ANALYTICS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: ANALYTICS_DATABASE_URL
+            - name: SUBSTACK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: SUBSTACK_API_KEY
+                  optional: true
+            - name: BLOOMBERG_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: BLOOMBERG_API_KEY
+                  optional: true
+            - name: YAHOO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: YAHOO_API_KEY
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 31415
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 31415
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+            limits:
+              cpu: '500m'
+              memory: '512Mi'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calypso-app
+  labels:
+    app: calypso-app
+spec:
+  selector:
+    app: calypso-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 31415
+  type: ClusterIP
