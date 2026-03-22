@@ -500,8 +500,15 @@ echo ""
 echo "==> [7/8] Configuring firewall"
 
 if command -v ufw &>/dev/null; then
-  ufw disable 2>/dev/null || true
+  ufw disable 2>/dev/null || true   # avoid error on first run
   ufw --force reset
+  # After --force reset, ufw's logging state can be inconsistent on repeat runs
+  # (Ubuntu ufw bug: "Could not load logging rules"). Patch the ufw.conf directly
+  # to set LOGLEVEL=off before applying policy so ufw does not try to load the
+  # broken logging rules chain during subsequent commands.
+  if [[ -f /etc/ufw/ufw.conf ]]; then
+    sed -i 's/^LOGLEVEL=.*/LOGLEVEL=off/' /etc/ufw/ufw.conf
+  fi
   ufw default deny incoming
   ufw default allow outgoing
   ufw allow 22/tcp     comment "SSH"
