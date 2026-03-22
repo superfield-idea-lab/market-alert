@@ -14,7 +14,7 @@ import { handleTasksRequest } from './api/tasks';
 import { handleTaskQueueResultRequest } from './api/task-queue';
 import { handleStudioRequest } from './api/studio';
 import { handleAuditRequest } from './api/audit';
-import { extractTraceId, traceLog } from 'core';
+import { extractTraceId, traceLog, log } from 'core';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -68,16 +68,21 @@ export default {
     // Helper: wrap a Response with the trace header.
     function withTrace(res: Response): Response {
       const duration = Date.now() - reqStart;
-      console.log(
-        JSON.stringify(
-          traceLog('info', traceId, {
-            method: req.method,
-            path: url.pathname,
-            status: res.status,
-            duration_ms: duration,
-          }),
-        ),
-      );
+      const entry = traceLog('info', traceId, {
+        method: req.method,
+        path: url.pathname,
+        status: res.status,
+        duration_ms: duration,
+      });
+      // Write to both console and the dual log files.
+      console.log(JSON.stringify(entry));
+      log('info', `${req.method} ${url.pathname} ${res.status}`, {
+        trace_id: traceId,
+        method: req.method,
+        path: url.pathname,
+        status: res.status,
+        duration_ms: duration,
+      });
       res.headers.set('X-Trace-Id', traceId);
       return res;
     }
