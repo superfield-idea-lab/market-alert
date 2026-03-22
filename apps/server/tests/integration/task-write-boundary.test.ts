@@ -17,7 +17,7 @@ beforeAll(async () => {
 
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DATABASE_URL: pg.url, PORT: String(PORT) },
+    env: { ...process.env, DATABASE_URL: pg.url, AUDIT_DATABASE_URL: pg.url, PORT: String(PORT) },
     stdout: 'ignore',
     stderr: 'ignore',
   });
