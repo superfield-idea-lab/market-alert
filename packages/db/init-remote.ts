@@ -13,17 +13,6 @@ const ROLE_NAMES = {
   analytics: 'analytics_w',
 } as const;
 
-const AUDIT_ACTIONS = [
-  'task.create',
-  'task.update',
-  'task.delete',
-  'auth.login',
-  'auth.logout',
-  'studio.chat',
-  'studio.rollback',
-  'system.migration',
-] as const;
-
 export interface InitRemoteConfig {
   adminDatabaseUrl: string;
   passwords: {
@@ -160,27 +149,23 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 }
 
 async function configureAuditDatabase(auditAdmin: ReturnType<typeof makePool>): Promise<void> {
-  const auditActions = AUDIT_ACTIONS.map((action) => `'${action}'`).join(', ');
   await auditAdmin.unsafe(`
 CREATE TABLE IF NOT EXISTS audit_log (
-  id BIGSERIAL PRIMARY KEY,
-  action TEXT NOT NULL CHECK (action IN (${auditActions})),
-  actor_type TEXT NOT NULL,
-  actor_id TEXT,
-  target_type TEXT,
-  target_id TEXT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'rejected', 'failed')),
-  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id TEXT,
+  changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action);
-CREATE INDEX IF NOT EXISTS idx_audit_log_target ON audit_log (target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_status ON audit_log (status);
 GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.audit)};
 GRANT INSERT, SELECT ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
 GRANT UPDATE(status) ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.audit)};
 `);
 }
 

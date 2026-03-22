@@ -3,7 +3,7 @@
 # Stage 2: distroless runtime — no shell, no package manager.
 
 # --- builder stage ---
-FROM oven/bun:1.1@sha256:d6ad4d3280d3e7e92b793a924105d68766d60b1f36709f4cee11bc8737782621 AS builder
+FROM oven/bun:1.2@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be053a16f74 AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/ui/package.json packages/ui/
 
 # Install all workspace dependencies with frozen lockfile for reproducibility
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
 
 # Copy source
 COPY . .
@@ -28,7 +28,7 @@ RUN bun build apps/server/src/index.ts \
       --external postgres
 
 # --- production stage ---
-FROM oven/bun:1.1-distroless@sha256:994252d8978f7fb4f12fb123c30d4405a46addc679f2cf1836d47f7350ce21b2 AS production
+FROM oven/bun:1.2-distroless@sha256:e2c3f36733fa2c2c9c80d89b481d9fc7629558cac2533c776f6285ae1ba6b8fa AS production
 
 WORKDIR /app
 
