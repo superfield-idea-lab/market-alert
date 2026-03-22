@@ -55,6 +55,10 @@ export interface MigrateOptions {
   databaseUrl?: string;
 }
 
+export interface MigrateAuditOptions {
+  databaseUrl?: string;
+}
+
 /**
  * Initializes the database tables by executing the native raw SQL schema.
  * This function should be called at server startup to ensure tables exist.
@@ -99,6 +103,49 @@ export async function migrate(options: MigrateOptions = {}) {
     throw err;
   } finally {
     if (migrationSql !== sql) {
+      await migrationSql.end({ timeout: 5 });
+    }
+  }
+}
+
+/**
+ * Initialises the audit database tables by executing the audit-specific SQL schema.
+ * Must be called at server startup before any audit writes occur.
+ */
+export async function migrateAudit(options: MigrateAuditOptions = {}) {
+  console.log('[db] Initializing audit database schema...');
+  const schemaSql = readFileSync(
+    fileURLToPath(new URL('./audit-schema.sql', import.meta.url)),
+    'utf-8',
+  );
+  const databaseUrl = options.databaseUrl ?? databaseUrls.audit;
+  const migrationSql =
+    options.databaseUrl === undefined
+      ? auditSql
+      : postgres(databaseUrl, {
+          max: 1,
+          idle_timeout: 10,
+          connect_timeout: 10,
+          connection: { client_min_messages: 'warning' },
+        });
+
+  try {
+    const cleanSql = schemaSql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    const statements = cleanSql
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    for (const statement of statements) {
+      await migrationSql.unsafe(statement);
+    }
+    console.log('[db] Audit schema migration complete.');
+  } catch (err) {
+    console.error('[db] Audit schema migration failed:', err);
+    throw err;
+  } finally {
+    if (migrationSql !== auditSql) {
       await migrationSql.end({ timeout: 5 });
     }
   }

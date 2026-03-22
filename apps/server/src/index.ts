@@ -6,10 +6,11 @@
  * the compiled frontend React application from `apps/web/dist`.
  */
 
-import { analyticsSql, auditSql, migrate, sql } from 'db';
+import { analyticsSql, auditSql, migrate, migrateAudit, sql } from 'db';
 import { handleAuthRequest } from './api/auth';
 import { handleTasksRequest } from './api/tasks';
 import { handleStudioRequest } from './api/studio';
+import { handleAuditRequest } from './api/audit';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -17,6 +18,11 @@ import { handleStudioRequest } from './api/studio';
 // deployments should promote controlled migrations, journal checkpoint setup,
 // and recovery validation ahead of serving traffic.
 await migrate();
+try {
+  await migrateAudit();
+} catch (err) {
+  console.warn('[db] Audit schema migration skipped — audit database unavailable:', err);
+}
 
 export interface AppState {
   sql: typeof sql;
@@ -68,6 +74,11 @@ export default {
     if (url.pathname.startsWith('/api/tasks')) {
       const tasksRes = await handleTasksRequest(req, url, appState);
       if (tasksRes) return tasksRes;
+    }
+
+    if (url.pathname.startsWith('/api/audit')) {
+      const auditRes = await handleAuditRequest(req, url, appState);
+      if (auditRes) return auditRes;
     }
 
     if (url.pathname.startsWith('/studio')) {

@@ -1,5 +1,6 @@
 import { sql } from 'db';
 import type { ConsequentialWriteRequest, PrincipalActorRef, TaskProperties } from 'core';
+import { emitAuditEvent } from './audit-service';
 
 export interface TaskWritePayload {
   taskId: string;
@@ -45,8 +46,18 @@ export async function applyTaskPatchThroughBoundary(
 ): Promise<{ id: string; properties: TaskProperties; created_at: string }> {
   const request = buildTaskConsequentialWriteRequest(input);
 
-  // The journal / ledger append is not implemented yet. This service is the
-  // seam where future consequential-write validation and persistence will live.
+  // Emit the audit event BEFORE the primary write.
+  // If the audit write fails, the primary write must not proceed.
+  await emitAuditEvent({
+    actor_id: request.principal.id,
+    action: request.transactionType,
+    entity_type: 'task',
+    entity_id: request.payload.taskId,
+    before: request.payload.current as unknown as Record<string, unknown>,
+    after: request.payload.next as unknown as Record<string, unknown>,
+    ts: new Date().toISOString(),
+  });
+
   const [row] = await sql<{ id: string; properties: TaskProperties; created_at: string }[]>`
     UPDATE entities
     SET properties = ${sql.json(request.payload.next as never)}, updated_at = NOW()
