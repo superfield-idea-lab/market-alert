@@ -48,8 +48,10 @@ export async function emitAuditEvent(event: AuditEventInput): Promise<AuditEvent
     // them with the correct type oid and PostgreSQL stores them as JSONB objects.
     // Using JSON.stringify() here would cause postgres.js to store a JSON string
     // value inside JSONB, breaking hash-chain verification on readback.
-    const beforeVal = event.before;
-    const afterVal = event.after;
+    // Cast through unknown to satisfy the postgres.js ParameterOrJSON type — the
+    // runtime behaviour of unsafe() accepts plain objects for jsonb parameters.
+    const beforeVal = event.before as unknown as string;
+    const afterVal = event.after as unknown as string;
 
     const insertRows = (await reserved.unsafe(
       `INSERT INTO audit_events
