@@ -1,0 +1,46 @@
+# Node modules
+node_modules
+**/node_modules
+
+# Build output
+dist
+dist-ssr
+**/dist
+
+# Git
+.git
+.gitignore
+
+# Environment files (secrets must not be in image)
+.env
+.env.*
+!.env.template
+!.env.test.template
+
+# Editor and OS artefacts
+.vscode
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Test artefacts
+playwright-report
+test-results
+coverage
+
+# Logs
+logs
+*.log
+uniques.log
+
+# Deprecated agent contexts
+.agent-context-deprecated-*
+.studio
+.calypso-db
+
+# Docker files (not needed inside image)
+docker-compose.yml

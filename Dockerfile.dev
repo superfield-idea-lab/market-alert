@@ -1,0 +1,33 @@
+# Development image — used by docker-compose.yml for local development.
+# Mounts source as a volume for hot-reload via bun --hot.
+# Entrypoint: scripts/dev-entrypoint.sh
+
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Copy workspace manifests and lockfile for dependency installation
+COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/ui/package.json packages/ui/
+
+# Install all workspace dependencies with frozen lockfile
+RUN bun install --frozen-lockfile
+
+# Copy entrypoint script before source so source volume-mount overrides the
+# rest at runtime without losing the pre-installed node_modules layer
+COPY scripts/dev-entrypoint.sh ./scripts/dev-entrypoint.sh
+RUN chmod +x ./scripts/dev-entrypoint.sh
+
+# Source is volume-mounted at runtime via docker-compose; copying here provides
+# a fallback for plain docker run without a volume
+COPY . .
+
+ENV PORT=31415
+
+EXPOSE 31415
+
+ENTRYPOINT ["./scripts/dev-entrypoint.sh"]
