@@ -19,6 +19,8 @@ export interface AuditEventInput {
   after: Record<string, unknown> | null;
   ip?: string;
   user_agent?: string;
+  /** Trace ID linking this audit row to the full request log. */
+  correlation_id?: string;
   ts: string; // ISO 8601
 }
 
