@@ -1,0 +1,78 @@
+# One-shot Job that runs init-remote.ts (genesis database initialisation).
+#
+# restartPolicy: OnFailure — Kubernetes retries the Job until it succeeds.
+# Credentials are sourced from the `calypso-db-init-secret` Secret.
+#
+# See packages/db/init-remote.ts for what the script does (issue #26).
+#
+# Run after postgres is ready and before the application starts:
+#   kubectl apply -f k8s/db-init-job.yaml
+#   kubectl wait --for=condition=complete job/calypso-db-init --timeout=120s
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: calypso-db-init
+  labels:
+    app: calypso-db-init
+spec:
+  # Retain completed/failed pods for log inspection; clean up after 1 hour.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: calypso-db-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-init
+          # Use the same release image — init-remote.ts ships inside the container.
+          image: ghcr.io/<owner>/calypso-starter-ts:latest
+          command: ['bun', 'run', 'packages/db/init-remote.ts']
+          env:
+            - name: ADMIN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: ADMIN_DATABASE_URL
+            - name: APP_RW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: APP_RW_PASSWORD
+            - name: AUDIT_W_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: AUDIT_W_PASSWORD
+            - name: ANALYTICS_W_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: ANALYTICS_W_PASSWORD
+            # Optional: override default database names
+            - name: APP_DB
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: APP_DB
+                  optional: true
+            - name: AUDIT_DB
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: AUDIT_DB
+                  optional: true
+            - name: ANALYTICS_DB
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: ANALYTICS_DB
+                  optional: true
+          resources:
+            requests:
+              cpu: '50m'
+              memory: '64Mi'
+            limits:
+              cpu: '200m'
+              memory: '256Mi'

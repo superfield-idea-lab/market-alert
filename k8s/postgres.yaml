@@ -1,0 +1,113 @@
+# StatefulSet + PersistentVolumeClaim for self-hosted PostgreSQL.
+#
+# Single replica — suitable for dev and small deployments.
+# Persistent storage is provided by a PVC so data survives pod restarts.
+# Credentials are sourced from the `calypso-secrets` Secret.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: calypso-postgres-pvc
+  labels:
+    app: calypso-postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: calypso-postgres
+  labels:
+    app: calypso-postgres
+spec:
+  serviceName: calypso-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-postgres
+  template:
+    metadata:
+      labels:
+        app: calypso-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-secrets
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '256Mi'
+            limits:
+              cpu: '500m'
+              memory: '512Mi'
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: calypso-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calypso-postgres
+  labels:
+    app: calypso-postgres
+spec:
+  selector:
+    app: calypso-postgres
+  ports:
+    - name: postgres
+      protocol: TCP
+      port: 5432
+      targetPort: 5432
+  clusterIP: None
