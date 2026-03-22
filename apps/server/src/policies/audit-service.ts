@@ -23,42 +23,57 @@ function resolveGenesisHash(): string {
 /**
  * Writes one audit event to the append-only hash-chained audit log.
  *
+ * Uses a serializable transaction via auditSql.unsafe() to ensure no two
+ * concurrent writers can select the same prev_hash.
+ *
  * @throws if the insert fails — callers must treat this as fatal and abort
  *         the associated primary database write.
  */
 export async function emitAuditEvent(event: AuditEventInput): Promise<AuditEventRow> {
-  // Fetch the latest hash inside a serialisable transaction so concurrent
-  // writers do not race on prev_hash selection.
-  const result = await auditSql.begin(async (tx) => {
-    // Lock the most recent row to prevent concurrent inserts racing on prev_hash.
-    const latestRows = (await tx`
-      SELECT hash FROM audit_events ORDER BY ts DESC, id DESC LIMIT 1 FOR UPDATE
-    `) as unknown as { hash: string }[];
+  // Run inside a serializable transaction so concurrent inserts cannot race
+  // on the prev_hash selection (SELECT ... FOR UPDATE + INSERT in one round-trip).
+  const reserved = await auditSql.reserve();
+
+  try {
+    await reserved.unsafe('BEGIN ISOLATION LEVEL SERIALIZABLE');
+
+    const latestRows = (await reserved.unsafe(
+      'SELECT hash FROM audit_events ORDER BY ts DESC, id DESC LIMIT 1 FOR UPDATE',
+    )) as unknown as { hash: string }[];
 
     const prevHash = latestRows[0]?.hash ?? resolveGenesisHash();
-
     const hash = await computeAuditHash(prevHash, event);
 
-    const rows = (await tx`
-      INSERT INTO audit_events (actor_id, action, entity_type, entity_id, before, after, ip, user_agent, ts, prev_hash, hash)
-      VALUES (
-        ${event.actor_id},
-        ${event.action},
-        ${event.entity_type},
-        ${event.entity_id},
-        ${event.before !== null ? tx.json(event.before as never) : null},
-        ${event.after !== null ? tx.json(event.after as never) : null},
-        ${event.ip ?? null},
-        ${event.user_agent ?? null},
-        ${event.ts}::timestamptz,
-        ${prevHash},
-        ${hash}
-      )
-      RETURNING id, actor_id, action, entity_type, entity_id, before, after, ip, user_agent, ts, prev_hash, hash
-    `) as unknown as AuditEventRow[];
+    const beforeJson = event.before !== null ? JSON.stringify(event.before) : null;
+    const afterJson = event.after !== null ? JSON.stringify(event.after) : null;
 
-    return rows[0];
-  });
+    const insertRows = (await reserved.unsafe(
+      `INSERT INTO audit_events
+         (actor_id, action, entity_type, entity_id, before, after, ip, user_agent, ts, prev_hash, hash)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9::timestamptz, $10, $11)
+       RETURNING id, actor_id, action, entity_type, entity_id, before, after, ip, user_agent, ts, prev_hash, hash`,
+      [
+        event.actor_id,
+        event.action,
+        event.entity_type,
+        event.entity_id,
+        beforeJson,
+        afterJson,
+        event.ip ?? null,
+        event.user_agent ?? null,
+        event.ts,
+        prevHash,
+        hash,
+      ],
+    )) as unknown as AuditEventRow[];
 
-  return result;
+    await reserved.unsafe('COMMIT');
+
+    return insertRows[0];
+  } catch (err) {
+    await reserved.unsafe('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    reserved.release();
+  }
 }
