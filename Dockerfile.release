@@ -1,0 +1,58 @@
+# Release image for GHCR.
+# Bakes apps/web/dist (Vite build output) into the image alongside the
+# compiled server bundle so a single container serves both frontend and API.
+#
+# Usage:
+#   docker build -f Dockerfile.release -t ghcr.io/<org>/calypso-server:<tag> .
+
+# --- web builder stage ---
+FROM oven/bun:1 AS web-builder
+
+WORKDIR /app
+
+# Copy workspace manifests and lockfile
+COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/ui/package.json packages/ui/
+
+# Install all workspace dependencies with frozen lockfile
+RUN bun install --frozen-lockfile
+
+# Copy source
+COPY . .
+
+# Build the Vite frontend
+RUN cd apps/web && bun run build
+
+# Compile the server bundle
+RUN bun build apps/server/src/index.ts \
+      --target bun \
+      --outfile dist/server.js \
+      --external postgres
+
+# --- release stage ---
+FROM oven/bun:1-distroless AS release
+
+WORKDIR /app
+
+# Compiled server bundle
+COPY --from=web-builder /app/dist/server.js ./dist/server.js
+
+# Baked frontend static assets served by the server from apps/web/dist
+COPY --from=web-builder /app/apps/web/dist ./apps/web/dist
+
+# Runtime dependencies
+COPY --from=web-builder /app/packages/db ./packages/db
+COPY --from=web-builder /app/node_modules ./node_modules
+
+ENV PORT=31415
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD bun -e "fetch('http://localhost:' + (process.env.PORT || 31415) + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+EXPOSE 31415
+
+ENTRYPOINT ["bun", "run", "dist/server.js"]
