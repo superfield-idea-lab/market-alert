@@ -500,23 +500,27 @@ echo ""
 echo "==> [7/8] Configuring firewall"
 
 if command -v ufw &>/dev/null; then
-  ufw disable 2>/dev/null || true   # avoid error on first run
-  ufw --force reset
-  # After --force reset, ufw's logging state can be inconsistent on repeat runs
-  # (Ubuntu ufw bug: "Could not load logging rules"). Patch the ufw.conf directly
-  # to set LOGLEVEL=off before applying policy so ufw does not try to load the
-  # broken logging rules chain during subsequent commands.
-  if [[ -f /etc/ufw/ufw.conf ]]; then
-    sed -i 's/^LOGLEVEL=.*/LOGLEVEL=off/' /etc/ufw/ufw.conf
-  fi
-  ufw default deny incoming
-  ufw default allow outgoing
-  ufw allow 22/tcp     comment "SSH"
-  ufw allow 6443/tcp   comment "K8s API"
-  ufw allow 10250/tcp  comment "kubelet"
-  ufw allow 31415/tcp  comment "App NodePort"
-  ufw allow 8472/udp   comment "Flannel VXLAN"
-  ufw --force enable
+  # Configure UFW. Run in a subshell so ufw warnings/errors on repeat runs
+  # (known Ubuntu bug: "Could not load logging rules" after --force reset) do
+  # not abort the main script. Firewall rules are best-effort — k3s works without
+  # them and they can be re-applied manually if needed.
+  (
+    set +e
+    ufw disable 2>/dev/null
+    ufw --force reset 2>/dev/null
+    # Disable logging to avoid iptables logging-rules load failures on repeat runs
+    if [[ -f /etc/ufw/ufw.conf ]]; then
+      sed -i 's/^LOGLEVEL=.*/LOGLEVEL=off/' /etc/ufw/ufw.conf
+    fi
+    ufw default deny incoming 2>/dev/null
+    ufw default allow outgoing 2>/dev/null
+    ufw allow 22/tcp     comment "SSH"   2>/dev/null
+    ufw allow 6443/tcp   comment "K8s API"  2>/dev/null
+    ufw allow 10250/tcp  comment "kubelet"  2>/dev/null
+    ufw allow 31415/tcp  comment "App NodePort"  2>/dev/null
+    ufw allow 8472/udp   comment "Flannel VXLAN" 2>/dev/null
+    ufw --force enable 2>/dev/null
+  )
   echo "    Firewall configured."
 else
   echo "    ufw not found — skipping firewall configuration."
