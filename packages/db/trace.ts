@@ -18,9 +18,10 @@
  * ```
  */
 
-import type postgres from 'postgres';
+import postgres from 'postgres';
 
-type Sql = ReturnType<typeof import('postgres').default>;
+type Sql = postgres.Sql;
+type TransactionSql = postgres.TransactionSql;
 
 /**
  * Executes `callback` inside a PostgreSQL transaction that opens with
@@ -34,13 +35,19 @@ type Sql = ReturnType<typeof import('postgres').default>;
  * @param traceId  - The trace ID for this request.
  * @param callback - A function that receives the transaction client and returns a Promise.
  */
-export async function withTraceId<T>(
+export function withTraceId<T>(
   sqlPool: Sql,
   traceId: string,
-  callback: (tx: postgres.TransactionSql) => Promise<T>,
+  callback: (tx: TransactionSql) => Promise<T>,
 ): Promise<T> {
-  return sqlPool.begin(async (tx) => {
-    await tx.unsafe(`SET LOCAL app.trace_id = '${traceId.replace(/'/g, "''")}'`);
-    return callback(tx);
-  });
+  // postgres's begin() signature uses UnwrapPromiseArray<T> as the return type,
+  // but at runtime the resolved value matches T for all our use-cases (the
+  // callback returns a plain Promise<T> rather than an array-of-promises).
+  // We cast here to keep the public API ergonomic without duplicating the
+  // complex UnwrapPromiseArray helper type from the postgres library.
+  return sqlPool.begin((tx: TransactionSql) => {
+    return tx
+      .unsafe(`SET LOCAL app.trace_id = '${traceId.replace(/'/g, "''")}'`)
+      .then(() => callback(tx));
+  }) as unknown as Promise<T>;
 }

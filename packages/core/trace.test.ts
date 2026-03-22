@@ -131,9 +131,14 @@ describe('tracedFetch', () => {
   test('sets X-Trace-Id on the outgoing request', async () => {
     let capturedHeader: string | null = null;
 
-    // Override global fetch for this test
+    // Override global fetch for this test using a type-cast so we can intercept
+    // calls without implementing the full fetch interface (preconnect etc.).
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
       capturedHeader = new Headers(init?.headers).get('X-Trace-Id');
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     };
@@ -149,11 +154,15 @@ describe('tracedFetch', () => {
   });
 
   test('does not overwrite headers provided by caller', async () => {
-    let capturedHeaders: Headers | null = null;
+    const captured: { headers: Headers | null } = { headers: null };
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      capturedHeaders = new Headers(init?.headers);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      captured.headers = new Headers(init?.headers);
       return new Response('ok', { status: 200 });
     };
 
@@ -161,8 +170,8 @@ describe('tracedFetch', () => {
       await tracedFetch('http://localhost/', {
         headers: { 'Content-Type': 'application/json' },
       });
-      expect(capturedHeaders?.get('Content-Type')).toBe('application/json');
-      expect(capturedHeaders?.get('X-Trace-Id')).toBeTruthy();
+      expect(captured.headers?.get('Content-Type')).toBe('application/json');
+      expect(captured.headers?.get('X-Trace-Id')).toBeTruthy();
     } finally {
       globalThis.fetch = originalFetch;
     }
