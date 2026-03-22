@@ -108,7 +108,7 @@ export default {
       // Delegated-token result submission route must be checked before the
       // cookie-auth tasks route so workers can submit without a user session.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
-      if (resultRes) return resultRes;
+      if (resultRes) return withTrace(resultRes);
 
       const tasksRes = await handleTasksRequest(req, url, appState);
       if (tasksRes) return withTrace(tasksRes);
