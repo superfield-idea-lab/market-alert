@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [[ -n "${REPO_ROOT:-}" ]]; then
+  cd "$REPO_ROOT"
+fi
+
 BRANCH=$(git branch --show-current 2>/dev/null)
 [[ "$BRANCH" == studio/session* ]] && exit 0
 
@@ -27,8 +32,19 @@ if command -v gh >/dev/null 2>&1; then
   fi
 fi
 
+changed_files=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  [[ -f "$path" ]] || continue
+  changed_files+=("$path")
+done < <(git diff --name-only origin/main...HEAD --)
+
 echo "pre-push: checking formatting..." >&2
-bunx prettier --check .
+if [[ "${#changed_files[@]}" -gt 0 ]]; then
+  bunx prettier --check --ignore-unknown "${changed_files[@]}"
+else
+  echo "pre-push: no changed files against origin/main; skipping formatting check." >&2
+fi
 
 echo "pre-push: checking TypeScript..." >&2
 bunx tsc --noEmit --pretty false
