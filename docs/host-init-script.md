@@ -64,47 +64,54 @@ ssh-keygen -t ed25519 -C "your-name@example.com" -f ~/.ssh/calypso_admin
 ### What the script does
 
 1.  **Root bootstrap (SSH as root@host):**
-   - Creates `superfield` OS account (no sudo, no wheel/sudo group membership)
-   - Locks account with `passwd -l superfield` (password login disabled)
-   - Writes supplied public key(s) to `/home/superfield/.ssh/authorized_keys`
-     with `600` permissions
-   - Validates each key's type and strength; rejects weak keys
-   - Hardens sshd globally: `PubkeyAuthentication yes`, `PasswordAuthentication no`,
-     `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `LoginGraceTime 30`,
-     `AllowUsers superfield root`
+
+- Creates `superfield` OS account (no sudo, no wheel/sudo group membership)
+- Locks account with `passwd -l superfield` (password login disabled)
+- Writes supplied public key(s) to `/home/superfield/.ssh/authorized_keys`
+  with `600` permissions
+- Validates each key's type and strength; rejects weak keys
+- Hardens sshd globally: `PubkeyAuthentication yes`, `PasswordAuthentication no`,
+  `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `LoginGraceTime 30`,
+  `AllowUsers superfield root`
 
 2.  **CIS Benchmark Level 1 host hardening:**
-   - Disables unused services: `avahi-daemon`, `cups`, `postfix` (if present)
-   - Kernel sysctl: disables IP source routing, enables SYN cookies,
-     restricts core dumps, disables AppArmor `userns_create` restriction
-     (required for k3s on Ubuntu 24.04+)
-   - Enables `unattended-upgrades` for automatic security patches
+
+- Disables unused services: `avahi-daemon`, `cups`, `postfix` (if present)
+- Kernel sysctl: disables IP source routing, enables SYN cookies,
+  restricts core dumps, disables AppArmor `userns_create` restriction
+  (required for k3s on Ubuntu 24.04+)
+- Enables `unattended-upgrades` for automatic security patches
 
 3.  **SSH hardening:**
-   - Sets `PermitRootLogin prohibit-password` — key-based root login stays
-     enabled; password root login disabled.
+
+- Sets `PermitRootLogin prohibit-password` — key-based root login stays
+  enabled; password root login disabled.
 
 4.  **k3s installation (root system service):**
-   - Removes any stale drop-ins from prior rootless attempts
-   - Installs k3s as a root system service (default systemd unit)
-   - Copies kubeconfig to `/home/superfield/.kube/config` (mode 600)
-   - ufw allows port 22 and 31415 only — port 6443 not opened externally
+
+- Removes any stale drop-ins from prior rootless attempts
+- Installs k3s as a root system service (default systemd unit)
+- Copies kubeconfig to `/home/superfield/.kube/config` (mode 600)
+- ufw allows port 22 and 31415 only — port 6443 not opened externally
 
 5.  **Kubernetes ServiceAccount and RBAC:**
-   - Creates namespace `calypso-<env>`
-   - Creates ServiceAccount `calypso-deployer` in the namespace
-   - Creates Role with permissions: `get/list/watch/patch` on `deployments`,
-     `create/get/list/watch/delete` on `jobs`, `get/list/watch` on `pods`
-     and `pods/log`
-   - Binds role to ServiceAccount
+
+- Creates namespace `calypso-<env>`
+- Creates ServiceAccount `calypso-deployer` in the namespace
+- Creates Role with permissions: `get/list/watch/patch` on `deployments`,
+  `create/get/list/watch/delete` on `jobs`, `get/list/watch` on `pods`
+  and `pods/log`
+- Binds role to ServiceAccount
 
 6.  **Application secrets:**
-   - SSH-es as `superfield` using the just-installed admin key
-   - Injects application secrets into the Kubernetes namespace.
+
+- SSH-es as `superfield` using the just-installed admin key
+- Injects application secrets into the Kubernetes namespace.
 
 7.  **Bootstrap summary:**
-   - Prints the full list of GitHub Actions secrets to configure
-   - Prints exact `gh secret set --env <env>` commands for the operator
+
+- Prints the full list of GitHub Actions secrets to configure
+- Prints exact `gh secret set --env <env>` commands for the operator
 
 ### Required GitHub Actions secrets (set after bootstrap)
 
@@ -320,13 +327,13 @@ For catastrophic failures, re-image the host and start fresh.
 
 ## Common failure modes
 
-| Symptom                                                | Cause                                 | Fix                                            |
-| ------------------------------------------------------ | ------------------------------------- | ---------------------------------------------- |
-| `ssh: connect to host ... port 22: Connection refused` | Host not reachable or SSH not running | Check host network / security group            |
-| `Permission denied (publickey)`                        | Wrong key file                        | Verify `--admin-key` matches the installed key |
-| `RSA key is too weak`                                  | Key < 3072 bits                       | Generate Ed25519: `ssh-keygen -t ed25519`      |
-| `k3s not starting`                                     | AppArmor userns restriction or stale drop-in | Check `journalctl -u k3s`; re-run script  |
-| `kubeconfig: permission denied`                        | File mode wrong                       | `chmod 600 /home/superfield/.kube/config`      |
-| `403 Forbidden` on deploy                              | ServiceAccount RBAC too narrow        | Verify Role binds to correct SA and namespace  |
-| `Token expired`                                        | 1h TTL elapsed                        | Trigger new workflow run                       |
-| `tunnel port collision`                                | Previous run not cleaned up           | Kill stale ssh process on runner               |
+| Symptom                                                | Cause                                        | Fix                                            |
+| ------------------------------------------------------ | -------------------------------------------- | ---------------------------------------------- |
+| `ssh: connect to host ... port 22: Connection refused` | Host not reachable or SSH not running        | Check host network / security group            |
+| `Permission denied (publickey)`                        | Wrong key file                               | Verify `--admin-key` matches the installed key |
+| `RSA key is too weak`                                  | Key < 3072 bits                              | Generate Ed25519: `ssh-keygen -t ed25519`      |
+| `k3s not starting`                                     | AppArmor userns restriction or stale drop-in | Check `journalctl -u k3s`; re-run script       |
+| `kubeconfig: permission denied`                        | File mode wrong                              | `chmod 600 /home/superfield/.kube/config`      |
+| `403 Forbidden` on deploy                              | ServiceAccount RBAC too narrow               | Verify Role binds to correct SA and namespace  |
+| `Token expired`                                        | 1h TTL elapsed                               | Trigger new workflow run                       |
+| `tunnel port collision`                                | Previous run not cleaned up                  | Kill stale ssh process on runner               |

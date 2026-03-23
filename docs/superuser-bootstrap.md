@@ -31,10 +31,10 @@ This prevents an operator from accidentally locking themselves out.
 
 ## Environment variables
 
-| Var                  | Purpose                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `SUPERUSER_EMAIL`    | Email/username for the bootstrap account                                                    |
-| `SUPERUSER_MNEMONIC` | BIP-39 mnemonic for deterministic password derivation.                                      |
+| Var                  | Purpose                                                |
+| -------------------- | ------------------------------------------------------ |
+| `SUPERUSER_EMAIL`    | Email/username for the bootstrap account               |
+| `SUPERUSER_MNEMONIC` | BIP-39 mnemonic for deterministic password derivation. |
 
 ## Kubernetes secret
 
