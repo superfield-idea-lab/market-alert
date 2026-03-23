@@ -54,6 +54,7 @@ jobs:
           tags: calypso-nightly:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: true
 
       - name: Initialize databases
         run: bun run packages/db/init-remote.ts
