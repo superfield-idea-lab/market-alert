@@ -9,15 +9,17 @@ import {
   LayoutDashboard,
   ChevronRight,
   ChevronLeft,
+  Smartphone,
 } from 'lucide-react';
 import { TaskListView } from './components/TaskListView';
 import { StudioChat } from './components/StudioChat';
+import { PwaDemoPage } from './pages/pwa-demo';
 
 function App() {
   const { user, logout, loading } = useAuth();
 
   // Core Layout State
-  const [activeView, setActiveView] = useState<'board' | 'settings'>('board');
+  const [activeView, setActiveView] = useState<'board' | 'settings' | 'pwa'>('board');
   const [chatExpanded, setChatExpanded] = useState(true);
 
   if (loading) {
@@ -53,6 +55,13 @@ function App() {
               className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
             >
               <Settings size={20} strokeWidth={2.5} />
+            </button>
+            <button
+              onClick={() => setActiveView('pwa')}
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'pwa' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+              title="PWA Demo"
+            >
+              <Smartphone size={20} strokeWidth={2.5} />
             </button>
           </div>
         </div>
@@ -92,8 +101,12 @@ function App() {
           </header>
 
           {/* Board Content */}
-          <div className="flex-1 overflow-hidden">
-            <TaskListView />
+          <div className="flex-1 overflow-hidden overflow-y-auto">
+            {activeView === 'board' && <TaskListView />}
+            {activeView === 'pwa' && <PwaDemoPage />}
+            {activeView === 'settings' && (
+              <div className="p-8 text-zinc-400 text-sm">Settings coming soon.</div>
+            )}
           </div>
         </div>
 
