@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { pathToFileURL } from 'url';
 import { describe, expect, it } from 'vitest';
-import { resolveDatabaseUrls, splitSqlStatements } from './index';
+import { resolveDatabaseUrls, resolveSchemaSqlPath, splitSqlStatements } from './index';
 
 describe('resolveDatabaseUrls', () => {
   it('uses localhost defaults when only DATABASE_URL is unset', () => {
@@ -66,5 +70,28 @@ SELECT 1
 
   it('handles trailing content without a final semicolon', () => {
     expect(splitSqlStatements('SELECT 1; SELECT 2')).toContain('SELECT 2');
+  });
+});
+
+describe('resolveSchemaSqlPath', () => {
+  it('prefers schema.sql adjacent to the module', () => {
+    expect(resolveSchemaSqlPath(import.meta.url)).toMatch(/packages\/db\/schema\.sql$/);
+  });
+
+  it('falls back to packaged schema.sql when running from a bundled dist directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'calypso-schema-path-'));
+    const distDir = join(root, 'dist');
+    const packagedDir = join(root, 'packages', 'db');
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(packagedDir, { recursive: true });
+    writeFileSync(join(packagedDir, 'schema.sql'), '-- test schema');
+
+    try {
+      expect(resolveSchemaSqlPath(pathToFileURL(join(distDir, 'server.js')).href, root)).toBe(
+        join(packagedDir, 'schema.sql'),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

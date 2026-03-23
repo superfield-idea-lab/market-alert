@@ -54,20 +54,24 @@ jobs:
           tags: calypso-nightly:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          no-cache: true
 
       - name: Initialize databases
         run: bun run packages/db/init-remote.ts
         env:
           ADMIN_DATABASE_URL: postgres://app_rw:app_rw_password@localhost:5432/calypso_app
-          DB_PASSWORD: app_rw_password
+          APP_RW_PASSWORD: app_rw_password
           AUDIT_W_PASSWORD: audit_w_password
           ANALYTICS_W_PASSWORD: analytics_w_password
+          AGENT_CODING_PASSWORD: agent_coding_password
+          AGENT_ANALYSIS_PASSWORD: agent_analysis_password
 
       - name: Start app container
         run: |
           docker run -d \
             --name calypso \
             --network host \
+            -v "$PWD/packages/db/schema.sql:/app/dist/schema.sql:ro" \
             -e DATABASE_URL=postgres://app_rw:app_rw_password@localhost:5432/calypso_app \
             -e AUDIT_DATABASE_URL=postgres://audit_w:audit_w_password@localhost:5432/calypso_audit \
             -e ANALYTICS_DATABASE_URL=postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics \
