@@ -38,4 +38,24 @@ export default defineConfig({
       plugins: [tailwindcss(tailwindConfig), autoprefixer()],
     },
   },
+  build: {
+    rollupOptions: {
+      // Compile the service worker as a separate top-level entry so it lands
+      // at dist/sw.js and is registered from the root scope (/sw.js).
+      // The SW must not be bundled with the main React chunk — it needs its
+      // own global scope and cannot use ES module imports at runtime.
+      input: {
+        main: 'index.html',
+        sw: 'src/sw.ts',
+      },
+      output: {
+        // Keep the service worker at the root of dist/ with a stable filename
+        // (no content hash) so the registration URL never changes between builds.
+        entryFileNames: (chunkInfo) => {
+          if (chunkInfo.name === 'sw') return 'sw.js';
+          return 'assets/[name]-[hash].js';
+        },
+      },
+    },
+  },
 });
