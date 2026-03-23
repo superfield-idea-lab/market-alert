@@ -176,50 +176,78 @@ export async function submitTaskResult(options: SubmitResultOptions): Promise<Ta
   return rows[0] ?? null;
 }
 
+export interface RecoveredTaskRow {
+  id: string;
+  status: TaskQueueStatus;
+  attempt: number;
+  agent_type: string;
+  job_type: string;
+}
+
 /**
  * Recovers stale claims (TQ-D-003 stale-claim-recovery).
  *
  * Tasks in 'claimed' status whose claim_expires_at has passed are either
  * reset to 'pending' (if attempt < max_attempts) or transitioned to 'dead'.
  *
- * Returns the number of rows updated.
+ * Exponential backoff: next_retry_at = NOW() + 2^attempt seconds.
+ *
+ * Returns the list of recovered rows with their new status so callers can
+ * emit audit events per row.
  */
-export async function recoverStaleClaims(): Promise<number> {
-  const rows = await sql<{ count: string }[]>`
-    WITH recovered AS (
-      UPDATE task_queue
-      SET
-        status           = CASE
-                             WHEN attempt >= max_attempts THEN 'dead'
-                             ELSE 'pending'
-                           END,
-        claimed_by       = NULL,
-        claimed_at       = NULL,
-        claim_expires_at = NULL,
-        delegated_token  = NULL,
-        next_retry_at    = CASE
-                             WHEN attempt >= max_attempts THEN NULL
-                             ELSE NOW() + (POWER(2, attempt) * INTERVAL '1 second')
-                           END,
-        updated_at       = NOW()
-      WHERE status = 'claimed'
-        AND claim_expires_at < NOW()
-      RETURNING 1
-    )
-    SELECT COUNT(*)::TEXT AS count FROM recovered
+export async function recoverStaleClaims(): Promise<RecoveredTaskRow[]> {
+  const rows = await sql<RecoveredTaskRow[]>`
+    UPDATE task_queue
+    SET
+      status           = CASE
+                           WHEN attempt >= max_attempts THEN 'dead'
+                           ELSE 'pending'
+                         END,
+      claimed_by       = NULL,
+      claimed_at       = NULL,
+      claim_expires_at = NULL,
+      delegated_token  = NULL,
+      next_retry_at    = CASE
+                           WHEN attempt >= max_attempts THEN NULL
+                           ELSE NOW() + (POWER(2, attempt) * INTERVAL '1 second')
+                         END,
+      updated_at       = NOW()
+    WHERE status = 'claimed'
+      AND claim_expires_at < NOW()
+    RETURNING id, status, attempt, agent_type, job_type
   `;
-  return parseInt(rows[0]?.count ?? '0', 10);
+  return rows;
 }
+
+/**
+ * Callback invoked once per recovered row so callers can emit audit events
+ * without coupling the db package to the audit infrastructure.
+ */
+export type StaleRecoveryAuditCallback = (rows: RecoveredTaskRow[]) => Promise<void>;
 
 /**
  * Starts the stale-claim recovery on a fixed interval.
  * The returned timer has .unref() called so it does not prevent process exit.
+ *
+ * @param intervalMs - Polling interval in milliseconds. Defaults to 60 000.
+ * @param onRecovered - Optional async callback receiving the list of recovered
+ *   rows after each sweep. Use this to emit audit events without coupling the
+ *   db package to the audit service.
  */
-export function startStaleClaimRecovery(intervalMs = 60_000): ReturnType<typeof setInterval> {
+export function startStaleClaimRecovery(
+  intervalMs = 60_000,
+  onRecovered?: StaleRecoveryAuditCallback,
+): ReturnType<typeof setInterval> {
   const timer = setInterval(() => {
-    recoverStaleClaims().catch((err) =>
-      console.error('[task-queue] stale claim recovery failed:', err),
-    );
+    recoverStaleClaims()
+      .then((rows) => {
+        if (rows.length > 0 && onRecovered) {
+          return onRecovered(rows).catch((err) =>
+            console.error('[task-queue] stale recovery audit callback failed:', err),
+          );
+        }
+      })
+      .catch((err) => console.error('[task-queue] stale claim recovery failed:', err));
   }, intervalMs);
   timer.unref();
   return timer;
