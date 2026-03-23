@@ -53,11 +53,12 @@ export function base64UrlDecode(str: string): string {
 }
 
 /**
- * Decodes a Base64 URL Safe string to a Uint8Array.
+ * Decodes a Base64 URL Safe string to a Uint8Array backed by a plain ArrayBuffer.
  */
-function base64UrlDecodeBytes(str: string): Uint8Array {
+function base64UrlDecodeBytes(str: string): Uint8Array<ArrayBuffer> {
   const binary = base64UrlDecode(str);
-  const bytes = new Uint8Array(binary.length);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
