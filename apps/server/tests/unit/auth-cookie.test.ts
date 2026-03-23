@@ -94,9 +94,7 @@ describe('auth cookie SameSite attribute', () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
 
-    const setCookieHeaders = res!.headers.getSetCookie
-      ? res!.headers.getSetCookie()
-      : [res!.headers.get('Set-Cookie') ?? ''];
+    const setCookieHeaders = res!.headers.getSetCookie();
 
     const authCookie = setCookieHeaders.find((h) => h.startsWith('calypso_auth='));
     expect(authCookie).toBeDefined();
@@ -130,9 +128,7 @@ describe('auth cookie SameSite attribute', () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(201);
 
-    const setCookieHeaders = res!.headers.getSetCookie
-      ? res!.headers.getSetCookie()
-      : [res!.headers.get('Set-Cookie') ?? ''];
+    const setCookieHeaders = res!.headers.getSetCookie();
 
     const authCookie = setCookieHeaders.find((h) => h.startsWith('calypso_auth='));
     expect(authCookie).toBeDefined();
@@ -156,9 +152,7 @@ describe('auth cookie other attributes', () => {
     const url = new URL(req.url);
 
     const res = await handleAuthRequest(req, url, appState);
-    const setCookieHeaders = res!.headers.getSetCookie
-      ? res!.headers.getSetCookie()
-      : [res!.headers.get('Set-Cookie') ?? ''];
+    const setCookieHeaders = res!.headers.getSetCookie();
 
     const authCookie = setCookieHeaders.find((h) => h.startsWith('calypso_auth='));
     expect(authCookie).toContain('HttpOnly');
@@ -178,9 +172,7 @@ describe('auth cookie other attributes', () => {
     const url = new URL(req.url);
 
     const res = await handleAuthRequest(req, url, appState);
-    const setCookieHeaders = res!.headers.getSetCookie
-      ? res!.headers.getSetCookie()
-      : [res!.headers.get('Set-Cookie') ?? ''];
+    const setCookieHeaders = res!.headers.getSetCookie();
 
     const authCookie = setCookieHeaders.find((h) => h.startsWith('calypso_auth='));
     expect(authCookie).toContain('Path=/');
