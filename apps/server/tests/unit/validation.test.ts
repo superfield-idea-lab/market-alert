@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'vitest';
-import { validate } from '../../src/api/validation';
+import { validate, getCompiledValidator } from '../../src/api/validation';
 import { createTaskSchema, registerUserSchema, patchTaskSchema } from 'core';
 
 describe('validate()', () => {
@@ -103,5 +103,62 @@ describe('validate()', () => {
       expect(err).toHaveProperty('instancePath');
       expect(err).toHaveProperty('message');
     }
+  });
+});
+
+describe('getCompiledValidator() — module-level caching', () => {
+  test('returns the same compiled function reference on successive calls (same schema object)', () => {
+    const fn1 = getCompiledValidator(createTaskSchema);
+    const fn2 = getCompiledValidator(createTaskSchema);
+    expect(fn1).toBe(fn2);
+  });
+
+  test('returns the same reference for registerUserSchema across two calls', () => {
+    const fn1 = getCompiledValidator(registerUserSchema);
+    const fn2 = getCompiledValidator(registerUserSchema);
+    expect(fn1).toBe(fn2);
+  });
+
+  test('returns the same reference for patchTaskSchema across two calls', () => {
+    const fn1 = getCompiledValidator(patchTaskSchema);
+    const fn2 = getCompiledValidator(patchTaskSchema);
+    expect(fn1).toBe(fn2);
+  });
+
+  test('valid payload is still accepted after refactor', () => {
+    const result = validate<{ name: string }>(createTaskSchema, { name: 'Cached task' });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.name).toBe('Cached task');
+    }
+  });
+
+  test('invalid payload is still rejected with the same structured error after refactor', () => {
+    const result = validate(createTaskSchema, { priority: 'bad' });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toHaveProperty('instancePath');
+      expect(result.errors[0]).toHaveProperty('message');
+      expect(result.errors[0]).toHaveProperty('keyword');
+      expect(result.errors[0]).toHaveProperty('schemaPath');
+    }
+  });
+
+  test('performance smoke: 1000 cached validate() calls complete within 100ms', () => {
+    // Warm up the cache (first call compiles the schema)
+    validate(createTaskSchema, { name: 'warmup' });
+
+    const ITERATIONS = 1000;
+    const start = performance.now();
+    for (let i = 0; i < ITERATIONS; i++) {
+      validate(createTaskSchema, { name: `task-${i}` });
+    }
+    const elapsed = performance.now() - start;
+
+    // 1000 cached validation calls must complete in under 100ms.
+    // AJV compilation only happens once (on warmup); each subsequent call
+    // reuses the compiled ValidateFunction — no schema traversal overhead.
+    expect(elapsed).toBeLessThan(100);
   });
 });
