@@ -41,6 +41,7 @@ WORKDIR /app
 
 # Compiled server bundle
 COPY --from=web-builder /app/dist/server.js ./dist/server.js
+COPY --from=web-builder /app/packages/db/schema.sql ./dist/schema.sql
 
 # Baked frontend static assets served by the server from apps/web/dist
 COPY --from=web-builder /app/apps/web/dist ./apps/web/dist
