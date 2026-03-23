@@ -3,17 +3,17 @@
  * User management API.
  *
  * DELETE /api/users/:id
- *   Deletes the specified user entity. Returns 409 Conflict if deleting the
- *   user would remove the last remaining superuser account, preventing the
- *   system from being locked out after a fresh deployment.
+ *   Deletes the specified user entity. Returns 403 Forbidden unless the caller
+ *   is the target user themselves or a superuser. Returns 409 Conflict if
+ *   deleting the user would remove the last remaining superuser account,
+ *   preventing the system from being locked out after a fresh deployment.
  *
- * Callers must be authenticated. The endpoint does not currently enforce that
- * only superusers may delete other users — that authorization layer is future
- * work.
+ * Callers must be authenticated and authorized.
  */
 
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
+import { isSuperuser } from './admin';
 
 export async function handleUsersRequest(
   req: Request,
@@ -46,6 +46,11 @@ export async function handleUsersRequest(
     `;
 
     if (!target) return json({ error: 'Not found' }, 404);
+
+    // Authorisation: only the user themselves or a superuser may delete.
+    if (user.id !== targetId && !isSuperuser(user.id)) {
+      return json({ error: 'Forbidden' }, 403);
+    }
 
     // Guard: refuse if this would remove the last superuser.
     if (target.properties.role === 'superuser') {
