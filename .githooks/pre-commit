@@ -24,9 +24,16 @@ if [[ -n "$JS_STAGED" ]]; then
   exit 1
 fi
 
-FORMATTABLE=$(printf '%s\n' "$STAGED" | grep -E '\.(cjs|css|html|json|md|mts|mjs|scss|ts|tsx|yaml|yml)$' || true)
+FORMATTABLE_STAGED=$(printf '%s\n' "$STAGED" | grep -E '\.(cjs|css|html|json|md|mts|mjs|scss|ts|tsx|yaml|yml)$' || true)
+# Filter to only files that exist on disk (exclude deletions)
+FORMATTABLE=""
+while IFS= read -r f; do
+  [[ -n "$f" && -f "$f" ]] && FORMATTABLE="${FORMATTABLE} $f"
+done <<< "$FORMATTABLE_STAGED"
+FORMATTABLE="${FORMATTABLE# }"
 if [[ -n "$FORMATTABLE" ]]; then
   echo "pre-commit: checking formatting on staged files..." >&2
+  # shellcheck disable=SC2086
   bunx prettier --check $FORMATTABLE
 fi
 
