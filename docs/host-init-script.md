@@ -54,7 +54,7 @@ ssh-keygen -t ed25519 -C "your-name@example.com" -f ~/.ssh/calypso_admin
 
 ### What the script does
 
-1. **Root bootstrap (SSH as root@host):**
+1.  **Root bootstrap (SSH as root@host):**
    - Creates `superfield` OS account (no sudo, no wheel/sudo group membership)
    - Locks account with `passwd -l superfield` (password login disabled)
    - Writes supplied public key(s) to `/home/superfield/.ssh/authorized_keys`
@@ -63,35 +63,34 @@ ssh-keygen -t ed25519 -C "your-name@example.com" -f ~/.ssh/calypso_admin
    - Hardens sshd globally: `PasswordAuthentication no`, `MaxAuthTries 3`,
      `LoginGraceTime 30`, `AllowUsers superfield`
 
-2. **CIS Benchmark Level 1 host hardening:**
+2.  **CIS Benchmark Level 1 host hardening:**
    - Disables unused services: `avahi-daemon`, `cups`, `postfix` (if present)
    - Kernel sysctl: disables IP source routing, enables SYN cookies,
      restricts core dumps
    - Enables `unattended-upgrades` for automatic security patches
 
-3. **Root SSH lockdown:**
-   - Sets `PermitRootLogin no` in sshd_config
-   - Removes root's `authorized_keys`
+3.  **Root SSH lockdown:**
+   - Sets `PermitRootLogin prohibit-password` in sshd_config to allow key-based
+     root login while disabling password-based root login.
    - Pass `--keep-root-ssh` to skip (prints an explicit warning)
 
-4. **k3s installation (systemd, User=superfield):**
+4.  **k3s installation (systemd, User=superfield):**
    - Installs k3s as a systemd service with `User=superfield`
    - Data directory and kubeconfig owned by `superfield`
    - API server binds to `127.0.0.1:6443` only
    - ufw does NOT open port 6443
 
-5. **Kubernetes ServiceAccount and RBAC:**
+5.  **Kubernetes ServiceAccount and RBAC:**
    - Creates namespace `calypso-<env>`
    - Creates ServiceAccount `calypso-deployer` in the namespace
    - Creates Role with RBAC limited to `patch` on `deployments` in namespace
    - Binds role to ServiceAccount
 
-6. **Application secrets and manifests:**
+6.  **Application secrets:**
    - SSH-es as `superfield` using the just-installed admin key
-   - Injects application secrets and applies k8s manifests
-   - Polls `/healthz` until the app responds
+   - Injects application secrets into the Kubernetes namespace.
 
-7. **Bootstrap summary:**
+7.  **Bootstrap summary:**
    - Prints the full list of GitHub Actions secrets to configure
    - Prints exact `gh secret set --env <env>` commands for the operator
 

@@ -26,8 +26,7 @@
 #   --help              Show this usage message.
 #
 # Environment variables (application credentials — passed to k8s secrets):
-#   CALYPSO_IMAGE_TAG   — image tag to deploy (e.g. "v1.2.3" or "sha-abc1234")
-#   GITHUB_PAT          — GitHub PAT for pulling from GHCR
+#   GITHUB_PAT          — GitHub PAT for pulling from GHCR (if using local DB)
 #
 # Optional env vars (remote postgres mode):
 #   REMOTE_PG_HOST          — hostname of the managed postgres instance
@@ -38,9 +37,10 @@
 #   REMOTE_PG_SSL           — SSL mode: disable | require | verify-full (default: require)
 #   REMOTE_PG_CA_CERT       — CA certificate PEM content (optional, for verify-full)
 #
-# Superuser credential (provide one):
-#   MNEMONIC            — BIP-39 mnemonic phrase
-#   SUPERUSER_PASSWORD  — password for superuser account (alternative to MNEMONIC)
+# Superuser Mnemonic:
+#   The script will interactively prompt for the superuser's BIP-39 mnemonic.
+#   For non-interactive use (e.g., in CI), you can provide the MNEMONIC
+#   environment variable as an override.
 #
 # Optional API keys:
 #   SUBSTACK_API_KEY
@@ -52,22 +52,19 @@
 #   1   — argument or precondition error (no admin key, invalid key type, etc.)
 #   2   — SSH connectivity failure
 #   3   — provisioning phase failed (bootstrap, k3s install, k8s apply, etc.)
-#   4   — post-provisioning health check failed
 #
 # Provisioning phases (run entirely over SSH from local machine):
 #   1.  Root bootstrap: create superfield account (locked, no sudo), install
 #       admin SSH key(s) with type/strength validation, harden sshd globally.
 #   2.  CIS Benchmark Level 1 host hardening: disable unused services,
 #       kernel sysctl security parameters, enable unattended-upgrades.
-#   3.  Root SSH lockdown: PermitRootLogin no, root authorized_keys removed
+#   3.  Root SSH lockdown: sets PermitRootLogin to prohibit-password (allows key-based login)
 #       (opt-out via --keep-root-ssh with mandatory warning).
 #   4.  k3s install as systemd service with User=superfield; API bound to
 #       localhost only; all data under /home/superfield.
-#   5.  Kubernetes namespace, secrets, and ServiceAccount with minimal RBAC
-#       (patch on deployments in namespace only).
-#   6.  Application secrets and k8s manifests applied via superfield SSH.
-#   7.  Health check: polls /healthz until app responds.
-#   8.  Bootstrap summary: prints required GitHub Actions secrets and exact
+#   5.  Kubernetes namespace, ServiceAccount with minimal RBAC for deployer.
+#   6.  Application secrets applied via superfield SSH.
+#   7.  Bootstrap summary: prints required GitHub Actions secrets and exact
 #       `gh secret set --env <env>` commands for the operator.
 #
 # Key type enforcement:
@@ -1156,16 +1153,9 @@ _set_sshd() {
   fi
 }
 
-_set_sshd PermitRootLogin no
+_set_sshd PermitRootLogin prohibit-password
 systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
-echo "    PermitRootLogin set to no."
-
-if [[ -f /root/.ssh/authorized_keys ]]; then
-  rm -f /root/.ssh/authorized_keys
-  echo "    root authorized_keys removed."
-else
-  echo "    root authorized_keys not found — nothing to remove."
-fi
+echo "    PermitRootLogin set to prohibit-password."
 REMOTESCRIPT
 
   echo "    Root SSH login disabled."
@@ -1317,11 +1307,27 @@ echo "    ServiceAccount and RBAC complete."
 
 # ── Phase 6: Application secrets and manifests ────────────────────────────────
 
-echo ""
-echo "==> [6/8] Applying application secrets and Kubernetes manifests"
+# ── Superuser Mnemonic Collection ─────────────────────────────────────────────
+if [[ -z "${MNEMONIC:-}" ]]; then
+  if [ -t 0 ]; then # Interactive terminal
+    echo ""
+    echo "==> Collecting superuser mnemonic"
+    read -rsp "    Enter superuser BIP-39 mnemonic: " MNEMONIC
+    echo ""
+  else # Non-interactive
+    echo "error: running in non-interactive mode, but no superuser mnemonic provided." >&2
+    echo "       Please set the MNEMONIC environment variable." >&2
+    exit 1
+  fi
+fi
 
-: "${CALYPSO_IMAGE_TAG:?CALYPSO_IMAGE_TAG is required}"
-IMAGE="${REPO}:${CALYPSO_IMAGE_TAG}"
+if [[ -z "${MNEMONIC:-}" ]]; then
+  echo "error: no superuser mnemonic provided. Aborting." >&2
+  exit 1
+fi
+
+echo ""
+echo "==> [6/7] Applying application secrets"
 
 # Determine DB mode
 if [[ -n "${REMOTE_PG_HOST:-}" ]]; then
@@ -1486,13 +1492,6 @@ kubectl patch secret calypso-api-secrets --namespace="${NAMESPACE}" \
   --type=json \
   -p='[{"op":"add","path":"/data/SUPERUSER_MNEMONIC","value":"'"$(echo -n "${MNEMONIC}" | base64 -w0)"'"}]'
 REMOTESCRIPT
-elif [[ -n "${SUPERUSER_PASSWORD:-}" ]]; then
-  _ssh_superfield bash <<REMOTESCRIPT
-export KUBECONFIG="/home/superfield/.kube/config"
-kubectl patch secret calypso-api-secrets --namespace="${NAMESPACE}" \
-  --type=json \
-  -p='[{"op":"add","path":"/data/SUPERUSER_PASSWORD","value":"'"$(echo -n "${SUPERUSER_PASSWORD}" | base64 -w0)"'"}]'
-REMOTESCRIPT
 fi
 
 if [[ "${DB_MODE}" == "local" ]]; then
@@ -1618,227 +1617,12 @@ kubectl rollout status statefulset/postgres --namespace="${NAMESPACE}" --timeout
 REMOTESCRIPT
 fi
 
-# Run db-init job
-_ssh_superfield bash <<REMOTESCRIPT
-set -euo pipefail
-export KUBECONFIG="/home/superfield/.kube/config"
+echo "    Secret provisioning complete."
 
-kubectl delete job calypso-db-init --namespace="${NAMESPACE}" --ignore-not-found
-kubectl apply --namespace="${NAMESPACE}" -f - <<MANIFEST
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: calypso-db-init
-  namespace: ${NAMESPACE}
-  labels:
-    app: calypso-db-init
-spec:
-  ttlSecondsAfterFinished: 3600
-  template:
-    metadata:
-      labels:
-        app: calypso-db-init
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: db-init
-          image: ${IMAGE}
-          imagePullPolicy: IfNotPresent
-          command: ['bun', 'run', 'packages/db/init-remote.ts']
-          env:
-            - name: ADMIN_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: ADMIN_DATABASE_URL
-            - name: APP_RW_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: APP_RW_PASSWORD
-            - name: AUDIT_W_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: AUDIT_W_PASSWORD
-            - name: ANALYTICS_W_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: ANALYTICS_W_PASSWORD
-            - name: AGENT_CODING_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: AGENT_CODING_PASSWORD
-            - name: AGENT_ANALYSIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-db-init-secret
-                  key: AGENT_ANALYSIS_PASSWORD
-          resources:
-            requests:
-              cpu: '50m'
-              memory: '64Mi'
-            limits:
-              cpu: '200m'
-              memory: '256Mi'
-      imagePullSecrets:
-        - name: ghcr-pull-secret
-MANIFEST
-
-echo "    Waiting for calypso-db-init job to complete..."
-kubectl wait --for=condition=complete job/calypso-db-init --namespace="${NAMESPACE}" --timeout=300s
-
-kubectl delete secret calypso-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
-echo "    calypso-db-init-secret deleted."
-
-kubectl delete deployment calypso-app --namespace="${NAMESPACE}" --ignore-not-found
-kubectl apply --namespace="${NAMESPACE}" -f - <<MANIFEST
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: calypso-app
-  namespace: ${NAMESPACE}
-  labels:
-    app: calypso-app
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: calypso-app
-  template:
-    metadata:
-      labels:
-        app: calypso-app
-    spec:
-      imagePullSecrets:
-        - name: ghcr-pull-secret
-      containers:
-        - name: app
-          image: ${IMAGE}
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 31415
-          env:
-            - name: PORT
-              value: '31415'
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: DATABASE_URL
-            - name: AUDIT_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: AUDIT_DATABASE_URL
-            - name: ANALYTICS_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: ANALYTICS_DATABASE_URL
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: JWT_SECRET
-            - name: ENCRYPTION_MASTER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: ENCRYPTION_MASTER_KEY
-            - name: SUBSTACK_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: SUBSTACK_API_KEY
-                  optional: true
-            - name: BLOOMBERG_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: BLOOMBERG_API_KEY
-                  optional: true
-            - name: YAHOO_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: calypso-api-secrets
-                  key: YAHOO_API_KEY
-                  optional: true
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 31415
-            initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 31415
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          resources:
-            requests:
-              cpu: '100m'
-              memory: '128Mi'
-            limits:
-              cpu: '500m'
-              memory: '512Mi'
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: calypso-app
-  namespace: ${NAMESPACE}
-  labels:
-    app: calypso-app
-spec:
-  selector:
-    app: calypso-app
-  ports:
-    - name: http
-      protocol: TCP
-      port: 80
-      targetPort: 31415
-  type: ClusterIP
-MANIFEST
-
-echo "    calypso-app deployment applied."
-REMOTESCRIPT
-
-echo "    Application manifests complete."
-
-# ── Phase 7: Health check ─────────────────────────────────────────────────────
+# ── Phase 7: Bootstrap summary ────────────────────────────────────────────────
 
 echo ""
-echo "==> [7/8] Polling /healthz until app responds"
-
-HEALTH_OK=false
-for i in $(seq 1 30); do
-  STATUS=$(_ssh_superfield "curl -sf http://localhost:31415/healthz -o /dev/null -w '%{http_code}'" 2>/dev/null || echo "000")
-  if [[ "${STATUS}" == "200" ]]; then
-    echo "    App is healthy (attempt ${i})."
-    HEALTH_OK=true
-    break
-  fi
-  echo "    Attempt ${i}/30: HTTP ${STATUS} — waiting..."
-  sleep 10
-done
-
-if [[ "${HEALTH_OK}" != "true" ]]; then
-  echo "error: health check failed after 30 attempts" >&2
-  exit 4
-fi
-
-# ── Phase 8: Bootstrap summary ────────────────────────────────────────────────
-
-echo ""
-echo "==> [8/8] Bootstrap summary — GitHub Actions secrets to configure"
+echo "==> [7/7] Bootstrap summary — GitHub Actions secrets to configure"
 
 # Extract k3s CA cert
 K3S_CA_CERT=$(_ssh_superfield bash <<'SSHSCRIPT'
@@ -1882,9 +1666,12 @@ echo "==> Provisioning complete!"
 echo "    Host        : ${HOST}"
 echo "    Environment : ${ENV_LABEL}"
 echo "    Namespace   : ${NAMESPACE}"
-echo "    Image       : ${IMAGE}"
 echo ""
 echo "    Admin access: ssh superfield@${HOST}"
 echo "    Deploys:      trigger .github/workflows/deploy.yml via workflow_dispatch"
 echo "    Runbook:      docs/host-init-script.md"
 echo ""
+
+
+# vim: ft=sh sw=2 ts=2 et
+
