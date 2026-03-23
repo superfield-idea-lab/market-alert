@@ -14,7 +14,7 @@ import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { createApiKey, listApiKeys, deleteApiKey } from 'db/api-keys';
 import { emitAuditEvent } from '../policies/audit-service';
 
-function isSuperuser(userId: string): boolean {
+export function isSuperuser(userId: string): boolean {
   const superuserId = process.env.SUPERUSER_ID;
   if (!superuserId) return false;
   return userId === superuserId;
