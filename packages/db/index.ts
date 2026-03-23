@@ -1,6 +1,7 @@
 import postgres from 'postgres';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import { buildSslOptions } from './ssl';
 
 export { buildSslOptions } from './ssl';
@@ -59,6 +60,26 @@ export interface MigrateAuditOptions {
   databaseUrl?: string;
 }
 
+export function resolveSchemaSqlPath(
+  moduleUrl: string = import.meta.url,
+  cwd: string = process.cwd(),
+): string {
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    resolve(moduleDir, 'schema.sql'),
+    resolve(moduleDir, '../packages/db/schema.sql'),
+    resolve(cwd, 'packages/db/schema.sql'),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 /**
  * Split a SQL string into individual statements on top-level semicolons,
  * respecting dollar-quoted blocks ($$...$$) so PL/pgSQL function bodies
@@ -115,7 +136,7 @@ export function splitSqlStatements(sql: string): string[] {
  */
 export async function migrate(options: MigrateOptions = {}) {
   console.log('[db] Initializing PostgreSQL database schema...');
-  const schemaSql = readFileSync(fileURLToPath(new URL('./schema.sql', import.meta.url)), 'utf-8');
+  const schemaSql = readFileSync(resolveSchemaSqlPath(), 'utf-8');
   const databaseUrl = options.databaseUrl ?? databaseUrls.app;
   const migrationSql =
     options.databaseUrl === undefined
