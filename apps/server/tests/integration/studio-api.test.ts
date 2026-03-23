@@ -20,6 +20,7 @@ let studioBranch = '';
 let studioFilePath = '';
 let sessionDir = '';
 let changesPath = '';
+let authCookie = '';
 
 beforeAll(async () => {
   const clone = spawnGitSync(['clone', REPO_ROOT, CLONE_ROOT], REPO_ROOT);
@@ -67,6 +68,23 @@ beforeAll(async () => {
   });
 
   await waitForServer(BASE);
+
+  // Register a test user and capture the session cookie for auth-gated studio routes
+  const username = `studio_test_${Date.now()}`;
+  const registerRes = await fetch(`${BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password: 'testpass123' }),
+  });
+  const setCookies = registerRes.headers.getSetCookie
+    ? registerRes.headers.getSetCookie()
+    : [registerRes.headers.get('set-cookie') ?? ''];
+  const cookiePairs: string[] = [];
+  for (const raw of setCookies) {
+    const pair = raw.split(';')[0].trim();
+    if (pair) cookiePairs.push(pair);
+  }
+  authCookie = cookiePairs.join('; ');
 }, 60_000);
 
 afterAll(async () => {
@@ -93,17 +111,54 @@ beforeEach(() => {
 });
 
 describe('Studio API integration', () => {
-  test('GET /studio/status returns inactive when .studio is absent', async () => {
+  // --- Unauthenticated 401 checks ---
+
+  test('POST /studio/start returns 401 for unauthenticated request', async () => {
+    const res = await fetch(`${BASE}/studio/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  test('POST /studio/chat returns 401 for unauthenticated request', async () => {
+    const res = await fetch(`${BASE}/studio/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Please adjust the header.' }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  test('GET /studio/status returns 401 for unauthenticated request', async () => {
     const res = await fetch(`${BASE}/studio/status`);
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  // --- Authenticated requests ---
+
+  test('GET /studio/status returns inactive when .studio is absent (authenticated)', async () => {
+    const res = await fetch(`${BASE}/studio/status`, {
+      headers: { Cookie: authCookie },
+    });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ active: false });
   });
 
-  test('GET /studio/status returns session metadata when .studio is present', async () => {
+  test('GET /studio/status returns session metadata when .studio is present (authenticated)', async () => {
     writeStudioFile();
 
-    const res = await fetch(`${BASE}/studio/status`);
+    const res = await fetch(`${BASE}/studio/status`, {
+      headers: { Cookie: authCookie },
+    });
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -113,10 +168,10 @@ describe('Studio API integration', () => {
     expect(Array.isArray(body.commits)).toBe(true);
   });
 
-  test('POST /studio/chat returns 403 when studio mode is inactive', async () => {
+  test('POST /studio/chat returns 403 when studio mode is inactive (authenticated)', async () => {
     const res = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({ message: 'Please adjust the header.' }),
     });
 
@@ -124,12 +179,12 @@ describe('Studio API integration', () => {
     expect(await res.json()).toEqual({ error: 'Studio mode is not active' });
   });
 
-  test('POST /studio/chat returns 400 when message is missing', async () => {
+  test('POST /studio/chat returns 400 when message is missing (authenticated)', async () => {
     writeStudioFile();
 
     const res = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({}),
     });
 
@@ -137,7 +192,7 @@ describe('Studio API integration', () => {
     expect(await res.json()).toEqual({ error: 'message required' });
   });
 
-  test('POST /studio/chat preserves prior turns across a multi-turn session', async () => {
+  test('POST /studio/chat preserves prior turns across a multi-turn session (authenticated)', async () => {
     writeStudioFile();
 
     const firstMessage = 'Please group dispatches by status.';
@@ -145,14 +200,14 @@ describe('Studio API integration', () => {
 
     const firstRes = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({ message: firstMessage }),
     });
     expect(firstRes.status).toBe(200);
 
     const secondRes = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({ message: secondMessage }),
     });
     expect(secondRes.status).toBe(200);
@@ -163,7 +218,7 @@ describe('Studio API integration', () => {
     expect(prompt).toContain(`Partner: ${secondMessage}`);
   });
 
-  test('POST /studio/reset clears prior session context', async () => {
+  test('POST /studio/reset clears prior session context (authenticated)', async () => {
     writeStudioFile();
 
     const firstMessage = 'Add a priority badge to each card.';
@@ -171,13 +226,14 @@ describe('Studio API integration', () => {
 
     const firstRes = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({ message: firstMessage }),
     });
     expect(firstRes.status).toBe(200);
 
     const resetRes = await fetch(`${BASE}/studio/reset`, {
       method: 'POST',
+      headers: { Cookie: authCookie },
     });
     expect(resetRes.status).toBe(200);
 
@@ -185,7 +241,7 @@ describe('Studio API integration', () => {
 
     const secondRes = await fetch(`${BASE}/studio/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({ message: secondMessage }),
     });
     expect(secondRes.status).toBe(200);
@@ -196,12 +252,12 @@ describe('Studio API integration', () => {
     expect(prompt).toContain(`Partner: ${secondMessage}`);
   });
 
-  test('POST /studio/rollback returns 400 when hash is missing', async () => {
+  test('POST /studio/rollback returns 400 when hash is missing (authenticated)', async () => {
     writeStudioFile();
 
     const res = await fetch(`${BASE}/studio/rollback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
       body: JSON.stringify({}),
     });
 
