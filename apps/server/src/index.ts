@@ -17,7 +17,7 @@ import { handleStudioRequest } from './api/studio';
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
 import { handleTasksQueueRequest } from './api/tasks-queue';
-import { startStaleClaimRecovery } from 'db/task-queue';
+import { startStaleClaimRecovery } from './policies/stale-claim-recovery-service';
 import { websocketHandler } from './websocket';
 
 // Starter behavior:
