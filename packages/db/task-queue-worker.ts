@@ -62,7 +62,7 @@ export async function createWorkerWaker(
   const pending: Array<() => void> = [];
 
   // Set up the LISTEN connection. The promise resolves once LISTEN is active.
-  const listenMeta = await listenSql.listen(channel, (_: string) => {
+  const listenMeta = await listenSql.listen(channel, () => {
     // Wake every outstanding waitForWork() call when a notification arrives.
     const toWake = pending.splice(0);
     for (const resolve of toWake) resolve();
