@@ -201,13 +201,22 @@ export async function handleAuthRequest(
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          // Starter cookie settings are intentionally minimal. The blueprint
-          // target is HTTP-only secure cookies with stricter session controls.
         },
       });
+      // SameSite=Strict prevents the cookie from being sent on any cross-site
+      // request, including top-level navigations. This is the correct posture for
+      // a session-authentication cookie because it eliminates CSRF via cross-site
+      // top-level navigation flows that SameSite=Lax would otherwise allow.
+      //
+      // If OAuth or social-login redirect flows are added in the future, the
+      // redirect-landing endpoint must issue a *new* session cookie after
+      // validating the OAuth state parameter on the server side. The OAuth state
+      // callback itself should use a short-lived, purpose-specific cookie with
+      // SameSite=Lax scoped only to that flow — the primary session cookie must
+      // remain SameSite=Strict.
       res.headers.append(
         'Set-Cookie',
-        `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
+        `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`,
       );
       res.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
       return res;
@@ -303,9 +312,11 @@ export async function handleAuthRequest(
           'Content-Type': 'application/json',
         },
       });
+      // SameSite=Strict — see the register endpoint comment above for the full
+      // rationale and guidance for future OAuth flows.
       res.headers.append(
         'Set-Cookie',
-        `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
+        `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`,
       );
       res.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
       return res;
