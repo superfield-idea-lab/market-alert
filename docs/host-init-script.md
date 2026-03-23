@@ -12,14 +12,17 @@ a short-lived SSH tunnel. The host never needs an open k3s API port.
 
 ## Security model
 
-- A dedicated `superfield` OS user owns all k3s data and the k3s daemon.
+- k3s runs as a root system service. `superfield` has a copy of the kubeconfig
+  at `/home/superfield/.kube/config` for operator convenience.
 - `superfield` has no sudo rights and no password login. Access is via
   SSH public key only.
-- The k3s API binds to `localhost:6443` only. ufw does NOT open port 6443.
+- ufw allows only port 22 (SSH) and 31415 (app NodePort). Port 6443 is not
+  opened — CI/CD reaches it via an SSH tunnel.
 - CI/CD connects via an SSH tunnel through `superfield@<host>`.
 - ServiceAccount tokens are short-lived (1h TTL via TokenRequest API).
   No static kubeconfig is stored as a GitHub secret.
-- Root SSH login is disabled after bootstrap (opt-out via `--keep-root-ssh`).
+- Root SSH login remains enabled with key-based authentication only
+  (`PermitRootLogin prohibit-password`). Password root login is disabled.
 
 ## Initial provisioning
 
@@ -29,12 +32,18 @@ Run from your local machine (not on the host):
 scripts/init-host.sh <host> <env> --admin-key ~/.ssh/id_ed25519.pub
 ```
 
+When run in an interactive terminal, the script will pause before each major
+step and ask for confirmation before proceeding. For non-interactive use (e.g.,
+in automation scripts), it will run without prompts.
+
 Where:
 
 - `<host>` — IP address or hostname of the target server
 - `<env>` — environment label (`demo` or `prod`); namespace will be `calypso-<env>`
 - `--admin-key` — path to a public key file to install in `superfield`'s
   `authorized_keys`. Repeat for multiple admin keys.
+- `--root-key` — (Optional) path to a private key to use for the initial root
+  SSH connection. Defaults to your system's configured SSH key.
 
 ### Accepted key types
 
@@ -60,30 +69,33 @@ ssh-keygen -t ed25519 -C "your-name@example.com" -f ~/.ssh/calypso_admin
    - Writes supplied public key(s) to `/home/superfield/.ssh/authorized_keys`
      with `600` permissions
    - Validates each key's type and strength; rejects weak keys
-   - Hardens sshd globally: `PasswordAuthentication no`, `MaxAuthTries 3`,
-     `LoginGraceTime 30`, `AllowUsers superfield`
+   - Hardens sshd globally: `PubkeyAuthentication yes`, `PasswordAuthentication no`,
+     `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `LoginGraceTime 30`,
+     `AllowUsers superfield root`
 
 2.  **CIS Benchmark Level 1 host hardening:**
    - Disables unused services: `avahi-daemon`, `cups`, `postfix` (if present)
    - Kernel sysctl: disables IP source routing, enables SYN cookies,
-     restricts core dumps
+     restricts core dumps, disables AppArmor `userns_create` restriction
+     (required for k3s on Ubuntu 24.04+)
    - Enables `unattended-upgrades` for automatic security patches
 
-3.  **Root SSH lockdown:**
-   - Sets `PermitRootLogin prohibit-password` in sshd_config to allow key-based
-     root login while disabling password-based root login.
-   - Pass `--keep-root-ssh` to skip (prints an explicit warning)
+3.  **SSH hardening:**
+   - Sets `PermitRootLogin prohibit-password` — key-based root login stays
+     enabled; password root login disabled.
 
-4.  **k3s installation (systemd, User=superfield):**
-   - Installs k3s as a systemd service with `User=superfield`
-   - Data directory and kubeconfig owned by `superfield`
-   - API server binds to `127.0.0.1:6443` only
-   - ufw does NOT open port 6443
+4.  **k3s installation (root system service):**
+   - Removes any stale drop-ins from prior rootless attempts
+   - Installs k3s as a root system service (default systemd unit)
+   - Copies kubeconfig to `/home/superfield/.kube/config` (mode 600)
+   - ufw allows port 22 and 31415 only — port 6443 not opened externally
 
 5.  **Kubernetes ServiceAccount and RBAC:**
    - Creates namespace `calypso-<env>`
    - Creates ServiceAccount `calypso-deployer` in the namespace
-   - Creates Role with RBAC limited to `patch` on `deployments` in namespace
+   - Creates Role with permissions: `get/list/watch/patch` on `deployments`,
+     `create/get/list/watch/delete` on `jobs`, `get/list/watch` on `pods`
+     and `pods/log`
    - Binds role to ServiceAccount
 
 6.  **Application secrets:**
@@ -240,41 +252,42 @@ Tokens have a 1h TTL. Each deploy run generates a fresh token. If you see
 regenerated automatically.
 
 **k3s API connection refused:**
-Verify k3s is running as superfield:
+Verify k3s is running:
 
 ```bash
-ssh superfield@<host> systemctl status k3s
-ssh superfield@<host> "ss -tlnp | grep 6443"
+ssh root@<host> systemctl status k3s
+ssh root@<host> "ss -tlnp | grep 6443"
 ```
 
-The API should show `127.0.0.1:6443`.
+The API will show `0.0.0.0:6443` (all interfaces) — port 6443 is blocked by
+ufw externally; the SSH tunnel forwards it via loopback.
 
-## k3s and superfield ownership verification
+## k3s and superfield verification
 
 After provisioning, verify the setup:
 
 ```bash
-# k3s service runs as superfield
-ssh superfield@<host> systemctl status k3s
-# Should show: User=superfield in the service unit
+# k3s service runs as root (system service)
+ssh root@<host> systemctl status k3s
+# Should show: active (running), no User= override
 
-# Data directory owned by superfield
-ssh superfield@<host> ls -la /home/superfield
-
-# API bound to localhost only
-ssh superfield@<host> "ss -tlnp | grep 6443"
-# Should show: 127.0.0.1:6443 only
+# superfield has kubeconfig copy
+ssh superfield@<host> kubectl get nodes
+# Should list the node as Ready
 
 # superfield has no sudo
 ssh superfield@<host> sudo -l
 # Should return: permission denied
 
 # Account is locked (password login disabled)
-ssh superfield@<host> passwd --status superfield
+ssh root@<host> passwd --status superfield
 # Should show: L (locked)
 
 # sshd hardening
-ssh superfield@<host> sshd -T | grep -E 'passwordauthentication|maxauthtries|logingracetime|allowusers'
+ssh root@<host> sshd -T | grep -E 'passwordauthentication|permitrootlogin|maxauthtries|logingracetime|allowusers'
+
+# ufw: only 22 and 31415 open
+ssh root@<host> ufw status
 ```
 
 ## CIS hardening verification
@@ -299,7 +312,7 @@ If provisioning fails mid-way:
 
 1. Identify the phase that failed from the error output.
 2. Re-run `scripts/init-host.sh` — all phases are idempotent.
-3. If k3s is in a bad state: `ssh superfield@<host> sudo k3s-uninstall.sh` then re-run.
+3. If k3s is in a bad state: `ssh root@<host> k3s-uninstall.sh` then re-run.
 4. If the `superfield` account is corrupted: SSH as root (if root login is still
    enabled) and run `userdel -r superfield` then re-run.
 
@@ -312,7 +325,7 @@ For catastrophic failures, re-image the host and start fresh.
 | `ssh: connect to host ... port 22: Connection refused` | Host not reachable or SSH not running | Check host network / security group            |
 | `Permission denied (publickey)`                        | Wrong key file                        | Verify `--admin-key` matches the installed key |
 | `RSA key is too weak`                                  | Key < 3072 bits                       | Generate Ed25519: `ssh-keygen -t ed25519`      |
-| `k3s not starting`                                     | Port conflict or resource limit       | Check `journalctl -u k3s` on host              |
+| `k3s not starting`                                     | AppArmor userns restriction or stale drop-in | Check `journalctl -u k3s`; re-run script  |
 | `kubeconfig: permission denied`                        | File mode wrong                       | `chmod 600 /home/superfield/.kube/config`      |
 | `403 Forbidden` on deploy                              | ServiceAccount RBAC too narrow        | Verify Role binds to correct SA and namespace  |
 | `Token expired`                                        | 1h TTL elapsed                        | Trigger new workflow run                       |
