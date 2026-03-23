@@ -21,7 +21,7 @@ import { handleAuthRequest } from '../../src/api/auth';
  */
 function makeAppState(overrides: { sqlResult?: unknown[] } = {}) {
   const rows = overrides.sqlResult ?? [];
-  const sql = vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]) =>
+  const sql = vi.fn(() =>
     Promise.resolve(rows),
   ) as unknown as import('../../src/index').AppState['sql'];
   (sql as unknown as { json: (v: unknown) => unknown }).json = (v: unknown) => v;
@@ -104,9 +104,7 @@ describe('auth cookie SameSite attribute', () => {
 
   test('register response Set-Cookie header contains SameSite=Strict', async () => {
     // First SELECT returns no existing user; INSERT and subsequent calls return []
-    let callCount = 0;
-    const sql = vi.fn((_strings: TemplateStringsArray) => {
-      callCount++;
+    const sql = vi.fn(() => {
       return Promise.resolve([]);
     }) as unknown as import('../../src/index').AppState['sql'];
     (sql as unknown as { json: (v: unknown) => unknown }).json = (v: unknown) => v;
