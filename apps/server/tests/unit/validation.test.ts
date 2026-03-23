@@ -144,4 +144,21 @@ describe('getCompiledValidator() — module-level caching', () => {
       expect(result.errors[0]).toHaveProperty('schemaPath');
     }
   });
+
+  test('performance smoke: 1000 cached validate() calls complete within 100ms', () => {
+    // Warm up the cache (first call compiles the schema)
+    validate(createTaskSchema, { name: 'warmup' });
+
+    const ITERATIONS = 1000;
+    const start = performance.now();
+    for (let i = 0; i < ITERATIONS; i++) {
+      validate(createTaskSchema, { name: `task-${i}` });
+    }
+    const elapsed = performance.now() - start;
+
+    // 1000 cached validation calls must complete in under 100ms.
+    // AJV compilation only happens once (on warmup); each subsequent call
+    // reuses the compiled ValidateFunction — no schema traversal overhead.
+    expect(elapsed).toBeLessThan(100);
+  });
 });
