@@ -4,7 +4,7 @@
 
 Studio Mode is a local developer environment where Claude CLI is accessible through a browser chat window while the live Calypso application runs alongside it in an embedded iframe. Changes made by Claude are applied by hot-swapping compiled binaries into a running k3s cluster — the same cluster topology used in demo, staging, and production — without using a Vite dev server.
 
-Studio Mode is started from the command line with `bun run studio` and serves everything from a single host.
+Studio Mode is started from the command line with `bun run studio` and serves everything from a single host. It is single-user by design: one developer, one browser, one Claude subprocess. There is no authentication, no session persistence, and no multi-tenancy. Chat history lives in server memory and is lost when the server stops.
 
 ---
 
@@ -41,7 +41,7 @@ The following must be present on the studio host before `bun run studio` is invo
 
 - The Calypso git repository (working tree, with submodule initialized)
 - `bun` and `k3s` (or `k3d`) installed and accessible on `PATH`
-- Docker or containerd available for container image builds
+- `kubectl` accessible on `PATH`
 - A running or startable k3s cluster
 
 Studio Mode does not install dependencies. If prerequisites are absent the start script exits with a clear error.
@@ -53,47 +53,49 @@ Studio Mode does not install dependencies. If prerequisites are absent the start
 Three things run on the host simultaneously:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Host                                                        │
-│                                                              │
-│  ┌─────────────────────────┐   ┌──────────────────────────┐ │
-│  │  Studio Server          │   │  k3s Cluster             │ │
-│  │  (bun, single process)  │   │                          │ │
-│  │                         │   │  ┌──────┐  ┌──────────┐  │ │
-│  │  • browser interface    │   │  │  db  │  │   api    │  │ │
-│  │  • Claude CLI hooks     │◄──┼──│      │  │          │  │ │
-│  │  • response logging     │   │  └──────┘  └──────────┘  │ │
-│  │  • hot-swap command     │──►│  ┌──────────┐  ┌───────┐  │ │
-│  │                         │   │  │  web     │  │agents │  │ │
-│  └─────────────────────────┘   │  │  static  │  │       │  │ │
-│                                │  └──────────┘  └───────┘  │ │
-│                                └──────────────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  Host (single exposed port: STUDIO_PORT)                         │
+│                                                                  │
+│  ┌───────────────────────────┐   ┌────────────────────────────┐ │
+│  │  Studio Server            │   │  k3s Cluster               │ │
+│  │  (bun, 0.0.0.0:7000)     │   │                            │ │
+│  │                           │   │  ┌──────┐  ┌────────────┐ │ │
+│  │  • browser UI  (/*)      │   │  │  db  │  │   api      │ │ │
+│  │  • app proxy   (/app/)   │──►│  │      │  │            │ │ │
+│  │  • api proxy   (/api/)   │──►│  └──────┘  └────────────┘ │ │
+│  │  • Claude subprocess      │   │  ┌────────────┐  ┌──────┐ │ │
+│  │  • kubectl subprocesses   │──►│  │  web       │  │agents│ │ │
+│  │  • SSE cluster events     │   │  │  (static)  │  │      │ │ │
+│  └───────────────────────────┘   │  └────────────┘  └──────┘ │ │
+│                                  └────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Studio Server
 
-A single Bun process that:
+A single Bun process that is the sole owner of both the Claude CLI subprocess and all `kubectl` subprocesses for the duration of a session. Nothing else on the host should invoke either `claude` or `kubectl` against the studio cluster while the server is running.
 
-- Serves the browser interface (chat panel + iframe shell)
-- Provides a Claude CLI hook endpoint that captures `claude` subprocess output and streams it to the browser
-- Owns all `kubectl` subprocesses — every cluster command (apply, rollout, cp, logs, status) is spawned by the studio server so its stdout and stderr are captured and made available to the browser and log files
-- Maintains a live view of cluster state by polling deployment and pod status on a short interval and pushing updates to connected browsers via server-sent events
+Responsibilities:
 
-The studio server is the single process responsible for all cluster interaction. Nothing else on the host should invoke `kubectl` for the studio cluster during an active session. This ownership ensures that cluster events — rollouts, restarts, pod crashes, log output — are always captured and never lost to a fire-and-forget shell call.
+- Serves the browser interface (chat panel + iframe shell) on `0.0.0.0:STUDIO_PORT`
+- Spawns and owns a single `claude` subprocess, manages conversation state across turns, and streams Claude's output to the browser
+- Owns all `kubectl` subprocesses — every cluster command (apply, rollout, delete pod, logs, port-forward) is spawned by the studio server so stdout and stderr are captured and surfaced to the browser and log files
+- Maintains a live view of cluster state via `kubectl get pods --watch` as a long-lived subprocess, pushing state transitions to the browser via server-sent events
+
+The server binds on all interfaces (`0.0.0.0`) because development happens on a networked host. There is no application-level authentication. Security is a network-perimeter concern — the host is assumed to be behind a firewall, VPN, or private network.
 
 ### k3s Cluster
 
 The cluster topology mirrors demo, staging, and production exactly: isolated containers for each service with the same networking and volume configuration. Services:
 
-| Service  | Description                                              |
-| -------- | -------------------------------------------------------- |
-| `db`     | Postgres instance, seeded from the repo's canonical seed |
-| `api`    | The Calypso API server                                   |
-| `web`    | Static web assets served by a lightweight HTTP server    |
-| `agents` | Background agent workers                                 |
+| Service  | Description                                                   |
+| -------- | ------------------------------------------------------------- |
+| `db`     | Postgres instance, seeded from the repo's canonical seed      |
+| `api`    | The Calypso API server                                        |
+| `web`    | Static web assets served by a lightweight HTTP server         |
+| `agents` | Background task-queue workers (same as production agent pool) |
 
-The difference from other environments: the cluster **does not pull finalized images from the GitHub container registry**. Instead, the studio server builds binaries locally from the working tree and injects them into running containers, then restarts affected services.
+The difference from other environments: the cluster **does not pull finalized images from the GitHub container registry**. Instead, the studio kustomize overlay mounts the host's working tree into each container at a predictable path. The studio server builds binaries locally and writes them to the mounted volume. Container processes are then restarted to pick up the new binary — no image rebuild or registry round-trip required.
 
 ---
 
@@ -108,16 +110,18 @@ The browser connects to the studio server. The UI has two panels:
 │  │  Claude Chat    │  │  Calypso App        │   │
 │  │  (sidebar)      │  │  (iframe)           │   │
 │  │                 │  │                     │   │
-│  │  [messages]     │  │  localhost:WEBAPP   │   │
-│  │                 │  │                     │   │
+│  │  [messages]     │  │  host:STUDIO_PORT/  │   │
+│  │                 │  │       app/          │   │
 │  │  [input]        │  │                     │   │
 │  └─────────────────┘  └─────────────────────┘   │
 └──────────────────────────────────────────────────┘
 ```
 
-**Left panel — Claude Chat**: Streams Claude CLI output in real time. The user types prompts here. The studio server invokes `claude` as a subprocess with the appropriate flags and pipes stdout back to the browser via server-sent events.
+**Left panel — Claude Chat**: Streams Claude CLI output in real time. The user types prompts here. The studio server manages conversation history in memory, constructs a full prompt for each turn, and streams Claude's response back to the browser via server-sent events.
 
-**Right panel — Calypso App (iframe)**: Points at the `web` service running in the k3s cluster. After a hot-swap the iframe displays a brief overlay:
+**Right panel — Calypso App (iframe)**: The studio server reverse-proxies the cluster's `web` and `api` services so the host only needs to expose a single port. The iframe points at `STUDIO_PORT/app/` which the studio server forwards to the `web` ClusterIP service inside k3s (via a `kubectl port-forward` subprocess it owns). API requests from the app are proxied similarly under `STUDIO_PORT/api/`. This avoids exposing NodePorts or additional listening ports on the host.
+
+After a hot-swap the iframe displays a brief overlay:
 
 ```
 ⟳  Reloading — cluster is restarting…
@@ -131,44 +135,55 @@ The overlay disappears once the studio server confirms the cluster is healthy ag
 
 When Claude makes a code change and the turn completes:
 
-1. The studio server receives a hot-swap trigger (via a Claude CLI post-turn hook or manually from the browser UI).
-2. The studio server determines which services are affected from `git diff --name-only`.
-3. The studio server builds the affected binary or static asset bundle from the working tree. Build stdout and stderr are captured and logged.
-4. The studio server spawns `kubectl cp` to copy the binary into the running container. All subprocess output is captured.
-5. The studio server spawns a rolling restart (`kubectl rollout restart deployment/<name>`) for each affected deployment. All subprocess output is captured.
-6. The browser iframe shows the reloading overlay and the chat panel shows a live cluster status stream.
-7. The studio server polls `kubectl rollout status` — as a owned subprocess — until all affected deployments report healthy. Poll output is streamed to the browser.
-8. The overlay clears and the iframe reloads.
+1. The studio server receives a hot-swap trigger (via the post-turn hook or manually from the browser UI).
+2. The studio server runs `git diff --name-only` to determine which services are affected.
+3. If migration files changed (`packages/core/drizzle/` or equivalent), the studio server runs the migration command (`bun run db:migrate`) before proceeding. Migration output is captured and streamed to the browser.
+4. The studio server builds the affected binary or static asset bundle from the working tree. Build stdout and stderr are captured and streamed to the browser.
+5. The built artifact is already visible inside the container via the shared volume mount — no copy step is needed.
+6. The studio server deletes the affected pods (`kubectl delete pod -l app=<service>`). The deployment controller recreates them, and the new process starts from the updated binary on the volume.
+7. The browser iframe shows the reloading overlay and the chat panel shows pod status transitions in real time.
+8. Once all affected pods report Ready, the overlay clears and the iframe reloads.
 
-Only the services whose source files changed are restarted. If only `apps/web` changed, only the `web` deployment restarts. If `apps/server` changed, only `api` restarts. If a database migration ran, `api` restarts after the migration completes.
+Only the services whose source files changed are restarted. If only `apps/web` changed, only the `web` pod is cycled. If `apps/server` changed, only `api` is cycled.
+
+### Error Handling
+
+- **Build failure (step 4):** The build error is streamed to the browser chat panel. The cluster is untouched — the previous binary remains running. No automatic retry. The developer reads the error and prompts Claude to fix it.
+- **Migration failure (step 3):** The migration error is streamed to the browser. Pod cycling does not proceed. The developer decides whether to fix the migration or roll it back.
+- **CrashLoopBackOff after restart:** The cluster status stream surfaces the crash loop and container logs in the browser. There is no automatic rollback — the developer reads the logs and prompts Claude to fix the issue or reverts the change manually.
+- **Pod restart timeout:** If a pod does not reach Ready within 60 seconds, the studio server logs a timeout warning to the browser. The overlay remains visible. The developer investigates via the cluster status stream.
 
 ### Cluster Status Stream
 
-The studio server maintains a continuous view of the cluster by running `kubectl get pods --watch` as a long-lived subprocess. Pod state transitions (Pending → Running → Ready, or CrashLoopBackOff, etc.) are parsed from its output and pushed to the browser via a server-sent events endpoint (`GET /studio/cluster/events`). The browser chat panel displays an unobtrusive status indicator showing whether all pods are healthy, restarting, or degraded.
+The studio server runs `kubectl get pods --watch` as a long-lived subprocess for the lifetime of the session. Pod state transitions (Pending, Running, Ready, CrashLoopBackOff, Error, etc.) are parsed and pushed to the browser via a server-sent events endpoint (`GET /studio/cluster/events`). The chat panel displays a persistent status indicator: healthy, restarting, or degraded.
 
 ---
 
 ## Claude CLI Integration
 
-The studio server invokes `claude` as a subprocess:
+The studio server is the sole owner of Claude for the duration of the session. It manages conversation history in memory, constructs a prompt for each turn that includes the full conversation context, and invokes Claude as a subprocess:
 
 ```
 claude --dangerously-skip-permissions -p "<prompt>"
 ```
 
-Claude's stdout is streamed to the browser chat panel in real time.
+Each turn is a single-shot invocation. The studio server accumulates the conversation (user messages + Claude responses) and replays the full history as context on every turn. Claude's stdout is streamed to the browser chat panel in real time via server-sent events.
+
+Conversation history is ephemeral. It lives in the studio server's process memory and is lost when the server stops. There is no persistence layer and no session resume.
 
 ### Hooks
 
 The studio server registers a post-turn hook with Claude CLI. After each turn completes, the hook:
 
-1. Inspects which files changed (via `git diff --name-only`).
-2. Determines which cluster services are affected.
+1. Snapshots `git diff --name-only` against the pre-turn state.
+2. Determines which cluster services are affected by the changed files.
 3. Triggers the hot-swap flow for those services.
+
+The hook runs synchronously — Claude's next turn does not begin until the hot-swap completes (or fails). This ensures the developer sees the result of each change before prompting again.
 
 ### Logging
 
-All Claude CLI invocations and responses are logged to `logs/studio/YYYY-MM-DD.jsonl` on the host. Each log entry includes:
+All Claude CLI invocations and responses are logged to `STUDIO_LOG_DIR/YYYY-MM-DD.jsonl` on the host. The default log directory is `../studio-logs/` relative to the repository root. Each log entry includes:
 
 - ISO timestamp
 - The full prompt sent
@@ -176,19 +191,19 @@ All Claude CLI invocations and responses are logged to `logs/studio/YYYY-MM-DD.j
 - Files changed in the turn
 - Services restarted and restart duration
 
-Logs are append-only and written outside the git working tree by default (`../studio-logs/` relative to the repo root, configurable via `STUDIO_LOG_DIR`).
+Logs are append-only. The log directory is outside the git working tree and is not committed.
 
 ---
 
 ## Cluster Isomorphism
 
-The k3s cluster used in Studio Mode is defined by the same Kubernetes manifests used for demo, staging, and production. The studio-specific override is a `kustomize` overlay at `k8s/overlays/studio/` that:
+The k3s cluster used in Studio Mode is defined by the same Kubernetes manifests used for demo, staging, and production. The studio-specific override is a kustomize overlay that lives in the studio submodule at `studio/k8s/overlay/`. It patches the base manifests to:
 
-- Sets image references to local image names rather than registry tags
-- Mounts the repo's working tree into containers at a predictable path for hot-swap access
-- Configures `imagePullPolicy: Never` so k3s uses locally loaded images
+- Mount the host's working tree (build output directories) into each container as a volume so the running process can read locally-built binaries without an image rebuild
+- Override each container's command to start from the binary on the mounted volume rather than the baked-in image binary
+- Use base images that contain only the runtime (no application binary), since the binary comes from the volume
 
-No other differences. Service names, port assignments, secrets structure, and volume layout are identical to the other overlays.
+No other differences. Service names, networking, secrets structure, and the number and kind of deployments are identical to the other environment overlays.
 
 ---
 
@@ -200,20 +215,21 @@ bun run studio
 
 The start script (`scripts/studio-start.ts`) performs these steps in order:
 
-1. Checks prerequisites (`bun`, `k3s`, `kubectl`, `docker` or `nerdctl`).
-2. Verifies the working tree is on a clean-enough state to build (warns on uncommitted changes, does not block).
-3. Builds all service images from the working tree.
-4. Loads images into the k3s image store.
-5. Applies the studio kustomize overlay (`kubectl apply -k k8s/overlays/studio`).
-6. Waits for all deployments to become healthy.
-7. Starts the studio server.
-8. Prints the studio URL and opens the browser if `STUDIO_OPEN_BROWSER` is set.
+1. Checks prerequisites (`bun`, `k3s`, `kubectl`).
+2. Verifies the working tree is clean enough to build (warns on uncommitted changes, does not block).
+3. Builds all service binaries and static assets from the working tree into the build output directories that the volume mounts expose.
+4. Applies the studio kustomize overlay (`kubectl apply -k studio/k8s/overlay`).
+5. Waits for all deployments to become healthy.
+6. Starts the studio server (which spawns its `kubectl port-forward` and `kubectl get pods --watch` subprocesses).
+7. Prints the studio URL and opens the browser if `STUDIO_OPEN_BROWSER` is set.
 
 ```
 ⬡ Studio Mode
-  App:     http://localhost:STUDIO_PORT
+  Studio:  http://0.0.0.0:7000
+  App:     http://0.0.0.0:7000/app/
+  API:     http://0.0.0.0:7000/api/
   Cluster: k3s studio overlay active
-  Logs:    ../studio-logs/YYYY-MM-DD.jsonl
+  Logs:    ../studio-logs/2026-03-24.jsonl
 ```
 
 ### Environment Variables
@@ -245,16 +261,15 @@ This deletes the studio overlay resources from k3s but leaves the k3s daemon run
 
 Files in this repository:
 
-| Path                   | Purpose                                                               |
-| ---------------------- | --------------------------------------------------------------------- |
-| `studio/`              | Git submodule — the studio mode repository                            |
-| `k8s/overlays/studio/` | Kustomize overlay for studio mode cluster (may live in the submodule) |
+| Path      | Purpose                                    |
+| --------- | ------------------------------------------ |
+| `studio/` | Git submodule — the studio mode repository |
 
 Files in the studio submodule:
 
-| Path (relative to `studio/`) | Purpose                                                                      |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| `scripts/studio-start.ts`    | Start script — prerequisite checks, image build, cluster apply, server start |
-| `scripts/studio-down.ts`     | Tear down the studio cluster overlay                                         |
-| `apps/server/`               | Studio server — browser interface, Claude CLI hooks, hot-swap coordinator    |
-| `logs/`                      | Claude response logs (git-ignored)                                           |
+| Path (relative to `studio/`) | Purpose                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `scripts/studio-start.ts`    | Start script — prerequisite checks, build, cluster apply, server start   |
+| `scripts/studio-down.ts`     | Tear down the studio cluster overlay                                     |
+| `k8s/overlay/`               | Kustomize overlay — volume mounts, command overrides, base image patches |
+| `apps/server/`               | Studio server — browser UI, Claude subprocess, kubectl ownership, proxy  |
