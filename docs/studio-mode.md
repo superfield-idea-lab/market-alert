@@ -4,7 +4,7 @@
 
 Studio Mode is a local developer environment where Claude CLI is accessible through a browser chat window while the live Calypso application runs alongside it in an embedded iframe. Changes made by Claude are applied by hot-swapping compiled binaries into a running k3s cluster — the same cluster topology used in demo, staging, and production — without using a Vite dev server.
 
-Studio Mode is started from the command line with `bun run studio` and serves everything from a single host. It is single-user by design: one developer, one browser, one Claude subprocess. There is no authentication, no session persistence, and no multi-tenancy. Chat history lives in server memory and is lost when the server stops.
+Studio Mode is started from the command line with `bun run studio` and serves everything from a single host. It is single-user by design: one developer, one browser, one Claude session. There is no authentication, no session persistence, and no multi-tenancy. Chat history lives in the Claude CLI session and is lost when the server stops.
 
 ---
 
@@ -63,7 +63,7 @@ Three things run on the host simultaneously:
 │  │  • browser UI  (/*)      │   │  │  db  │  │   api      │ │ │
 │  │  • app proxy   (/app/)   │──►│  │      │  │            │ │ │
 │  │  • api proxy   (/api/)   │──►│  └──────┘  └────────────┘ │ │
-│  │  • Claude subprocess      │   │  ┌────────────┐  ┌──────┐ │ │
+│  │  • Claude session          │   │  ┌────────────┐  ┌──────┐ │ │
 │  │  • kubectl subprocesses   │──►│  │  web       │  │agents│ │ │
 │  │  • SSE cluster events     │   │  │  (static)  │  │      │ │ │
 │  └───────────────────────────┘   │  └────────────┘  └──────┘ │ │
@@ -78,11 +78,12 @@ A single Bun process that is the sole owner of both the Claude CLI subprocess an
 Responsibilities:
 
 - Serves the browser interface (chat panel + iframe shell) on `0.0.0.0:STUDIO_PORT`
-- Spawns and owns a single `claude` subprocess, manages conversation state across turns, and streams Claude's output to the browser
-- Owns all `kubectl` subprocesses — every cluster command (apply, rollout, delete pod, logs, port-forward) is spawned by the studio server so stdout and stderr are captured and surfaced to the browser and log files
+- Spawns Claude CLI headlessly with a session key, reusing the same session across turns so context is maintained by Claude without replay
+- Reverse-proxies cluster HTTP endpoints (ClusterIP services) into the browser — the studio server is the sole ingress point for cluster traffic
+- Owns all `kubectl` subprocesses — every cluster command (apply, rollout, delete pod, logs) is spawned by the studio server so stdout and stderr are captured and surfaced to the browser and log files
 - Maintains a live view of cluster state via `kubectl get pods --watch` as a long-lived subprocess, pushing state transitions to the browser via server-sent events
 
-The server binds on all interfaces (`0.0.0.0`) because development happens on a networked host. There is no application-level authentication. Security is a network-perimeter concern — the host is assumed to be behind a firewall, VPN, or private network.
+The server binds on all interfaces (`0.0.0.0`) because development happens on a networked host. Calypso cluster services bind to localhost only and are not directly reachable from the network — the studio server is the sole ingress point. There is no application-level authentication. Security is a network-perimeter concern — the host is assumed to be on a trusted network behind a firewall, VPN, or private network. Studio Mode MUST NOT be exposed to untrusted networks.
 
 ### k3s Cluster
 
@@ -117,9 +118,9 @@ The browser connects to the studio server. The UI has two panels:
 └──────────────────────────────────────────────────┘
 ```
 
-**Left panel — Claude Chat**: Streams Claude CLI output in real time. The user types prompts here. The studio server manages conversation history in memory, constructs a full prompt for each turn, and streams Claude's response back to the browser via server-sent events.
+**Left panel — Claude Chat**: Streams Claude CLI output in real time. The user types prompts here. Each message is sent to the Claude CLI session via its session key. Claude maintains conversation context across turns — the studio server does not replay history. Claude's response is streamed back to the browser via server-sent events.
 
-**Right panel — Calypso App (iframe)**: The studio server reverse-proxies the cluster's `web` and `api` services so the host only needs to expose a single port. The iframe points at `STUDIO_PORT/app/` which the studio server forwards to the `web` ClusterIP service inside k3s (via a `kubectl port-forward` subprocess it owns). API requests from the app are proxied similarly under `STUDIO_PORT/api/`. This avoids exposing NodePorts or additional listening ports on the host.
+**Right panel — Calypso App (iframe)**: The studio server reverse-proxies the cluster's `web` and `api` ClusterIP services so the host only needs to expose a single port. The iframe points at `STUDIO_PORT/app/` which the studio server proxies to the `web` service inside k3s. API requests from the app are proxied similarly under `STUDIO_PORT/api/`. Cluster services bind to localhost only — the studio server is the sole network-reachable ingress point. This avoids exposing NodePorts or additional listening ports on the host.
 
 After a hot-swap the iframe displays a brief overlay:
 
@@ -161,15 +162,15 @@ The studio server runs `kubectl get pods --watch` as a long-lived subprocess for
 
 ## Claude CLI Integration
 
-The studio server is the sole owner of Claude for the duration of the session. It manages conversation history in memory, constructs a prompt for each turn that includes the full conversation context, and invokes Claude as a subprocess:
+The studio server is the sole owner of Claude for the duration of the session. It invokes Claude headlessly with a session key that persists context across turns:
 
 ```
-claude --dangerously-skip-permissions -p "<prompt>"
+claude --dangerously-skip-permissions --session-key <key> -p "<message>"
 ```
 
-Each turn is a single-shot invocation. The studio server accumulates the conversation (user messages + Claude responses) and replays the full history as context on every turn. Claude's stdout is streamed to the browser chat panel in real time via server-sent events.
+Each turn reuses the same session key. Claude CLI maintains the full conversation context internally — the studio server sends only the new message for each turn, not the accumulated history. Claude's stdout is streamed to the browser chat panel in real time via server-sent events.
 
-Conversation history is ephemeral. It lives in the studio server's process memory and is lost when the server stops. There is no persistence layer and no session resume.
+Conversation history is owned by the Claude CLI session. The session key is generated at studio server startup and is not persisted. When the server stops, the session is abandoned. There is no session resume across server restarts.
 
 ### Hooks
 
@@ -183,11 +184,11 @@ The hook runs synchronously — Claude's next turn does not begin until the hot-
 
 ### Logging
 
-All Claude CLI invocations and responses are logged to `STUDIO_LOG_DIR/YYYY-MM-DD.jsonl` on the host. The default log directory is `../studio-logs/` relative to the repository root. Each log entry includes:
+All Claude CLI turns are logged to `STUDIO_LOG_DIR/YYYY-MM-DD.jsonl` on the host. The default log directory is `../studio-logs/` relative to the repository root. Each log entry includes:
 
 - ISO timestamp
-- The full prompt sent
-- The full response received
+- The user message sent for this turn
+- Claude's response for this turn
 - Files changed in the turn
 - Services restarted and restart duration
 
@@ -220,7 +221,7 @@ The start script (`scripts/studio-start.ts`) performs these steps in order:
 3. Builds all service binaries and static assets from the working tree into the build output directories that the volume mounts expose.
 4. Applies the studio kustomize overlay (`kubectl apply -k studio/k8s/overlay`).
 5. Waits for all deployments to become healthy.
-6. Starts the studio server (which spawns its `kubectl port-forward` and `kubectl get pods --watch` subprocesses).
+6. Starts the studio server (which spawns its `kubectl get pods --watch` subprocess and begins reverse-proxying cluster services).
 7. Prints the studio URL and opens the browser if `STUDIO_OPEN_BROWSER` is set.
 
 ```
@@ -245,7 +246,15 @@ The start script (`scripts/studio-start.ts`) performs these steps in order:
 
 ## Stopping Studio Mode
 
-`Ctrl+C` on the studio server process is sufficient. The cluster continues running until explicitly torn down.
+`Ctrl+C` sends SIGINT to the studio server process. The server performs a graceful shutdown:
+
+1. Stops accepting new browser connections and SSE subscriptions.
+2. Sends SIGTERM to all child processes (Claude CLI, `kubectl` subprocesses) as a process group.
+3. Waits up to 5 seconds for child processes to exit.
+4. If any child process has not exited after 5 seconds, sends SIGKILL to the process group.
+5. Closes the listening socket and exits.
+
+The cluster continues running after the studio server stops — it is not torn down automatically.
 
 To tear down the cluster:
 
