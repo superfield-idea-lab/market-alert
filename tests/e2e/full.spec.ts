@@ -87,7 +87,7 @@ test('app loads and shows login screen', async () => {
 
   await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
-  await playwrightExpect(page.getByRole('heading', { name: 'Calypso Weekly' })).toBeVisible();
+  await playwrightExpect(page.getByRole('heading', { name: 'Calypso' })).toBeVisible();
   await playwrightExpect(page.getByPlaceholder('••••••••')).toBeVisible();
   vitestExpect(consoleErrors.filter((e) => !isExpectedError(e))).toHaveLength(0);
 
