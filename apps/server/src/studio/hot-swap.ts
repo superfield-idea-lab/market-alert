@@ -110,7 +110,7 @@ async function defaultDeletePod(service: Service, context: string): Promise<Spaw
   ]);
 }
 
-async function defaultWatchPods(
+export async function defaultWatchPods(
   service: Service,
   context: string,
   onTransition: (line: string) => void,
@@ -171,7 +171,6 @@ export async function hotSwap(opts: HotSwapOptions): Promise<HotSwapResult> {
     podRestartTimeoutMs = DEFAULT_POD_RESTART_TIMEOUT_MS,
     spawnFn = defaultSpawn,
     deletePodFn = defaultDeletePod,
-    watchPodsFn = defaultWatchPods,
   } = opts;
 
   const affected = mapFilesToServices(changedFiles);

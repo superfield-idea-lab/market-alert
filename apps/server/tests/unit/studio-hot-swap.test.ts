@@ -3,7 +3,6 @@ import {
   mapFilesToServices,
   hasMigrationChanges,
   hotSwap,
-  type Service,
   type SpawnResult,
 } from '../../src/studio/hot-swap';
 
