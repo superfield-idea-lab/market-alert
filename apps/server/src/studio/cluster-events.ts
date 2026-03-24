@@ -101,7 +101,8 @@ export class ClusterEventStream {
       },
     );
 
-    const reader = this.proc.stdout.getReader();
+    const stdout = this.proc.stdout as ReadableStream<Uint8Array>;
+    const reader = stdout.getReader();
     const decoder = new TextDecoder();
     let buf = '';
 
