@@ -13,7 +13,6 @@ import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
 import { handlePasskeyRequest } from './api/passkey';
 import { handleTasksRequest } from './api/tasks';
 import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/task-queue';
-import { handleStudioRequest } from './api/studio';
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
 import { startStaleClaimRecovery } from './policies/stale-claim-recovery-service';
@@ -192,11 +191,6 @@ export default {
     if (url.pathname.startsWith('/api/users')) {
       const usersRes = await handleUsersRequest(req, url, appState);
       if (usersRes) return withTrace(usersRes);
-    }
-
-    if (url.pathname.startsWith('/studio')) {
-      const studioRes = await handleStudioRequest(req, url);
-      if (studioRes) return withTrace(studioRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
