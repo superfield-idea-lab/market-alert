@@ -11,7 +11,7 @@
     "test": "bun run test:unit && bun run test:api && bun run test:component && bun run test:e2e",
     "test:migration": "bun --bun vitest run --config apps/server/vitest.migration.config.ts",
     "test:unit": "bun --bun vitest run tests/unit apps/*/tests/unit",
-    "test:api": "for f in apps/server/tests/integration/*.test.ts; do case \"$f\" in *studio-api*) continue;; esac; bun --bun vitest run \"$f\" || exit 1; done",
+    "test:api": "for f in apps/server/tests/integration/*.test.ts; do bun --bun vitest run \"$f\" || exit 1; done",
     "test:pg-container": "bun --bun vitest run apps/server/tests/integration/pg-container.test.ts",
     "test:component": "bun --bun vitest run --config apps/web/vitest.browser.config.ts",
     "test:e2e": "bun --bun vitest run --config tests/e2e/vitest.config.ts",
@@ -21,7 +21,8 @@
     "format": "bunx prettier --write .",
     "format:check": "bunx prettier --check .",
     "dev": "bun run scripts/dev-start.ts",
-    "studio": "bun run scripts/studio-start.ts"
+    "studio": "bun run studio/scripts/studio-start.ts",
+    "studio:down": "bun run studio/scripts/studio-down.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

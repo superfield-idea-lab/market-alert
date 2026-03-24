@@ -1,18 +1,8 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import {
-  MessageSquare,
-  Settings,
-  Plus,
-  User,
-  LayoutDashboard,
-  ChevronRight,
-  ChevronLeft,
-  Smartphone,
-} from 'lucide-react';
+import { Settings, Plus, User, LayoutDashboard, Smartphone } from 'lucide-react';
 import { TaskListView } from './components/TaskListView';
-import { StudioChat } from './components/StudioChat';
 import { PwaDemoPage } from './pages/pwa-demo';
 
 function App() {
@@ -20,7 +10,6 @@ function App() {
 
   // Core Layout State
   const [activeView, setActiveView] = useState<'board' | 'settings' | 'pwa'>('board');
-  const [chatExpanded, setChatExpanded] = useState(true);
 
   if (loading) {
     return (
@@ -107,46 +96,6 @@ function App() {
             {activeView === 'settings' && (
               <div className="p-8 text-zinc-400 text-sm">Settings coming soon.</div>
             )}
-          </div>
-        </div>
-
-        {/* Studio Chat Overlay */}
-        <div
-          className={`absolute right-0 top-0 bottom-0 transition-transform duration-300 ease-in-out ${
-            chatExpanded ? 'translate-x-0' : 'translate-x-full'
-          }`}
-          style={{ width: '420px', maxWidth: '50vw' }}
-        >
-          {/* Toggle Button (visible when chat is collapsed) */}
-          {!chatExpanded && (
-            <button
-              onClick={() => setChatExpanded(true)}
-              className="absolute left-0 top-1/2 -translate-x-full -translate-y-1/2 bg-zinc-900 text-white p-3 rounded-l-lg shadow-lg hover:bg-zinc-800 transition-colors flex items-center gap-2"
-            >
-              <MessageSquare size={18} className="text-indigo-400" />
-              <span className="text-sm font-medium">Studio</span>
-              <ChevronLeft size={16} />
-            </button>
-          )}
-
-          {/* Chat Panel */}
-          <div className="h-full flex flex-col bg-zinc-50 border-l border-zinc-200 shadow-xl">
-            {/* Studio Chat Header with Minimize */}
-            <header className="h-16 px-6 border-b border-zinc-200 flex items-center justify-between shrink-0 bg-white">
-              <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider text-zinc-800">
-                <MessageSquare size={16} className="text-indigo-500" />
-                Studio
-              </h2>
-              <button
-                onClick={() => setChatExpanded(false)}
-                className="p-2 hover:bg-zinc-100 rounded-lg transition-colors text-zinc-400 hover:text-zinc-600"
-                title="Minimize chat"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </header>
-
-            <StudioChat />
           </div>
         </div>
       </main>
