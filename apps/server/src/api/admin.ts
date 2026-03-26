@@ -6,8 +6,11 @@
  * DELETE /api/admin/keys/:id    — revokes an API key
  * GET    /api/admin/task-queue   — lists recent task queue entries for monitoring
  *
+ * GET    /api/admin/users       — paginated user list, optional ?role= filter
+ * PATCH  /api/admin/users/:id   — change role or active status of a user
+ *
  * Superuser is determined by the SUPERUSER_ID environment variable.
- * All create and revoke operations are written to the audit log.
+ * All create, revoke, role-change, and deactivation operations are audit-logged.
  */
 
 import type { AppState } from '../index';
@@ -27,7 +30,6 @@ export async function handleAdminRequest(
   url: URL,
   appState: AppState,
 ): Promise<Response | null> {
-  void appState; // AppState reserved for future admin operations requiring direct db access
   if (!url.pathname.startsWith('/api/admin')) return null;
 
   const corsHeaders = getCorsHeaders(req);
@@ -132,6 +134,156 @@ export async function handleAdminRequest(
     });
 
     return json({ tasks, limit, offset });
+  }
+
+  // -----------------------------------------------------------------------
+  // User management endpoints
+  // -----------------------------------------------------------------------
+
+  const { sql } = appState;
+
+  // GET /api/admin/users — paginated user list with optional role filter
+  if (req.method === 'GET' && url.pathname === '/api/admin/users') {
+    const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20));
+    const offset = (page - 1) * limit;
+    const roleFilter = url.searchParams.get('role') ?? null;
+
+    interface UserRow {
+      id: string;
+      properties: Record<string, unknown>;
+      created_at: string;
+      updated_at: string;
+    }
+
+    let users: UserRow[];
+    let totalRows: { count: string }[];
+
+    if (roleFilter) {
+      users = await sql<UserRow[]>`
+        SELECT id, properties, created_at, updated_at
+        FROM entities
+        WHERE type = 'user'
+          AND properties->>'role' = ${roleFilter}
+        ORDER BY created_at ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      totalRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*) AS count
+        FROM entities
+        WHERE type = 'user'
+          AND properties->>'role' = ${roleFilter}
+      `;
+    } else {
+      users = await sql<UserRow[]>`
+        SELECT id, properties, created_at, updated_at
+        FROM entities
+        WHERE type = 'user'
+        ORDER BY created_at ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      totalRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*) AS count
+        FROM entities
+        WHERE type = 'user'
+      `;
+    }
+
+    const total = Number(totalRows[0]?.count ?? 0);
+
+    // Strip password hashes from the response
+    const sanitized = users.map((u) => {
+      const { password_hash: _pwHash, ...safeProps } = u.properties as Record<string, unknown> & {
+        password_hash?: string;
+      };
+      void _pwHash;
+      return {
+        id: u.id,
+        properties: safeProps,
+        created_at: u.created_at,
+        updated_at: u.updated_at,
+      };
+    });
+
+    return json({ users: sanitized, total, page, limit });
+  }
+
+  // PATCH /api/admin/users/:id — change role or active status
+  if (req.method === 'PATCH' && url.pathname.match(/^\/api\/admin\/users\/[^/]+$/)) {
+    const targetId = url.pathname.split('/')[4];
+    if (!targetId) return json({ error: 'Missing user id' }, 400);
+
+    let body: { role?: string; active?: boolean };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    // Validate that at least one field is provided
+    if (body.role === undefined && body.active === undefined) {
+      return json({ error: 'At least one of role or active must be provided' }, 400);
+    }
+
+    // Look up the target user
+    const [target] = await sql<{ id: string; properties: Record<string, unknown> }[]>`
+      SELECT id, properties
+      FROM entities
+      WHERE id = ${targetId} AND type = 'user'
+    `;
+
+    if (!target) return json({ error: 'Not found' }, 404);
+
+    const beforeProps = { ...target.properties };
+    const updatedProps = { ...target.properties };
+
+    if (body.role !== undefined) {
+      updatedProps.role = body.role;
+    }
+
+    if (body.active !== undefined) {
+      updatedProps.active = body.active;
+    }
+
+    await sql`
+      UPDATE entities
+      SET properties = ${sql.json(updatedProps as never)},
+          updated_at = NOW()
+      WHERE id = ${targetId}
+    `;
+
+    // Audit log — role changes
+    if (body.role !== undefined && body.role !== beforeProps.role) {
+      await emitAuditEvent({
+        actor_id: user.id,
+        action: 'user.role_change',
+        entity_type: 'user',
+        entity_id: targetId,
+        before: { role: beforeProps.role ?? null },
+        after: { role: body.role },
+        ts: new Date().toISOString(),
+      }).catch((err) => console.warn('[audit] user.role_change audit write failed:', err));
+    }
+
+    // Audit log — activation / deactivation
+    if (body.active !== undefined && body.active !== beforeProps.active) {
+      await emitAuditEvent({
+        actor_id: user.id,
+        action: body.active ? 'user.reactivate' : 'user.deactivate',
+        entity_type: 'user',
+        entity_id: targetId,
+        before: { active: beforeProps.active ?? null },
+        after: { active: body.active },
+        ts: new Date().toISOString(),
+      }).catch((err) => console.warn('[audit] user.active_change audit write failed:', err));
+    }
+
+    // Return updated user without password hash
+    const { password_hash: _pwHash2, ...safeProps } = updatedProps as Record<string, unknown> & {
+      password_hash?: string;
+    };
+    void _pwHash2;
+    return json({ id: targetId, properties: safeProps });
   }
 
   return null;

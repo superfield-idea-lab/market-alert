@@ -280,8 +280,9 @@ export async function handleAuthRequest(
     try {
       // Retrieve User Entity
       const users = await sql`
-                SELECT id, properties->>'username' as username, properties->>'password_hash' as password_hash 
-                FROM entities 
+                SELECT id, properties->>'username' as username, properties->>'password_hash' as password_hash,
+                       COALESCE((properties->>'active')::boolean, true) as active
+                FROM entities
                 WHERE type = 'user' AND properties->>'username' = ${username}
             `;
 
@@ -293,6 +294,14 @@ export async function handleAuthRequest(
       }
 
       const user = users[0];
+
+      // Deactivated users cannot log in
+      if (user.active === false) {
+        return new Response(JSON.stringify({ error: 'Account deactivated' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
       const isMatch = await Bun.password.verify(password, user.password_hash);
       if (!isMatch) {
