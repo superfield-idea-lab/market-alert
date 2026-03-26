@@ -27,13 +27,45 @@ import type { AppState } from '../index';
 import { getCorsHeaders } from './auth';
 import { signJwt } from '../auth/jwt';
 
-// The Relying Party configuration.
-// RP_ID must match the effective domain of the origin.
-// In development (localhost) the rpID is 'localhost'.
-// For production, override via RP_ID / RP_NAME / ORIGIN env vars.
-const RP_ID = process.env.RP_ID ?? 'localhost';
+// The Relying Party name (display only, not security-critical).
 const RP_NAME = process.env.RP_NAME ?? 'Calypso';
-const ORIGIN = process.env.ORIGIN ?? `http://localhost:5174`;
+
+// Default fallback values when no request headers or env vars are available.
+const DEFAULT_RP_ID = 'localhost';
+const DEFAULT_ORIGIN = 'http://localhost:5174';
+
+/**
+ * Derive WebAuthn RP ID and origin dynamically from the incoming request.
+ *
+ * Precedence:
+ *   1. Environment variables RP_ID + ORIGIN (both must be set to take effect)
+ *   2. Request Origin header
+ *   3. Request Referer header
+ *   4. Localhost defaults
+ *
+ * URL parsing errors fall back to localhost defaults.
+ */
+export function getRpConfig(req: Request): { rpId: string; origin: string } {
+  // Env vars take precedence when both are set
+  const envRpId = process.env.RP_ID;
+  const envOrigin = process.env.ORIGIN;
+  if (envRpId && envOrigin) {
+    return { rpId: envRpId, origin: envOrigin };
+  }
+
+  // Try Origin header first, then Referer
+  const headerValue = req.headers.get('origin') ?? req.headers.get('referer');
+  if (headerValue) {
+    try {
+      const parsed = new URL(headerValue);
+      return { rpId: parsed.hostname, origin: parsed.origin };
+    } catch {
+      // URL parsing failed — fall through to defaults
+    }
+  }
+
+  return { rpId: DEFAULT_RP_ID, origin: DEFAULT_ORIGIN };
+}
 
 export async function handlePasskeyRequest(
   req: Request,
@@ -78,9 +110,11 @@ export async function handlePasskeyRequest(
         (row) => ({ id: row.credential_id }),
       );
 
+      const { rpId } = getRpConfig(req);
+
       const options = await generateRegistrationOptions({
         rpName: RP_NAME,
-        rpID: RP_ID,
+        rpID: rpId,
         userName: user.username,
         userDisplayName: user.username,
         excludeCredentials,
@@ -135,11 +169,13 @@ export async function handlePasskeyRequest(
       // Delete the challenge immediately (single-use)
       await sql`DELETE FROM passkey_challenges WHERE id = ${challengeRow.id}`;
 
+      const { rpId, origin: rpOrigin } = getRpConfig(req);
+
       const verification = await verifyRegistrationResponse({
         response,
         expectedChallenge: challengeRow.challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
+        expectedOrigin: rpOrigin,
+        expectedRPID: rpId,
       });
 
       if (!verification.verified || !verification.registrationInfo) {
@@ -188,8 +224,10 @@ export async function handlePasskeyRequest(
         }));
       }
 
+      const { rpId } = getRpConfig(req);
+
       const options = await generateAuthenticationOptions({
-        rpID: RP_ID,
+        rpID: rpId,
         allowCredentials,
         userVerification: 'preferred',
         timeout: 60_000,
@@ -258,11 +296,13 @@ export async function handlePasskeyRequest(
       // Delete challenge immediately (single-use)
       await sql`DELETE FROM passkey_challenges WHERE id = ${challengeRow.id}`;
 
+      const { rpId, origin: rpOrigin } = getRpConfig(req);
+
       const verification = await verifyAuthenticationResponse({
         response,
         expectedChallenge: challengeRow.challenge,
-        expectedOrigin: ORIGIN,
-        expectedRPID: RP_ID,
+        expectedOrigin: rpOrigin,
+        expectedRPID: rpId,
         credential: {
           id: cred.credential_id,
           publicKey: new Uint8Array(cred.public_key),

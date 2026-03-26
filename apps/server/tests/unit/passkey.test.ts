@@ -1,11 +1,13 @@
 /**
- * Unit tests for passkey API helper functions and routing.
+ * Unit tests for passkey API helper functions, routing, and RP config derivation.
  *
- * These tests verify the route-matching logic and request/response structure
- * of the passkey handler without requiring a database or authenticator device.
+ * These tests verify the route-matching logic, request/response structure,
+ * and dynamic RP configuration of the passkey handler without requiring a
+ * database or authenticator device.
  */
 
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, afterEach } from 'vitest';
+import { getRpConfig } from '../../src/api/passkey';
 
 describe('passkey route matching', () => {
   test('register/begin path is distinct from /api/auth/register', () => {
@@ -71,15 +73,105 @@ describe('counter-based clone detection logic', () => {
   });
 });
 
-describe('passkey RP configuration defaults', () => {
-  test('default RP_ID is localhost for development', () => {
-    // This reflects the env var fallback in passkey.ts
-    const RP_ID = process.env.RP_ID ?? 'localhost';
-    expect(RP_ID).toBe('localhost');
+describe('getRpConfig', () => {
+  const savedEnv = { RP_ID: process.env.RP_ID, ORIGIN: process.env.ORIGIN };
+
+  afterEach(() => {
+    // Restore original env
+    if (savedEnv.RP_ID === undefined) delete process.env.RP_ID;
+    else process.env.RP_ID = savedEnv.RP_ID;
+    if (savedEnv.ORIGIN === undefined) delete process.env.ORIGIN;
+    else process.env.ORIGIN = savedEnv.ORIGIN;
   });
 
-  test('default ORIGIN is http://localhost:5174', () => {
-    const ORIGIN = process.env.ORIGIN ?? 'http://localhost:5174';
-    expect(ORIGIN).toBe('http://localhost:5174');
+  function makeRequest(headers: Record<string, string> = {}): Request {
+    return new Request('http://localhost/api/auth/passkey/register/begin', {
+      method: 'POST',
+      headers,
+    });
+  }
+
+  test('env vars override request headers when both RP_ID and ORIGIN are set', () => {
+    process.env.RP_ID = 'example.com';
+    process.env.ORIGIN = 'https://example.com';
+    const req = makeRequest({ origin: 'https://other.com' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('example.com');
+    expect(config.origin).toBe('https://example.com');
+  });
+
+  test('derives rpId and origin from Origin header', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest({ origin: 'https://myapp.example.com:8443' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('myapp.example.com');
+    expect(config.origin).toBe('https://myapp.example.com:8443');
+  });
+
+  test('falls back to Referer header when Origin is absent', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest({ referer: 'https://referer-host.dev/some/path' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('referer-host.dev');
+    expect(config.origin).toBe('https://referer-host.dev');
+  });
+
+  test('prefers Origin header over Referer header', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest({
+      origin: 'https://origin-host.dev',
+      referer: 'https://referer-host.dev/page',
+    });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('origin-host.dev');
+    expect(config.origin).toBe('https://origin-host.dev');
+  });
+
+  test('falls back to localhost defaults when no headers or env vars', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest();
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('localhost');
+    expect(config.origin).toBe('http://localhost:5174');
+  });
+
+  test('falls back to localhost defaults on invalid Origin header', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest({ origin: 'not-a-valid-url' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('localhost');
+    expect(config.origin).toBe('http://localhost:5174');
+  });
+
+  test('env vars ignored when only RP_ID is set (not ORIGIN)', () => {
+    process.env.RP_ID = 'example.com';
+    delete process.env.ORIGIN;
+    const req = makeRequest({ origin: 'https://header-host.dev' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('header-host.dev');
+    expect(config.origin).toBe('https://header-host.dev');
+  });
+
+  test('env vars ignored when only ORIGIN is set (not RP_ID)', () => {
+    delete process.env.RP_ID;
+    process.env.ORIGIN = 'https://example.com';
+    const req = makeRequest({ origin: 'https://header-host.dev' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('header-host.dev');
+    expect(config.origin).toBe('https://header-host.dev');
+  });
+
+  test('works with Docker container hostname in Origin', () => {
+    delete process.env.RP_ID;
+    delete process.env.ORIGIN;
+    const req = makeRequest({ origin: 'http://my-container:3000' });
+    const config = getRpConfig(req);
+    expect(config.rpId).toBe('my-container');
+    expect(config.origin).toBe('http://my-container:3000');
   });
 });
