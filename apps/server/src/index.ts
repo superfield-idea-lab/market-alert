@@ -20,6 +20,7 @@ import { websocketHandler } from './websocket';
 import { handleAdminRequest } from './api/admin';
 import { handleUsersRequest } from './api/users';
 import { seedSuperuser } from './seed/superuser';
+import { seedDemoPersonas } from './seed/demo-personas';
 import { getJwks } from './auth/jwt';
 
 // Starter behavior:
@@ -48,6 +49,11 @@ startStaleClaimRecovery();
 
 // Seed the initial superuser if none exists yet.
 await seedSuperuser({ sql }).catch((err) => console.error('[seed] Superuser seeding failed:', err));
+
+// Seed demo personas when DEMO_MODE=true is set.
+await seedDemoPersonas({ sql }).catch((err) =>
+  console.error('[demo] Demo persona seeding failed:', err),
+);
 
 export interface AppState {
   sql: typeof sql;
