@@ -57,6 +57,12 @@ import { restoreClaudeCredentials } from './claude-credentials';
 import { invokeCli, validateClaudeCliPath } from './claude-cli';
 import { SAMPLE_JOB_TYPE, buildCliPayload, validateCliResult } from './sample-agent-job';
 import { resolveAgentTimeoutMs, resolveSigtermGraceMs } from './timeout';
+import {
+  SECURITY_SCAN_JOB_TYPE,
+  SECURITY_SCAN_TIMEOUT_MS,
+  buildSecurityScanCliPayload,
+  validateSecurityScanResult,
+} from './security-scanner-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -193,8 +199,9 @@ async function tryClaimAndExecute(
     console.log(`[runner] Claimed task ${task.id} (type=${task.job_type}, timeout=${timeoutMs}ms)`);
 
     // Route to the appropriate CLI based on job type.
-    // claude_sample jobs go through the Claude CLI integration; all others
-    // use the existing Codex path.
+    // claude_sample jobs go through the Claude CLI integration; security_scan
+    // jobs go through Claude CLI with a hard timeout and read-only code access;
+    // all others use the existing Codex path.
     let result: Record<string, unknown>;
     if (task.job_type === SAMPLE_JOB_TYPE) {
       const cliPayload = buildCliPayload(task.id, agentType, task.payload);
@@ -205,6 +212,15 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateCliResult(rawResult);
+    } else if (task.job_type === SECURITY_SCAN_JOB_TYPE) {
+      const cliPayload = buildSecurityScanCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs: SECURITY_SCAN_TIMEOUT_MS,
+        sigtermGraceMs,
+      });
+      result = validateSecurityScanResult(rawResult);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }
