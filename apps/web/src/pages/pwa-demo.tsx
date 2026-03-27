@@ -15,12 +15,14 @@
 
 import React from 'react';
 import { usePlatform } from '../hooks/use-platform';
+import { NotificationDemoCard } from '../components/pwa/demos/notification-demo';
+import { StorageDemoCard } from '../components/pwa/demos/storage-demo';
+import { CameraDemoCard } from '../components/pwa/demos/camera-demo';
+import { MicDemoCard } from '../components/pwa/demos/mic-demo';
 
 /**
- * Top-level PWA demo page.  Currently renders a platform info summary header
- * and a placeholder grid that downstream cards will populate.
- *
- * Subsequent issues (#16–#20) add individual demo cards to this grid.
+ * Top-level PWA demo page.  Renders a platform info summary header and a
+ * grid of demo cards showcasing PWA capabilities available on this device.
  */
 export function PwaDemoPage() {
   const platform = usePlatform();
@@ -51,12 +53,12 @@ export function PwaDemoPage() {
           </span>
         </div>
 
-        {/* Demo card grid — downstream issues (#16–#20) inject cards here */}
+        {/* Demo card grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Demo cards will be added here as subsequent issues are implemented */}
-          <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-6 text-center text-zinc-400 text-sm col-span-full">
-            Demo cards loading — check back as features are implemented.
-          </div>
+          <NotificationDemoCard />
+          <StorageDemoCard />
+          <CameraDemoCard />
+          <MicDemoCard />
         </div>
       </div>
     </div>
