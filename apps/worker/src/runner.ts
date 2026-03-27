@@ -7,15 +7,16 @@
  * ----------------------------------------
  * 1. Connect to PostgreSQL using the agent-type read-only role.
  * 2. Assert read-only DB access on startup (TQ-C-008).
- * 3. Start the LISTEN/NOTIFY worker loop.
- * 4. Per iteration: claim one task from the queue, invoke the Codex binary,
- *    and submit the result back to the API server using the delegated token
- *    embedded in the task row.
+ * 3. Validate CLAUDE_CLI_PATH at startup when set (WORKER-C-002).
+ * 4. Start the LISTEN/NOTIFY worker loop.
+ * 5. Per iteration: claim one task from the queue, invoke the configured CLI
+ *    binary (Claude CLI or Codex), and submit the result back to the API server
+ *    using the delegated token embedded in the task row.
  *
  * Security constraints
  * ---------------------
  * - The DB role is read-only; writes are structurally impossible (WORKER-T-002).
- * - The Codex binary is invoked as a subprocess with no shell (WORKER-C-002).
+ * - CLI binaries are invoked as subprocesses with no shell (WORKER-C-002).
  * - Results are submitted via the API path, never directly to the DB (WORKER-T-001).
  * - The delegated token is single-use and task-scoped (WORKER-T-005).
  *
@@ -24,6 +25,8 @@
  * - AGENT_DATABASE_URL — read-only agent role connection string (required)
  * - AGENT_TYPE         — agent type name, e.g. "coding" (required)
  * - API_BASE_URL       — base URL of the Calypso API server (required)
+ * - CLAUDE_CLI_PATH    — path to the Claude CLI binary; validated at startup.
+ *                        When unset, the dev stub is used as fallback.
  * - CODEX_PATH         — path to the codex binary (default: /usr/local/bin/codex)
  * - WORKER_ID          — unique identifier for this worker instance (default: hostname)
  *
@@ -32,6 +35,8 @@
  * - Worker blueprint: calypso-blueprint/rules/blueprints/worker.yaml
  * - Task queue schema: packages/db/task-queue.ts
  * - Worker waker: packages/db/task-queue-worker.ts
+ * - Claude CLI integration: apps/worker/src/claude-cli.ts
+ * - Sample agent job type: apps/worker/src/sample-agent-job.ts
  */
 
 import { spawn } from 'child_process';
@@ -39,10 +44,13 @@ import os from 'os';
 import { createAgentPool, loadAgentDbConfig } from './db';
 import { assertReadOnlyRole } from './startup';
 import { restoreCodexCredentials } from './codex-credentials';
+import { invokeCli, validateClaudeCliPath } from './claude-cli';
+import { SAMPLE_JOB_TYPE, buildCliPayload, validateCliResult } from './sample-agent-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
 const CODEX_PATH = process.env.CODEX_PATH ?? '/usr/local/bin/codex';
+const CLAUDE_CLI_PATH = process.env.CLAUDE_CLI_PATH;
 const WORKER_ID = process.env.WORKER_ID ?? os.hostname();
 
 /**
@@ -140,8 +148,17 @@ async function tryClaimAndExecute(
 
     console.log(`[runner] Claimed task ${task.id} (type=${task.job_type})`);
 
-    // Invoke Codex with the task payload.
-    const result = await invokeCodex(task.payload);
+    // Route to the appropriate CLI based on job type.
+    // claude_sample jobs go through the Claude CLI integration; all others
+    // use the existing Codex path.
+    let result: Record<string, unknown>;
+    if (task.job_type === SAMPLE_JOB_TYPE) {
+      const cliPayload = buildCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({ cliPath: CLAUDE_CLI_PATH, taskPayload: cliPayload });
+      result = validateCliResult(rawResult);
+    } else {
+      result = await invokeCodex(task.payload);
+    }
 
     console.log(`[runner] Task ${task.id} completed`);
 
@@ -187,6 +204,19 @@ export async function startRunner(): Promise<void> {
   const db = createAgentPool(agentDatabaseUrl);
 
   console.log(`[runner] Starting — agent_type=${agentType}, worker_id=${WORKER_ID}`);
+
+  // Validate CLAUDE_CLI_PATH at startup when configured.
+  // When unset the Claude CLI module falls back to the dev stub automatically.
+  if (CLAUDE_CLI_PATH) {
+    await validateClaudeCliPath(CLAUDE_CLI_PATH).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runner] ${msg}`);
+      process.exit(1);
+    });
+    console.log(`[runner] Claude CLI validated at ${CLAUDE_CLI_PATH}`);
+  } else {
+    console.log('[runner] CLAUDE_CLI_PATH not set — Claude CLI jobs will use dev stub fallback');
+  }
 
   // Verify that the DB role is read-only before entering the loop (TQ-C-008).
   await assertReadOnlyRole(db as Parameters<typeof assertReadOnlyRole>[0]);
