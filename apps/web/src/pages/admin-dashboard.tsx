@@ -214,8 +214,7 @@ export function AdminDashboard() {
         wsRef.current.close();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // intentional: run once on mount; fetchData and connectWs are stable refs
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
