@@ -26,7 +26,12 @@
  * - AGENT_TYPE         — agent type name, e.g. "coding" (required)
  * - API_BASE_URL       — base URL of the Calypso API server (required)
  * - CLAUDE_CLI_PATH    — path to the Claude CLI binary; validated at startup.
+ *                        When set, Claude credentials are restored from DB.
  *                        When unset, the dev stub is used as fallback.
+ * - CLAUDE_AUTH_FILE   — override path for Claude CLI credentials file.
+ *                        Defaults to ~/.config/anthropic/credentials.json.
+ * - CODE_MOUNT_PATH    — path to the read-only code volume (default: /repo).
+ *                        Set in container by the initContainer git clone.
  * - CODEX_PATH         — path to the codex binary (default: /usr/local/bin/codex)
  * - WORKER_ID          — unique identifier for this worker instance (default: hostname)
  *
@@ -44,6 +49,7 @@ import os from 'os';
 import { createAgentPool, loadAgentDbConfig } from './db';
 import { assertReadOnlyRole } from './startup';
 import { restoreCodexCredentials } from './codex-credentials';
+import { restoreClaudeCredentials } from './claude-credentials';
 import { invokeCli, validateClaudeCliPath } from './claude-cli';
 import { SAMPLE_JOB_TYPE, buildCliPayload, validateCliResult } from './sample-agent-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
@@ -223,12 +229,24 @@ export async function startRunner(): Promise<void> {
 
   console.log(`[runner] DB role verified read-only`);
 
-  // Restore Codex subscription credentials from the encrypted bundle stored
-  // in the database.  Fails closed if the bundle is missing, expired, or
-  // cannot be decrypted.
-  await restoreCodexCredentials(agentType);
-
-  console.log(`[runner] Codex credentials restored — entering worker loop`);
+  if (CLAUDE_CLI_PATH) {
+    // Restore Claude CLI credentials from the encrypted bundle stored in the
+    // database.  Fails closed if the bundle is missing, expired, or cannot be
+    // decrypted.  Credentials are written to the Claude CLI auth file path so
+    // the binary can authenticate when invoked against the read-only code mount.
+    await restoreClaudeCredentials(agentType).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runner] Claude credential restore failed: ${msg}`);
+      process.exit(1);
+    });
+    console.log(`[runner] Claude CLI credentials restored — entering worker loop`);
+  } else {
+    // Restore Codex subscription credentials from the encrypted bundle stored
+    // in the database.  Fails closed if the bundle is missing, expired, or
+    // cannot be decrypted.
+    await restoreCodexCredentials(agentType);
+    console.log(`[runner] Codex credentials restored — entering worker loop`);
+  }
 
   const { stop } = await runWorkerLoop({
     agentType,
