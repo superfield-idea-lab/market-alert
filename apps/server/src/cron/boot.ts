@@ -10,6 +10,7 @@ import { registerStaleClaimRecoveryJob } from './jobs/stale-claim-recovery';
 import { registerSecurityScannerJob } from './jobs/security-scanner';
 import { registerSocComplianceReviewJob } from './jobs/soc-compliance-review';
 import { registerRuntimeTracerJob } from './jobs/runtime-tracer';
+import { registerCodeCleanupJob } from './jobs/code-cleanup';
 
 let scheduler: CronScheduler | null = null;
 
@@ -29,6 +30,7 @@ export function startCronScheduler(): CronScheduler {
   registerSecurityScannerJob(scheduler);
   registerSocComplianceReviewJob(scheduler);
   registerRuntimeTracerJob(scheduler);
+  registerCodeCleanupJob(scheduler);
 
   scheduler.start();
   return scheduler;

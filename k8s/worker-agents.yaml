@@ -289,3 +289,89 @@ spec:
             limits:
               cpu: '500m'
               memory: '512Mi'
+
+
+# ── NetworkPolicy: code_cleanup worker ───────────────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: calypso-worker-code-cleanup-egress
+  labels:
+    app: calypso-worker-code-cleanup
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-worker-code-cleanup
+  policyTypes:
+    - Egress
+  egress:
+    # Allow outbound to API gateway (calypso-app) on port 80
+    - to:
+        - podSelector:
+            matchLabels:
+              app: calypso-app
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+
+# ── Deployment: code_cleanup worker ──────────────────────────────────────────
+# Runs on a cron-enqueued schedule; performs read-only code quality analysis.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calypso-worker-code-cleanup
+  labels:
+    app: calypso-worker-code-cleanup
+    agent-type: code_cleanup
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-worker-code-cleanup
+  template:
+    metadata:
+      labels:
+        app: calypso-worker-code-cleanup
+        agent-type: code_cleanup
+    spec:
+      containers:
+        - name: worker
+          # Image tag is set via deploy.sh or kubectl set image
+          image: ghcr.io/<owner>/calypso-worker-code-cleanup:latest
+          env:
+            - name: AGENT_TYPE
+              value: 'code_cleanup'
+            # DB connection uses the agent_code_cleanup role (read-only, view-scoped)
+            - name: AGENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-code-cleanup-secret
+                  key: AGENT_DATABASE_URL
+            # API gateway base URL for task claim and result submission
+            - name: API_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-code-cleanup-secret
+                  key: API_BASE_URL
+            # Vendor API key for the code cleanup agent (Claude API key)
+            - name: VENDOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-code-cleanup-secret
+                  key: VENDOR_API_KEY
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '256Mi'
+            limits:
+              cpu: '500m'
+              memory: '1Gi'
