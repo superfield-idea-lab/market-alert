@@ -22,6 +22,12 @@ import {
 } from '@simplewebauthn/browser';
 import type { User } from '../context/AuthContext';
 
+/** Read the CSRF token from the __Host-csrf-token cookie set by the server. */
+function getCsrfToken(): string {
+  const match = document.cookie.split('; ').find((row) => row.startsWith('__Host-csrf-token='));
+  return match ? match.split('=')[1] : '';
+}
+
 // ---- Passkey Registration -----------------------------------------------
 
 interface RegisterPasskeyButtonProps {
@@ -65,10 +71,14 @@ export const RegisterPasskeyButton: React.FC<RegisterPasskeyButtonProps> = ({
       // Step 2: invoke the browser authenticator
       const registrationResponse = await startRegistration({ optionsJSON: options });
 
-      // Step 3: send response to server for verification and storage
+      // Step 3: send response to server for verification and storage.
+      // X-CSRF-Token is required by the server's double-submit cookie guard.
       const completeRes = await fetch('/api/auth/passkey/register/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCsrfToken(),
+        },
         credentials: 'include',
         body: JSON.stringify({ userId, response: registrationResponse }),
       });

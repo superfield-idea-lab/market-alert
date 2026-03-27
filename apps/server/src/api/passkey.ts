@@ -24,7 +24,8 @@ import {
 } from '@simplewebauthn/server';
 import type { RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { AppState } from '../index';
-import { getCorsHeaders } from './auth';
+import { getCorsHeaders, parseCookies } from './auth';
+import { verifyCsrf } from '../auth/csrf';
 import { signJwt } from '../auth/jwt';
 
 // The Relying Party name (display only, not security-critical).
@@ -142,6 +143,16 @@ export async function handlePasskeyRequest(
   // POST /api/auth/passkey/register/complete
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/register/complete') {
+    // CSRF guard: registration mutates server state by adding a new credential
+    // to the authenticated user's account. An attacker could forge a cross-origin
+    // POST to trick the browser into submitting an attacker-controlled attestation.
+    const csrfError = verifyCsrf(req, parseCookies(req.headers.get('Cookie')));
+    if (csrfError)
+      return new Response(csrfError.body, {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+
     try {
       const { userId, response } = (await req.json()) as {
         userId: string;
@@ -184,8 +195,8 @@ export async function handlePasskeyRequest(
 
       const { credential, aaguid } = verification.registrationInfo;
 
-      // Store the credential
-      await sql`
+      // Store the credential, return the persisted credential_id
+      const inserted = await sql`
         INSERT INTO passkey_credentials
           (user_id, credential_id, public_key, counter, aaguid, transports)
         VALUES (
@@ -196,9 +207,11 @@ export async function handlePasskeyRequest(
           ${aaguid ?? ''},
           ${credential.transports ?? []}
         )
+        RETURNING credential_id
       `;
+      const credentialId = (inserted[0] as { credential_id: string }).credential_id;
 
-      return json({ verified: true }, 200, corsHeaders);
+      return json({ verified: true, credentialId }, 200, corsHeaders);
     } catch (err) {
       console.error('PASSKEY REGISTER COMPLETE ERROR:', err);
       return json({ error: 'Internal Server Error' }, 500, corsHeaders);
