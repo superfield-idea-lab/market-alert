@@ -63,6 +63,12 @@ import {
   buildSecurityScanCliPayload,
   validateSecurityScanResult,
 } from './security-scanner-job';
+import {
+  SOC_COMPLIANCE_JOB_TYPE,
+  SOC_COMPLIANCE_TIMEOUT_MS,
+  buildSocComplianceCliPayload,
+  validateSocComplianceResult,
+} from './soc-compliance-agent-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -200,8 +206,8 @@ async function tryClaimAndExecute(
 
     // Route to the appropriate CLI based on job type.
     // claude_sample jobs go through the Claude CLI integration; security_scan
-    // jobs go through Claude CLI with a hard timeout and read-only code access;
-    // all others use the existing Codex path.
+    // and soc_compliance_review jobs go through Claude CLI with a hard timeout
+    // and read-only code access; all others use the existing Codex path.
     let result: Record<string, unknown>;
     if (task.job_type === SAMPLE_JOB_TYPE) {
       const cliPayload = buildCliPayload(task.id, agentType, task.payload);
@@ -221,6 +227,15 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateSecurityScanResult(rawResult);
+    } else if (task.job_type === SOC_COMPLIANCE_JOB_TYPE) {
+      const cliPayload = buildSocComplianceCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs: SOC_COMPLIANCE_TIMEOUT_MS,
+        sigtermGraceMs,
+      });
+      result = validateSocComplianceResult(rawResult);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

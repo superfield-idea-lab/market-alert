@@ -138,6 +138,105 @@ spec:
               memory: '512Mi'
 
 
+# ── NetworkPolicy: soc_compliance worker ─────────────────────────────────────
+# Restricts outbound traffic from soc_compliance worker pods to the API gateway
+# only. Direct database access is structurally blocked at the network layer.
+# The worker runs with read-only code access; no write capability to the DB.
+# Blueprint: WORKER-C-006 (network-policy-blocks-direct-db)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: calypso-worker-soc-compliance-egress
+  labels:
+    app: calypso-worker-soc-compliance
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-worker-soc-compliance
+  policyTypes:
+    - Egress
+  egress:
+    # Allow outbound to API gateway (calypso-app) on port 80
+    - to:
+        - podSelector:
+            matchLabels:
+              app: calypso-app
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+
+# ── Deployment: soc_compliance worker ────────────────────────────────────────
+# Processes soc_compliance_review tasks enqueued by the daily cron job.
+# Invokes the Claude CLI with a read-only codebase snapshot and a 5-minute
+# hard timeout. The agent_soc_compliance DB role is read-only (TQ-C-008).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calypso-worker-soc-compliance
+  labels:
+    app: calypso-worker-soc-compliance
+    agent-type: soc_compliance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-worker-soc-compliance
+  template:
+    metadata:
+      labels:
+        app: calypso-worker-soc-compliance
+        agent-type: soc_compliance
+    spec:
+      containers:
+        - name: worker
+          # Image tag is set via deploy.sh or kubectl set image
+          image: ghcr.io/<owner>/calypso-worker-soc-compliance:latest
+          env:
+            - name: AGENT_TYPE
+              value: 'soc_compliance'
+            # DB connection uses the agent_soc_compliance role (read-only, view-scoped)
+            - name: AGENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-soc-compliance-secret
+                  key: AGENT_DATABASE_URL
+            # API gateway base URL for task claim and result submission
+            - name: API_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-soc-compliance-secret
+                  key: API_BASE_URL
+            # Claude CLI binary path (required for SOC compliance analysis)
+            - name: CLAUDE_CLI_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-soc-compliance-secret
+                  key: CLAUDE_CLI_PATH
+                  optional: true
+            # Vendor API key for the Claude CLI (Claude API key)
+            - name: VENDOR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-soc-compliance-secret
+                  key: VENDOR_API_KEY
+          resources:
+            requests:
+              cpu: '200m'
+              memory: '256Mi'
+            limits:
+              cpu: '1000m'
+              memory: '1Gi'
+
+
 # ── Deployment: analysis worker ───────────────────────────────────────────────
 ---
 apiVersion: apps/v1
