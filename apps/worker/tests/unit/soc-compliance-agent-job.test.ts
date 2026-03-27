@@ -149,7 +149,7 @@ describe('validateSocComplianceResult', () => {
   });
 
   test('throws when result field is missing', () => {
-    const { result: _result, ...noResult } = validResult;
+    const noResult = { ...validResult, result: undefined };
     expect(() => validateSocComplianceResult(noResult as Record<string, unknown>)).toThrow(
       'missing required "result" string field',
     );
@@ -163,7 +163,7 @@ describe('validateSocComplianceResult', () => {
   });
 
   test('throws when findings field is missing', () => {
-    const { findings: _findings, ...noFindings } = validResult;
+    const noFindings = { ...validResult, findings: undefined };
     expect(() => validateSocComplianceResult(noFindings as Record<string, unknown>)).toThrow(
       'missing required "findings" array field',
     );
@@ -177,7 +177,7 @@ describe('validateSocComplianceResult', () => {
   });
 
   test('throws when scanned_at field is missing', () => {
-    const { scanned_at: _scanned_at, ...noScannedAt } = validResult;
+    const noScannedAt = { ...validResult, scanned_at: undefined };
     expect(() => validateSocComplianceResult(noScannedAt as Record<string, unknown>)).toThrow(
       'missing required "scanned_at" string field',
     );
@@ -191,7 +191,7 @@ describe('validateSocComplianceResult', () => {
   });
 
   test('throws when finding_count field is missing', () => {
-    const { finding_count: _finding_count, ...noFindingCount } = validResult;
+    const noFindingCount = { ...validResult, finding_count: undefined };
     expect(() => validateSocComplianceResult(noFindingCount as Record<string, unknown>)).toThrow(
       'missing required "finding_count" number field',
     );
