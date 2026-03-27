@@ -1,0 +1,101 @@
+# Dockerfile.agent-worker — Production agent worker image with Claude CLI.
+#
+# This image runs the Calypso agent worker container in Kubernetes. It is
+# purpose-built for self-improving agent workloads where each pod:
+#   - Reads a read-only snapshot of the repository from a volume populated
+#     by the k8s initContainer (git clone at pod start).
+#   - Authenticates the Claude CLI binary using credentials fetched from the
+#     worker_credentials table at startup (never baked into the image).
+#   - Runs as a non-root user (UID 1000 / GID 1000) with no shell.
+#
+# Two-stage build:
+#   Stage 1 (builder): install dependencies and compile the worker bundle.
+#   Stage 2 (runtime): bun distroless image — no shell, no package manager.
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime (shell absent in production stage)
+#   WORKER-C-007  Vendor CLI invoked without shell (binary copied directly)
+#   WORKER-T-009  No secrets baked into container image (credentials at runtime only)
+#
+# Build arguments:
+#   CLAUDE_VERSION — version tag for documentation only (e.g. "1.0.0")
+#
+# The Claude CLI binary must be present in the build context at:
+#   claude-binary/claude
+# CI must download and verify the pinned binary before building this image.
+#
+# Environment variables expected at container startup:
+#   AGENT_DATABASE_URL  — read-only PostgreSQL connection string for the agent role
+#   AGENT_TYPE          — agent type name (e.g. "coding")
+#   API_BASE_URL        — base URL of the Calypso API server
+#   CLAUDE_CLI_PATH     — path to the Claude CLI binary (default: /usr/local/bin/claude)
+#   CLAUDE_AUTH_FILE    — path for the restored credentials file (default: /tmp/claude-auth/credentials.json)
+#   CODE_MOUNT_PATH     — path to the read-only code volume (default: /repo)
+#   ENCRYPTION_MASTER_KEY — 64-char hex key for credential decryption (from K8s Secret)
+#   WORKER_ID           — unique identifier for this instance (defaults to hostname)
+
+# --- builder stage ---
+FROM oven/bun:1.2@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be053a16f74 AS builder
+
+WORKDIR /app
+
+# Copy workspace manifests and lockfile first for layer caching
+COPY package.json bun.lock ./
+COPY apps/worker/package.json apps/worker/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+
+# Install workspace dependencies with frozen lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
+
+# Copy source files needed for the worker bundle
+COPY apps/worker/ apps/worker/
+COPY packages/core/ packages/core/
+COPY packages/db/ packages/db/
+COPY tsconfig.json ./
+
+# Compile the worker entry-point to a single bundle targeting the bun runtime
+RUN bun build apps/worker/src/index.ts \
+      --target bun \
+      --outfile dist/worker.js \
+      --external postgres
+
+# --- runtime stage ---
+# Distroless: no shell (/bin/sh absent), no package manager, minimal attack surface.
+# Blueprint: WORKER-C-001 (no-shell-binary-in-image)
+FROM oven/bun:1.2-distroless@sha256:e2c3f36733fa2c2c9c80d89b481d9fc7629558cac2533c776f6285ae1ba6b8fa AS runtime
+
+ARG CLAUDE_VERSION=unknown
+LABEL claude.version="${CLAUDE_VERSION}"
+
+# Non-root user — worker runs as UID/GID 1000.
+# The distroless image already provides a non-root user; bun distroless runs
+# as UID 1000 by default. We explicitly set it here for documentation clarity
+# and to satisfy security scanners that verify the USER directive.
+USER 1000:1000
+
+WORKDIR /app
+
+# Copy compiled worker bundle
+COPY --from=builder /app/dist/worker.js ./dist/worker.js
+
+# Copy node_modules for postgres (external dependency not bundled)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy the Claude CLI binary — must be present in the build context as claude-binary/claude.
+# The CI build step downloads and verifies the pinned binary before building this image.
+# Blueprint: WORKER-C-007 (vendor-cli-array-form-spawn — binary copied directly, no shell)
+COPY --chown=1000:1000 claude-binary/claude /usr/local/bin/claude
+
+# Runtime environment defaults
+ENV CLAUDE_CLI_PATH=/usr/local/bin/claude
+# Credentials are written to a tmpfs volume mounted at /tmp/claude-auth in K8s.
+# Override to /tmp/claude-auth/credentials.json via K8s env when using the manifest.
+ENV CLAUDE_AUTH_FILE=/tmp/.claude-credentials.json
+# Path to the read-only code volume populated by the initContainer git clone.
+ENV CODE_MOUNT_PATH=/repo
+
+# Health: no HTTP endpoint — check if the process is running via container runtime.
+# Liveness/readiness probes can be added at the orchestrator level.
+
+ENTRYPOINT ["bun", "run", "dist/worker.js"]

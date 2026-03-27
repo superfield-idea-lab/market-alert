@@ -1,0 +1,218 @@
+# K8s manifests for the agent worker container with read-only code mount.
+#
+# This file defines the Kubernetes resources required to run the Claude CLI-backed
+# agent worker in production.  Each worker pod:
+#   - Clones the repository read-only via an initContainer on pod start.
+#   - Authenticates the Claude CLI using credentials from worker_credentials DB
+#     table (decrypted at startup; never baked into the image).
+#   - Runs as a non-root user (UID/GID 1000) with a read-only code volume.
+#   - Has no shell in the runtime container (distroless).
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime
+#   WORKER-C-006  NetworkPolicy blocks direct DB access
+#   WORKER-T-009  No secrets baked into container image
+#
+# Prerequisites
+# -------------
+#   - calypso-agent-worker-secret must be created by the operator (see secrets.example.yaml).
+#   - calypso-app Deployment must be running (NetworkPolicy allows egress to it).
+#
+# Apply order (after genesis db-init-job completes):
+#   kubectl apply -f k8s/agent-worker.yaml
+#
+# To scale the worker:
+#   kubectl scale deployment calypso-agent-worker --replicas=3
+
+# ── ServiceAccount ────────────────────────────────────────────────────────────
+# Dedicated ServiceAccount for the agent worker.  No cluster-level permissions
+# are granted — the SA exists to support future IAM/IRSA credential binding and
+# to isolate the worker's K8s identity from other pods.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: calypso-agent-worker
+  labels:
+    app: calypso-agent-worker
+
+
+# ── NetworkPolicy: agent worker egress ───────────────────────────────────────
+# Restricts outbound traffic from agent worker pods.
+# Allowed egress:
+#   - API gateway (calypso-app) on port 80 — task claim and result submission
+#   - Anthropic API on port 443 — Claude CLI authentication and inference
+#   - Git repository host on port 443 — initContainer code clone
+#   - DNS resolution on port 53
+# Direct database access is structurally blocked at the network layer.
+# Blueprint: WORKER-C-006 (network-policy-blocks-direct-db)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: calypso-agent-worker-egress
+  labels:
+    app: calypso-agent-worker
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-agent-worker
+  policyTypes:
+    - Egress
+  egress:
+    # Allow outbound to API gateway (calypso-app) on port 80
+    - to:
+        - podSelector:
+            matchLabels:
+              app: calypso-app
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow HTTPS for Claude CLI and initContainer git clone
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+
+# ── Deployment: agent worker ──────────────────────────────────────────────────
+# Each replica:
+#   1. initContainer: git clone of the repository into /repo (read-only mount).
+#   2. worker container: claims tasks, invokes Claude CLI against /repo, submits results.
+#
+# Volumes:
+#   code-volume     — emptyDir populated by initContainer; mounted read-only in worker.
+#   claude-auth     — tmpfs for the decrypted Claude credentials file (cleared on pod death).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calypso-agent-worker
+  labels:
+    app: calypso-agent-worker
+    agent-type: claude
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-agent-worker
+  template:
+    metadata:
+      labels:
+        app: calypso-agent-worker
+        agent-type: claude
+    spec:
+      serviceAccountName: calypso-agent-worker
+
+      # Run all containers as non-root.
+      # Blueprint: WORKER-T-007 (container-shell-access) — non-root reduces blast radius.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      initContainers:
+        # Clone the repository at the latest HEAD into the shared code volume.
+        # The clone is shallow (depth=1) for fast startup.  The volume is then
+        # mounted read-only in the worker container so the agent cannot modify code.
+        - name: git-clone
+          image: alpine/git:latest
+          command:
+            - sh
+            - -c
+            - |
+              git clone --depth=1 "${REPO_URL}" /repo && \
+              chmod -R a-w /repo
+          env:
+            - name: REPO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-agent-worker-secret
+                  key: REPO_URL
+          volumeMounts:
+            - name: code-volume
+              mountPath: /repo
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+
+      containers:
+        - name: worker
+          # Image tag is set via deploy.sh or kubectl set image.
+          # Blueprint: WORKER-C-001 (no-shell-binary-in-image) — distroless image.
+          image: ghcr.io/<owner>/calypso-agent-worker:latest
+          env:
+            - name: AGENT_TYPE
+              value: 'claude'
+            # DB connection uses the agent_claude role (read-only, view-scoped).
+            - name: AGENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-agent-worker-secret
+                  key: AGENT_DATABASE_URL
+            # API gateway base URL for task claim and result submission.
+            - name: API_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-agent-worker-secret
+                  key: API_BASE_URL
+            # Encryption key for decrypting the Claude credential bundle from DB.
+            # Blueprint: WORKER-T-009 (vendor-api-key-leak) — key from Secret, not image.
+            - name: ENCRYPTION_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-agent-worker-secret
+                  key: ENCRYPTION_MASTER_KEY
+            # Claude CLI binary path (copied into image at Dockerfile.agent-worker build).
+            - name: CLAUDE_CLI_PATH
+              value: '/usr/local/bin/claude'
+            # Credentials file written to tmpfs so it is cleared on pod death.
+            - name: CLAUDE_AUTH_FILE
+              value: '/tmp/claude-auth/credentials.json'
+            # Path to the read-only code volume populated by the initContainer.
+            - name: CODE_MOUNT_PATH
+              value: '/repo'
+          volumeMounts:
+            # Read-only code volume — worker can read but not write to /repo.
+            - name: code-volume
+              mountPath: /repo
+              readOnly: true
+            # tmpfs for the decrypted Claude credentials file.
+            # Cleared automatically when the pod is deleted.
+            - name: claude-auth
+              mountPath: /tmp/claude-auth
+          resources:
+            requests:
+              cpu: '200m'
+              memory: '256Mi'
+            limits:
+              cpu: '1000m'
+              memory: '1Gi'
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            # Root filesystem is read-only; writable paths use volume mounts.
+            readOnlyRootFilesystem: true
+
+      volumes:
+        # Shared volume between initContainer and worker container.
+        # Populated with a shallow git clone by the initContainer.
+        - name: code-volume
+          emptyDir: {}
+        # tmpfs for the Claude credentials file — never persisted to disk.
+        # Blueprint: WORKER-T-009 (vendor-api-key-leak) — credentials in memory only.
+        - name: claude-auth
+          emptyDir:
+            medium: Memory
+            sizeLimit: '1Mi'
