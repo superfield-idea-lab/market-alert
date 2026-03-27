@@ -5,6 +5,7 @@
  * GET    /api/admin/keys        — lists API key metadata (no raw values)
  * DELETE /api/admin/keys/:id    — revokes an API key
  * GET    /api/admin/task-queue   — lists recent task queue entries for monitoring
+ * GET    /api/admin/findings     — aggregated findings from completed agent tasks
  *
  * GET    /api/admin/users       — paginated user list, optional ?role= filter
  * PATCH  /api/admin/users/:id   — change role or active status of a user
@@ -134,6 +135,110 @@ export async function handleAdminRequest(
     });
 
     return json({ tasks, limit, offset });
+  }
+
+  // GET /api/admin/findings — aggregate structured findings from completed self-improving agent tasks.
+  // Supported agent types: security, soc_compliance, runtime_errors, code_cleanup.
+  // Each finding in the task result must conform to: { severity, file_path, description, remediation }.
+  // Optional query parameters:
+  //   ?agent_type=<string>  — filter to a single agent type
+  //   ?limit=<number>       (default 200, max 500)
+  //   ?offset=<number>      (default 0)
+  if (req.method === 'GET' && url.pathname === '/api/admin/findings') {
+    const { sql: appSql } = appState;
+
+    const agentTypeParam = url.searchParams.get('agent_type') ?? undefined;
+    const limitParam = url.searchParams.get('limit');
+    const offsetParam = url.searchParams.get('offset');
+
+    const limit = Math.min(Math.max(parseInt(limitParam ?? '200', 10) || 200, 1), 500);
+    const offset = Math.max(parseInt(offsetParam ?? '0', 10) || 0, 0);
+
+    // Known self-improving agent types that produce structured findings
+    const FINDINGS_AGENT_TYPES = [
+      'security',
+      'soc_compliance',
+      'runtime_errors',
+      'code_cleanup',
+    ] as const;
+
+    // Query completed tasks from the findings-producing agent types
+    interface CompletedTaskRow {
+      id: string;
+      agent_type: string;
+      result: Record<string, unknown> | null;
+      completed_at: Date | null;
+      updated_at: Date;
+    }
+
+    const agentFilter = agentTypeParam ?? null;
+
+    const rows = await appSql<CompletedTaskRow[]>`
+      SELECT id, agent_type, result, completed_at, updated_at
+      FROM task_queue
+      WHERE status = 'completed'
+        AND result IS NOT NULL
+        AND agent_type = ANY(${appSql.array(FINDINGS_AGENT_TYPES as unknown as string[])})
+        ${agentFilter ? appSql`AND agent_type = ${agentFilter}` : appSql``}
+      ORDER BY updated_at DESC
+      LIMIT ${limit}
+      OFFSET ${offset}
+    `;
+
+    // Extract findings from task results — each result may contain a `findings` array
+    interface RawFinding {
+      severity?: string;
+      file_path?: string;
+      description?: string;
+      remediation?: string;
+      [key: string]: unknown;
+    }
+
+    interface Finding {
+      task_id: string;
+      agent_type: string;
+      severity: string;
+      file_path: string;
+      description: string;
+      remediation: string;
+      scanned_at: string;
+    }
+
+    const findings: Finding[] = [];
+
+    for (const row of rows) {
+      if (!row.result) continue;
+      const rawFindings = Array.isArray(row.result.findings) ? row.result.findings : [];
+      const scannedAt = row.completed_at
+        ? new Date(row.completed_at).toISOString()
+        : new Date(row.updated_at).toISOString();
+
+      for (const f of rawFindings as RawFinding[]) {
+        if (typeof f !== 'object' || f === null) continue;
+        findings.push({
+          task_id: row.id,
+          agent_type: row.agent_type,
+          severity: typeof f.severity === 'string' ? f.severity : 'unknown',
+          file_path: typeof f.file_path === 'string' ? f.file_path : '',
+          description: typeof f.description === 'string' ? f.description : '',
+          remediation: typeof f.remediation === 'string' ? f.remediation : '',
+          scanned_at: scannedAt,
+        });
+      }
+    }
+
+    // Build summary counts per agent type and severity
+    const summary: Record<string, Record<string, number>> = {};
+    for (const at of FINDINGS_AGENT_TYPES) {
+      summary[at] = {};
+    }
+
+    for (const f of findings) {
+      if (!summary[f.agent_type]) summary[f.agent_type] = {};
+      summary[f.agent_type][f.severity] = (summary[f.agent_type][f.severity] ?? 0) + 1;
+    }
+
+    return json({ findings, summary, limit, offset });
   }
 
   // -----------------------------------------------------------------------
