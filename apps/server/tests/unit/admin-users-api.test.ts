@@ -125,6 +125,106 @@ describe('Admin Users API — GET /api/admin/users', () => {
     expect(body.users[0].properties.username).toBe('alice');
   });
 
+  test('supports ?q= search parameter filtering by username', async () => {
+    const authModule = await import('../../src/api/auth');
+    vi.spyOn(authModule, 'getAuthenticatedUser').mockResolvedValue({
+      id: 'super-id',
+      username: 'admin',
+    });
+    const responseModule = await import('../../src/lib/response');
+    vi.spyOn(responseModule, 'isSuperuser').mockReturnValue(true);
+
+    const matchingUser = {
+      id: 'user-1',
+      properties: { username: 'alice', password_hash: 'hash', role: 'user' },
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    const appState = makeAppState([matchingUser], [{ count: '1' }]);
+
+    const req = makeRequest('GET', '/api/admin/users?q=alice', undefined, 'calypso_auth=fake');
+    const url = new URL(req.url);
+    const result = await handleAdminRequest(req, url, appState);
+    expect(result?.status).toBe(200);
+
+    const body = await result?.json();
+    expect(body.users).toHaveLength(1);
+    expect(body.total).toBe(1);
+    expect(body.users[0].properties.username).toBe('alice');
+    // password_hash must be stripped
+    expect(body.users[0].properties.password_hash).toBeUndefined();
+  });
+
+  test('empty ?q= returns full paginated list', async () => {
+    const authModule = await import('../../src/api/auth');
+    vi.spyOn(authModule, 'getAuthenticatedUser').mockResolvedValue({
+      id: 'super-id',
+      username: 'admin',
+    });
+    const responseModule = await import('../../src/lib/response');
+    vi.spyOn(responseModule, 'isSuperuser').mockReturnValue(true);
+
+    const userRows = [
+      {
+        id: 'user-1',
+        properties: { username: 'alice', password_hash: 'hash' },
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      },
+      {
+        id: 'user-2',
+        properties: { username: 'bob', password_hash: 'hash' },
+        created_at: '2024-01-02T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      },
+    ];
+
+    const appState = makeAppState(userRows, [{ count: '2' }]);
+
+    const req = makeRequest('GET', '/api/admin/users?q=', undefined, 'calypso_auth=fake');
+    const url = new URL(req.url);
+    const result = await handleAdminRequest(req, url, appState);
+    expect(result?.status).toBe(200);
+
+    const body = await result?.json();
+    expect(body.users).toHaveLength(2);
+    expect(body.total).toBe(2);
+  });
+
+  test('supports combined ?q= and ?role= filters', async () => {
+    const authModule = await import('../../src/api/auth');
+    vi.spyOn(authModule, 'getAuthenticatedUser').mockResolvedValue({
+      id: 'super-id',
+      username: 'admin',
+    });
+    const responseModule = await import('../../src/lib/response');
+    vi.spyOn(responseModule, 'isSuperuser').mockReturnValue(true);
+
+    const superuserMatch = {
+      id: 'super-1',
+      properties: { username: 'superalice', password_hash: 'hash', role: 'superuser' },
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    const appState = makeAppState([superuserMatch], [{ count: '1' }]);
+
+    const req = makeRequest(
+      'GET',
+      '/api/admin/users?q=alice&role=superuser',
+      undefined,
+      'calypso_auth=fake',
+    );
+    const url = new URL(req.url);
+    const result = await handleAdminRequest(req, url, appState);
+    expect(result?.status).toBe(200);
+
+    const body = await result?.json();
+    expect(body.users).toHaveLength(1);
+    expect(body.users[0].properties.role).toBe('superuser');
+  });
+
   test('supports ?role= query filter', async () => {
     const authModule = await import('../../src/api/auth');
     vi.spyOn(authModule, 'getAuthenticatedUser').mockResolvedValue({

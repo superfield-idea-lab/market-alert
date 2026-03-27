@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, Search } from 'lucide-react';
+
+/** Debounce delay for search input (milliseconds). */
+const SEARCH_DEBOUNCE_MS = 300;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -395,6 +398,11 @@ type AdminTab = 'tasks' | 'users' | 'findings';
 export function AdminDashboard() {
   const [tasks, setTasks] = useState<TaskQueueEntry[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [userTotal, setUserTotal] = useState(0);
+  const [userPage, setUserPage] = useState(1);
+  const [userLimit] = useState(20);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
@@ -404,6 +412,11 @@ export function AdminDashboard() {
   const reconnectDelayRef = useRef(WS_RECONNECT_BASE_MS);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // Fetch helpers
+  // ---------------------------------------------------------------------------
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -419,24 +432,36 @@ export function AdminDashboard() {
     }
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/users?limit=50', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users ?? []);
+  const fetchUsers = useCallback(
+    async (page: number, q: string) => {
+      setLoadingUsers(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: String(userLimit),
+        });
+        if (q) params.set('q', q);
+        const res = await fetch(`/api/admin/users?${params.toString()}`, {
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUsers(data.users ?? []);
+          setUserTotal(data.total ?? 0);
+        }
+      } catch (err) {
+        console.error('Admin dashboard user fetch error:', err);
+      } finally {
+        setLoadingUsers(false);
       }
-    } catch (err) {
-      console.error('Admin dashboard user fetch error:', err);
-    } finally {
-      setLoadingUsers(false);
-    }
-  }, []);
+    },
+    [userLimit],
+  );
 
   const fetchData = useCallback(() => {
     fetchTasks();
-    fetchUsers();
-  }, [fetchTasks, fetchUsers]);
+    fetchUsers(userPage, searchQuery);
+  }, [fetchTasks, fetchUsers, userPage, searchQuery]);
 
   /** Apply an incoming task_queue WebSocket event to the task list. */
   const applyTaskEvent = useCallback((event: string, data: Record<string, unknown>) => {
@@ -518,12 +543,41 @@ export function AdminDashboard() {
     return () => {
       mountedRef.current = false;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       if (wsRef.current) {
         wsRef.current.onclose = null; // prevent reconnect on intentional close
         wsRef.current.close();
       }
     };
   }, []); // intentional: run once on mount; fetchData and connectWs are stable refs
+
+  // ---------------------------------------------------------------------------
+  // Debounced search
+  // ---------------------------------------------------------------------------
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchInput(value);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(value);
+      setUserPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+  };
+
+  // Re-fetch users when searchQuery or userPage changes
+  useEffect(() => {
+    fetchUsers(userPage, searchQuery);
+  }, [fetchUsers, userPage, searchQuery]);
+
+  // ---------------------------------------------------------------------------
+  // Pagination
+  // ---------------------------------------------------------------------------
+
+  const totalPages = Math.max(1, Math.ceil(userTotal / userLimit));
+  const pageStart = userTotal === 0 ? 0 : (userPage - 1) * userLimit + 1;
+  const pageEnd = Math.min(userPage * userLimit, userTotal);
 
   const tabs: { id: AdminTab; label: string }[] = [
     { id: 'tasks', label: 'Task Queue' },
@@ -634,6 +688,25 @@ export function AdminDashboard() {
       {/* User List Panel */}
       {activeTab === 'users' && (
         <section>
+          {/* Section header with search */}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">Users</h2>
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+              />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={handleSearchChange}
+                placeholder="Search users..."
+                className="pl-8 pr-3 py-1.5 text-xs border border-zinc-200 rounded-lg bg-white text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-colors w-52"
+                aria-label="Search users"
+              />
+            </div>
+          </div>
+
           <div className="border border-zinc-200 rounded-xl overflow-hidden bg-white">
             {loadingUsers ? (
               <div className="flex items-center justify-center h-24 text-zinc-400 text-sm">
@@ -641,7 +714,7 @@ export function AdminDashboard() {
               </div>
             ) : users.length === 0 ? (
               <div className="flex items-center justify-center h-24 text-zinc-400 text-sm">
-                No users found.
+                {searchQuery ? `No users match "${searchQuery}".` : 'No users found.'}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -682,6 +755,39 @@ export function AdminDashboard() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Pagination footer */}
+            {userTotal > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100 bg-zinc-50">
+                <span className="text-xs text-zinc-500">
+                  {pageStart}–{pageEnd} of {userTotal} user{userTotal !== 1 ? 's' : ''}
+                  {searchQuery && (
+                    <span className="ml-1 text-indigo-500">
+                      matching &ldquo;{searchQuery}&rdquo;
+                    </span>
+                  )}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setUserPage((p) => Math.max(1, p - 1))}
+                    disabled={userPage <= 1}
+                    className="px-2 py-1 text-xs font-medium text-zinc-600 border border-zinc-200 rounded-md hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-zinc-500">
+                    Page {userPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setUserPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={userPage >= totalPages}
+                    className="px-2 py-1 text-xs font-medium text-zinc-600 border border-zinc-200 rounded-md hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>

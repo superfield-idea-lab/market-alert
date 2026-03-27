@@ -247,12 +247,19 @@ export async function handleAdminRequest(
 
   const { sql } = appState;
 
-  // GET /api/admin/users — paginated user list with optional role filter
+  // GET /api/admin/users — paginated user list with optional role filter and ?q= search
+  //
+  // Query parameters:
+  //   ?q=<string>    — case-insensitive partial match on username, email, or display_name
+  //   ?role=<string> — exact match on properties.role
+  //   ?page=<number> — 1-based page number (default 1)
+  //   ?limit=<number>— page size (default 20, max 100)
   if (req.method === 'GET' && url.pathname === '/api/admin/users') {
     const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20));
     const offset = (page - 1) * limit;
     const roleFilter = url.searchParams.get('role') ?? null;
+    const searchTerm = url.searchParams.get('q')?.trim() ?? null;
 
     interface UserRow {
       id: string;
@@ -264,7 +271,57 @@ export async function handleAdminRequest(
     let users: UserRow[];
     let totalRows: { count: string }[];
 
-    if (roleFilter) {
+    if (searchTerm && roleFilter) {
+      const pattern = `%${searchTerm}%`;
+      users = await sql<UserRow[]>`
+        SELECT id, properties, created_at, updated_at
+        FROM entities
+        WHERE type = 'user'
+          AND properties->>'role' = ${roleFilter}
+          AND (
+            LOWER(properties->>'username') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'email') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'display_name') LIKE LOWER(${pattern})
+          )
+        ORDER BY created_at ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      totalRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*) AS count
+        FROM entities
+        WHERE type = 'user'
+          AND properties->>'role' = ${roleFilter}
+          AND (
+            LOWER(properties->>'username') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'email') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'display_name') LIKE LOWER(${pattern})
+          )
+      `;
+    } else if (searchTerm) {
+      const pattern = `%${searchTerm}%`;
+      users = await sql<UserRow[]>`
+        SELECT id, properties, created_at, updated_at
+        FROM entities
+        WHERE type = 'user'
+          AND (
+            LOWER(properties->>'username') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'email') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'display_name') LIKE LOWER(${pattern})
+          )
+        ORDER BY created_at ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      totalRows = await sql<{ count: string }[]>`
+        SELECT COUNT(*) AS count
+        FROM entities
+        WHERE type = 'user'
+          AND (
+            LOWER(properties->>'username') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'email') LIKE LOWER(${pattern})
+            OR LOWER(properties->>'display_name') LIKE LOWER(${pattern})
+          )
+      `;
+    } else if (roleFilter) {
       users = await sql<UserRow[]>`
         SELECT id, properties, created_at, updated_at
         FROM entities
