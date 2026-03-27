@@ -143,6 +143,15 @@ CREATE OR REPLACE FUNCTION notify_task_queue_insert()
     RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     PERFORM pg_notify('task_queue_' || NEW.agent_type, NEW.id::TEXT);
+    PERFORM pg_notify('task_queue_admin', json_build_object(
+        'event', 'task_queue.created',
+        'id', NEW.id,
+        'status', NEW.status,
+        'agent_type', NEW.agent_type,
+        'job_type', NEW.job_type,
+        'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+        'updated_at', to_char(NEW.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    )::TEXT);
     RETURN NEW;
 END
 $$;
@@ -151,6 +160,28 @@ DROP TRIGGER IF EXISTS trg_task_queue_notify ON task_queue;
 CREATE TRIGGER trg_task_queue_notify
     AFTER INSERT ON task_queue
     FOR EACH ROW EXECUTE FUNCTION notify_task_queue_insert();
+
+-- LISTEN/NOTIFY trigger: notify admin monitor channel on task status update.
+CREATE OR REPLACE FUNCTION notify_task_queue_update()
+    RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_notify('task_queue_admin', json_build_object(
+        'event', 'task_queue.updated',
+        'id', NEW.id,
+        'status', NEW.status,
+        'agent_type', NEW.agent_type,
+        'job_type', NEW.job_type,
+        'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+        'updated_at', to_char(NEW.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    )::TEXT);
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_task_queue_admin_notify ON task_queue;
+CREATE TRIGGER trg_task_queue_admin_notify
+    AFTER UPDATE ON task_queue
+    FOR EACH ROW EXECUTE FUNCTION notify_task_queue_update();
 
 -- Passkey / WebAuthn credentials
 -- Stores the public key credential registered by the user's authenticator.
