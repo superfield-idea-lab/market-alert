@@ -1,8 +1,10 @@
 /**
- * Unit tests for admin dashboard rendering logic and access control.
+ * Unit tests for admin dashboard rendering logic, access control, and
+ * WebSocket reactive task queue update logic.
  *
- * Tests the conditional visibility logic for the admin nav button and
- * the admin view access guard without requiring DOM rendering.
+ * Tests the conditional visibility logic for the admin nav button, the admin
+ * view access guard, status badge colours, and the task list merge logic that
+ * applies incoming WebSocket events — all without requiring DOM rendering.
  */
 
 import { describe, test, expect } from 'vitest';
@@ -43,6 +45,50 @@ function resolveStatusColor(status: string): string {
   };
   return STATUS_COLORS[status] ?? 'bg-zinc-50 text-zinc-600 border-zinc-200';
 }
+
+// ---------------------------------------------------------------------------
+// Mirror of the task list reactive merge logic from AdminDashboard
+// ---------------------------------------------------------------------------
+
+interface TaskEntry {
+  id: string;
+  status: string;
+  agent_type: string | null;
+  created_at: string;
+  updated_at: string;
+  claimed_at: string | null;
+  completed_at: string | null;
+}
+
+/**
+ * Applies a task_queue WebSocket event to a task list.
+ * Mirrors the `applyTaskEvent` logic in AdminDashboard.
+ */
+function applyTaskEvent(
+  prev: TaskEntry[],
+  event: string,
+  data: Record<string, unknown>,
+): TaskEntry[] {
+  const incoming = data as unknown as TaskEntry;
+  if (event === 'task_queue.created') {
+    if (prev.some((t) => t.id === incoming.id)) return prev;
+    return [incoming, ...prev].slice(0, 50);
+  }
+  if (event === 'task_queue.updated') {
+    const idx = prev.findIndex((t) => t.id === incoming.id);
+    if (idx === -1) {
+      return [incoming, ...prev].slice(0, 50);
+    }
+    const next = [...prev];
+    next[idx] = { ...next[idx], ...incoming };
+    return next;
+  }
+  return prev;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe('Admin nav visibility', () => {
   test('visible when isSuperadmin is true', () => {
@@ -98,5 +144,84 @@ describe('AdminDashboard module exports', () => {
   test('AdminDashboard is exported from the module', async () => {
     const mod = await import('../../src/pages/admin-dashboard.js');
     expect(typeof mod.AdminDashboard).toBe('function');
+  });
+});
+
+describe('Task queue reactive merge logic (applyTaskEvent)', () => {
+  const baseTask: TaskEntry = {
+    id: 'task-1',
+    status: 'pending',
+    agent_type: 'coding',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    claimed_at: null,
+    completed_at: null,
+  };
+
+  test('task_queue.created prepends a new task to the list', () => {
+    const result = applyTaskEvent(
+      [],
+      'task_queue.created',
+      baseTask as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('task-1');
+  });
+
+  test('task_queue.created is idempotent for duplicate ids', () => {
+    const result = applyTaskEvent(
+      [baseTask],
+      'task_queue.created',
+      baseTask as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(1);
+  });
+
+  test('task_queue.updated merges status change into existing row', () => {
+    const update = { ...baseTask, status: 'running', updated_at: '2026-01-01T00:01:00Z' };
+    const result = applyTaskEvent(
+      [baseTask],
+      'task_queue.updated',
+      update as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('running');
+    expect(result[0].updated_at).toBe('2026-01-01T00:01:00Z');
+  });
+
+  test('task_queue.updated adds row if id is not in list', () => {
+    const newTask = { ...baseTask, id: 'task-2', status: 'claimed' };
+    const result = applyTaskEvent(
+      [baseTask],
+      'task_queue.updated',
+      newTask as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(2);
+    expect(result[0].id).toBe('task-2');
+  });
+
+  test('unknown event type returns list unchanged', () => {
+    const result = applyTaskEvent(
+      [baseTask],
+      'task.updated',
+      baseTask as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(baseTask);
+  });
+
+  test('list is capped at 50 entries on created', () => {
+    const big: TaskEntry[] = Array.from({ length: 50 }, (_, i) => ({
+      ...baseTask,
+      id: `task-${i}`,
+    }));
+    const newTask = { ...baseTask, id: 'task-new' };
+    const result = applyTaskEvent(
+      big,
+      'task_queue.created',
+      newTask as unknown as Record<string, unknown>,
+    );
+    expect(result).toHaveLength(50);
+    expect(result[0].id).toBe('task-new');
   });
 });

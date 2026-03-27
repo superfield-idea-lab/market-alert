@@ -16,13 +16,15 @@ import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/tas
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
 import { startCronScheduler } from './cron/boot';
-import { websocketHandler } from './websocket';
+import { websocketHandler, type WsClientData } from './websocket';
 import { handleAdminRequest } from './api/admin';
+import { isSuperuser } from './lib/response';
 import { handleUsersRequest } from './api/users';
 import { seedSuperuser } from './seed/superuser';
 import { seedDemoPersonas } from './seed/demo-personas';
 import { seedDemoData } from './seed/demo-data';
 import { startDemoHealthCheck } from './cron/demo-health-check';
+import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
 
 // Starter behavior:
@@ -67,6 +69,12 @@ await seedDemoData({ sql }).catch((err) =>
 // agent_type=cron so the admin monitor shows continuous activity.
 startDemoHealthCheck({ sql });
 
+// Start the task-queue LISTEN/NOTIFY → WebSocket bridge so the admin monitor
+// receives real-time task status changes without polling.
+startTaskQueueListener().catch((err) =>
+  console.error('[task-queue-listener] Failed to start:', err),
+);
+
 export interface AppState {
   sql: typeof sql;
   auditSql: typeof auditSql;
@@ -95,7 +103,7 @@ export default {
    *
    * @returns {Response} A unified response object containing the HTML document or API payload.
    */
-  async fetch(req: Request, server: import('bun').Server<undefined>) {
+  async fetch(req: Request, server: import('bun').Server<WsClientData>) {
     const url = new URL(req.url);
     const traceId = extractTraceId(req);
     const reqStart = Date.now();
@@ -151,7 +159,8 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      const upgraded = server.upgrade(req);
+      const clientData: WsClientData = { isSuperadmin: isSuperuser(user.id) };
+      const upgraded = server.upgrade(req, { data: clientData });
       if (!upgraded) {
         return new Response('WebSocket upgrade failed', { status: 400 });
       }

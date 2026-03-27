@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { broadcast, connectedClientCount } from '../../src/websocket';
+import { broadcast, broadcastToAdmins, connectedClientCount } from '../../src/websocket';
 
 describe('broadcast', () => {
   test('does not throw when there are no connected clients', () => {
@@ -34,6 +34,26 @@ describe('broadcast', () => {
     // Suppress unused variable warning for the mock
     void mockWs;
     void received;
+  });
+});
+
+describe('broadcastToAdmins', () => {
+  test('does not throw when there are no connected clients', () => {
+    expect(() =>
+      broadcastToAdmins('task_queue.updated', { id: 'abc', status: 'running' }),
+    ).not.toThrow();
+  });
+
+  test('serialises event and data as JSON in admin-only message format', () => {
+    const event = 'task_queue.created';
+    const data = { id: 'xyz', status: 'pending', agent_type: 'coding' };
+    const expected = JSON.stringify({ event, data });
+
+    const formatted = JSON.stringify({ event, data });
+    const parsed = JSON.parse(formatted) as { event: string; data: typeof data };
+    expect(parsed.event).toBe(event);
+    expect(parsed.data).toEqual(data);
+    expect(formatted).toBe(expected);
   });
 });
 

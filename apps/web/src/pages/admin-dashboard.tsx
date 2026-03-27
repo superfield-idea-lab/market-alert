@@ -1,9 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 
-/** Polling interval in milliseconds (30 seconds). */
-const POLL_INTERVAL_MS = 30_000;
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -12,6 +9,7 @@ interface TaskQueueEntry {
   id: string;
   status: string;
   agent_type: string | null;
+  job_type?: string;
   created_at: string;
   updated_at: string;
   claimed_at: string | null;
@@ -71,6 +69,17 @@ function formatTimestamp(iso: string | null): string {
   });
 }
 
+/** Build the WebSocket URL from the current page origin. */
+function buildWsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws`;
+}
+
+/** WebSocket reconnect base delay in milliseconds. */
+const WS_RECONNECT_BASE_MS = 1_000;
+/** Maximum reconnect delay in milliseconds (exponential back-off cap). */
+const WS_RECONNECT_MAX_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -80,41 +89,133 @@ export function AdminDashboard() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectDelayRef = useRef(WS_RECONNECT_BASE_MS);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  const fetchTasks = useCallback(async () => {
     try {
-      const [taskRes, userRes] = await Promise.all([
-        fetch('/api/admin/task-queue?limit=50', { credentials: 'include' }),
-        fetch('/api/admin/users?limit=50', { credentials: 'include' }),
-      ]);
-
-      if (taskRes.ok) {
-        const data = await taskRes.json();
+      const res = await fetch('/api/admin/task-queue?limit=50', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
         setTasks(data.tasks ?? []);
       }
-      if (userRes.ok) {
-        const data = await userRes.json();
-        setUsers(data.users ?? []);
-      }
-      setLastRefresh(new Date());
     } catch (err) {
-      console.error('Admin dashboard fetch error:', err);
+      console.error('Admin dashboard task fetch error:', err);
     } finally {
       setLoadingTasks(false);
+    }
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/users?limit=50', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data.users ?? []);
+      }
+    } catch (err) {
+      console.error('Admin dashboard user fetch error:', err);
+    } finally {
       setLoadingUsers(false);
     }
   }, []);
 
-  // Initial load + polling
-  useEffect(() => {
-    fetchData();
-    timerRef.current = setInterval(fetchData, POLL_INTERVAL_MS);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+  const fetchData = useCallback(() => {
+    fetchTasks();
+    fetchUsers();
+  }, [fetchTasks, fetchUsers]);
+
+  /** Apply an incoming task_queue WebSocket event to the task list. */
+  const applyTaskEvent = useCallback((event: string, data: Record<string, unknown>) => {
+    if (event === 'task_queue.created') {
+      const incoming = data as unknown as TaskQueueEntry;
+      setTasks((prev) => {
+        // Avoid duplicates — prepend if not already present.
+        if (prev.some((t) => t.id === incoming.id)) return prev;
+        return [incoming, ...prev].slice(0, 50);
+      });
+    } else if (event === 'task_queue.updated') {
+      const incoming = data as unknown as TaskQueueEntry;
+      setTasks((prev) => {
+        const idx = prev.findIndex((t) => t.id === incoming.id);
+        if (idx === -1) {
+          // Row not yet in the list — add it at the top.
+          return [incoming, ...prev].slice(0, 50);
+        }
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...incoming };
+        return next;
+      });
+    }
+  }, []);
+
+  /** Connect (or reconnect) the WebSocket. */
+  const connectWs = useCallback(() => {
+    if (!mountedRef.current) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+
+    const ws = new WebSocket(buildWsUrl());
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (!mountedRef.current) {
+        ws.close();
+        return;
+      }
+      setWsConnected(true);
+      reconnectDelayRef.current = WS_RECONNECT_BASE_MS;
+      // Re-fetch tasks on reconnect to sync any changes missed during disconnect.
+      fetchTasks();
     };
-  }, [fetchData]);
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data as string) as {
+          event: string;
+          data: Record<string, unknown>;
+        };
+        if (typeof msg.event === 'string' && msg.event.startsWith('task_queue.')) {
+          applyTaskEvent(msg.event, msg.data ?? {});
+        }
+      } catch {
+        // Ignore malformed messages.
+      }
+    };
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return;
+      setWsConnected(false);
+      // Exponential back-off reconnect.
+      const delay = reconnectDelayRef.current;
+      reconnectDelayRef.current = Math.min(delay * 2, WS_RECONNECT_MAX_MS);
+      reconnectTimerRef.current = setTimeout(connectWs, delay);
+    };
+
+    ws.onerror = () => {
+      // onclose fires after onerror; reconnect logic runs there.
+    };
+  }, [applyTaskEvent, fetchTasks]);
+
+  // Initial data load + WebSocket connection on mount.
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchData();
+    connectWs();
+
+    return () => {
+      mountedRef.current = false;
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // prevent reconnect on intentional close
+        wsRef.current.close();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
@@ -123,7 +224,17 @@ export function AdminDashboard() {
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Admin Dashboard</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            {lastRefresh ? `Last refreshed ${lastRefresh.toLocaleTimeString()}` : 'Loading...'}
+            {wsConnected ? (
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Live
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-zinc-300" />
+                Reconnecting…
+              </span>
+            )}
           </p>
         </div>
         <button
