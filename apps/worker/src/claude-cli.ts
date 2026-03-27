@@ -242,13 +242,15 @@ export async function invokeCli(options: InvokeCliOptions): Promise<Record<strin
     });
 
     // Write task payload to stdin and close to signal EOF.
+    // Suppress EPIPE errors here — if the child exits before reading stdin,
+    // the 'close' handler will fire and reject with the appropriate error.
+    child.stdin.on('error', () => {
+      // Intentionally ignored: EPIPE and similar write errors on stdin are
+      // expected when the subprocess exits early. The 'close' handler covers
+      // the failure path.
+    });
     const stdinPayload = JSON.stringify(taskPayload);
-    child.stdin.write(stdinPayload, (writeErr) => {
-      if (writeErr && !timedOut) {
-        clearTimeout(timer);
-        reject(writeErr);
-        return;
-      }
+    child.stdin.write(stdinPayload, () => {
       child.stdin.end();
     });
   });
