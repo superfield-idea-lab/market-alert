@@ -9,7 +9,7 @@
  * - Sample agent job payload building and result validation
  */
 
-import { describe, test, expect, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { writeFileSync, chmodSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
