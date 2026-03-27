@@ -53,8 +53,15 @@ import { access, constants } from 'fs/promises';
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Default CLI invocation timeout in milliseconds (30 seconds). */
-export const DEFAULT_CLI_TIMEOUT_MS = 30_000;
+/**
+ * Default CLI invocation timeout in milliseconds (10 minutes).
+ *
+ * This fallback applies only when `invokeCli` is called without an explicit
+ * `timeoutMs` and no agent-type timeout has been configured via environment
+ * variables. Production callers should always pass the timeout resolved by
+ * `resolveAgentTimeoutMs` from the `timeout` module.
+ */
+export const DEFAULT_CLI_TIMEOUT_MS = 600_000;
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -146,6 +153,13 @@ export interface InvokeCliOptions {
   taskPayload: unknown;
   /** Maximum ms to wait for the CLI to exit. Default: DEFAULT_CLI_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * Grace period in milliseconds between SIGTERM and SIGKILL.
+   * When the timeout fires, SIGTERM is sent first. If the process has not
+   * exited after this duration, SIGKILL is sent.
+   * Default: 5 000 ms.
+   */
+  sigtermGraceMs?: number;
 }
 
 /**
@@ -160,7 +174,12 @@ export interface InvokeCliOptions {
  * @throws {ClaudeCliTimeoutError} CLI exceeded `timeoutMs`.
  */
 export async function invokeCli(options: InvokeCliOptions): Promise<Record<string, unknown>> {
-  const { cliPath, taskPayload, timeoutMs = DEFAULT_CLI_TIMEOUT_MS } = options;
+  const {
+    cliPath,
+    taskPayload,
+    timeoutMs = DEFAULT_CLI_TIMEOUT_MS,
+    sigtermGraceMs = 5_000,
+  } = options;
 
   // Fall back to dev stub when no CLI path is configured.
   if (!cliPath) {
@@ -176,11 +195,16 @@ export async function invokeCli(options: InvokeCliOptions): Promise<Record<strin
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Timeout guard — SIGKILL if the CLI hangs.
+    // Timeout guard — SIGTERM first, then SIGKILL after grace period.
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      child.kill('SIGTERM');
+      // Send SIGKILL after the grace period if the process hasn't exited yet.
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, sigtermGraceMs);
       reject(new ClaudeCliTimeoutError(timeoutMs));
     }, timeoutMs);
 
@@ -196,6 +220,7 @@ export async function invokeCli(options: InvokeCliOptions): Promise<Record<strin
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (killTimer !== null) clearTimeout(killTimer);
       if (timedOut) return; // Already rejected via timeout path.
 
       if (code !== 0) {
@@ -212,6 +237,7 @@ export async function invokeCli(options: InvokeCliOptions): Promise<Record<strin
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      if (killTimer !== null) clearTimeout(killTimer);
       if (!timedOut) reject(err);
     });
 

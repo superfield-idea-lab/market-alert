@@ -22,18 +22,22 @@
  *
  * Environment variables
  * ----------------------
- * - AGENT_DATABASE_URL — read-only agent role connection string (required)
- * - AGENT_TYPE         — agent type name, e.g. "coding" (required)
- * - API_BASE_URL       — base URL of the Calypso API server (required)
- * - CLAUDE_CLI_PATH    — path to the Claude CLI binary; validated at startup.
- *                        When set, Claude credentials are restored from DB.
- *                        When unset, the dev stub is used as fallback.
- * - CLAUDE_AUTH_FILE   — override path for Claude CLI credentials file.
- *                        Defaults to ~/.config/anthropic/credentials.json.
- * - CODE_MOUNT_PATH    — path to the read-only code volume (default: /repo).
- *                        Set in container by the initContainer git clone.
- * - CODEX_PATH         — path to the codex binary (default: /usr/local/bin/codex)
- * - WORKER_ID          — unique identifier for this worker instance (default: hostname)
+ * - AGENT_DATABASE_URL              — read-only agent role connection string (required)
+ * - AGENT_TYPE                      — agent type name, e.g. "coding" (required)
+ * - API_BASE_URL                    — base URL of the Calypso API server (required)
+ * - CLAUDE_CLI_PATH                 — path to the Claude CLI binary; validated at startup.
+ *                                     When set, Claude credentials are restored from DB.
+ *                                     When unset, the dev stub is used as fallback.
+ * - CLAUDE_AUTH_FILE                — override path for Claude CLI credentials file.
+ *                                     Defaults to ~/.config/anthropic/credentials.json.
+ * - CODE_MOUNT_PATH                 — path to the read-only code volume (default: /repo).
+ *                                     Set in container by the initContainer git clone.
+ * - CODEX_PATH                      — path to the codex binary (default: /usr/local/bin/codex)
+ * - WORKER_ID                       — unique identifier for this worker instance (default: hostname)
+ * - AGENT_TIMEOUT_MS                — default hard timeout for all agent jobs in ms (default: 600000)
+ * - AGENT_TIMEOUT_MS_<AGENT_TYPE>   — per-agent-type hard timeout override in ms
+ *                                     (e.g. AGENT_TIMEOUT_MS_CODING=300000)
+ * - AGENT_TIMEOUT_SIGTERM_GRACE_MS  — grace period between SIGTERM and SIGKILL in ms (default: 5000)
  *
  * Canonical docs
  * ---------------
@@ -52,6 +56,7 @@ import { restoreCodexCredentials } from './codex-credentials';
 import { restoreClaudeCredentials } from './claude-credentials';
 import { invokeCli, validateClaudeCliPath } from './claude-cli';
 import { SAMPLE_JOB_TYPE, buildCliPayload, validateCliResult } from './sample-agent-job';
+import { resolveAgentTimeoutMs, resolveSigtermGraceMs } from './timeout';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -64,8 +69,15 @@ const WORKER_ID = process.env.WORKER_ID ?? os.hostname();
  *
  * The task payload is passed as a JSON string on stdin.  The CLI is expected
  * to write a JSON result object to stdout and exit 0 on success.
+ *
+ * A hard timeout is enforced: SIGTERM is sent after `timeoutMs`, followed by
+ * SIGKILL after `sigtermGraceMs` if the process has not yet exited.
  */
-async function invokeCodex(taskPayload: unknown): Promise<Record<string, unknown>> {
+async function invokeCodex(
+  taskPayload: unknown,
+  timeoutMs: number,
+  sigtermGraceMs: number,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const child = spawn(CODEX_PATH, ['--json-result'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -74,6 +86,18 @@ async function invokeCodex(taskPayload: unknown): Promise<Record<string, unknown
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Hard timeout: SIGTERM then SIGKILL.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, sigtermGraceMs);
+      reject(new Error(`Codex exceeded timeout of ${timeoutMs}ms`));
+    }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -84,6 +108,10 @@ async function invokeCodex(taskPayload: unknown): Promise<Record<string, unknown
     });
 
     child.on('close', (code) => {
+      clearTimeout(timer);
+      if (killTimer !== null) clearTimeout(killTimer);
+      if (timedOut) return; // Already rejected via timeout path.
+
       if (code !== 0) {
         reject(new Error(`Codex exited ${code}: ${stderr.slice(0, 500)}`));
         return;
@@ -95,7 +123,11 @@ async function invokeCodex(taskPayload: unknown): Promise<Record<string, unknown
       }
     });
 
-    child.on('error', reject);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      if (killTimer !== null) clearTimeout(killTimer);
+      if (!timedOut) reject(err);
+    });
 
     // Write task payload to stdin and close to signal EOF.
     child.stdin.write(JSON.stringify(taskPayload));
@@ -134,11 +166,17 @@ async function submitResultViaApi(
  *
  * Returns without doing anything if no task is available.
  * All errors are caught and logged; the loop must not throw.
+ *
+ * A hard timeout is enforced on subprocess execution. On expiry the subprocess
+ * receives SIGTERM, then SIGKILL after the grace period. The task is marked
+ * failed with a timeout reason and the worker returns to the claim loop.
  */
 async function tryClaimAndExecute(
   db: ReturnType<typeof createAgentPool>,
   agentType: string,
   apiBaseUrl: string,
+  timeoutMs: number,
+  sigtermGraceMs: number,
 ): Promise<void> {
   let task: Awaited<ReturnType<typeof claimNextTask>> = null;
 
@@ -152,7 +190,7 @@ async function tryClaimAndExecute(
       return; // No pending tasks — wait for next notification or poll interval.
     }
 
-    console.log(`[runner] Claimed task ${task.id} (type=${task.job_type})`);
+    console.log(`[runner] Claimed task ${task.id} (type=${task.job_type}, timeout=${timeoutMs}ms)`);
 
     // Route to the appropriate CLI based on job type.
     // claude_sample jobs go through the Claude CLI integration; all others
@@ -160,10 +198,15 @@ async function tryClaimAndExecute(
     let result: Record<string, unknown>;
     if (task.job_type === SAMPLE_JOB_TYPE) {
       const cliPayload = buildCliPayload(task.id, agentType, task.payload);
-      const rawResult = await invokeCli({ cliPath: CLAUDE_CLI_PATH, taskPayload: cliPayload });
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs,
+        sigtermGraceMs,
+      });
       result = validateCliResult(rawResult);
     } else {
-      result = await invokeCodex(task.payload);
+      result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }
 
     console.log(`[runner] Task ${task.id} completed`);
@@ -248,10 +291,18 @@ export async function startRunner(): Promise<void> {
     console.log(`[runner] Codex credentials restored — entering worker loop`);
   }
 
+  // Resolve hard timeout for this agent type.
+  const timeoutMs = resolveAgentTimeoutMs(agentType);
+  const sigtermGraceMs = resolveSigtermGraceMs();
+  console.log(
+    `[runner] Hard timeout configured — timeout=${timeoutMs}ms, sigtermGrace=${sigtermGraceMs}ms`,
+  );
+
   const { stop } = await runWorkerLoop({
     agentType,
     databaseUrl: agentDatabaseUrl,
-    tryClaimAndExecute: () => tryClaimAndExecute(db, agentType, apiBaseUrl),
+    tryClaimAndExecute: () =>
+      tryClaimAndExecute(db, agentType, apiBaseUrl, timeoutMs, sigtermGraceMs),
   });
 
   // Graceful shutdown on SIGTERM (sent by container orchestrator on scale-down).

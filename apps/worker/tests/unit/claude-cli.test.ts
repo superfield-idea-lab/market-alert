@@ -207,6 +207,50 @@ printf '{"result":"got-%s","status":"completed"}\\n' "$id"
       unlinkSync(fakeCli);
     }
   }, 5000);
+
+  test('ClaudeCliTimeoutError includes the configured timeoutMs', async () => {
+    const fakeCli = writeTempScript(
+      'sleep-timeout-check',
+      `#!/bin/sh\nsleep 30\necho '{"result":"late"}'\n`,
+    );
+    try {
+      await invokeCli({ cliPath: fakeCli, taskPayload: {}, timeoutMs: 150 }).catch((err) => {
+        expect(err).toBeInstanceOf(ClaudeCliTimeoutError);
+        expect((err as ClaudeCliTimeoutError).timeoutMs).toBe(150);
+        expect((err as ClaudeCliTimeoutError).message).toContain('150');
+      });
+    } finally {
+      unlinkSync(fakeCli);
+    }
+  }, 5000);
+
+  test('sends SIGTERM before SIGKILL on timeout (process exits on SIGTERM)', async () => {
+    // Script traps SIGTERM and exits 0 — so if SIGTERM is received the
+    // process exits cleanly. If only SIGKILL were sent this would also work,
+    // but the primary assertion is that the timeout fires and the promise
+    // rejects with ClaudeCliTimeoutError in a short window.
+    const fakeCli = writeTempScript('sigterm-exit', `#!/bin/sh\ntrap 'exit 0' TERM\nsleep 30\n`);
+    try {
+      await expect(
+        invokeCli({ cliPath: fakeCli, taskPayload: {}, timeoutMs: 200, sigtermGraceMs: 1000 }),
+      ).rejects.toBeInstanceOf(ClaudeCliTimeoutError);
+    } finally {
+      unlinkSync(fakeCli);
+    }
+  }, 5000);
+
+  test('SIGKILL sent after grace period when process ignores SIGTERM', async () => {
+    // Script traps SIGTERM (ignores it) and only exits when SIGKILL arrives.
+    // With a short sigtermGraceMs the whole sequence should complete quickly.
+    const fakeCli = writeTempScript('sigterm-ignore', `#!/bin/sh\ntrap '' TERM\nsleep 30\n`);
+    try {
+      await expect(
+        invokeCli({ cliPath: fakeCli, taskPayload: {}, timeoutMs: 200, sigtermGraceMs: 200 }),
+      ).rejects.toBeInstanceOf(ClaudeCliTimeoutError);
+    } finally {
+      unlinkSync(fakeCli);
+    }
+  }, 5000);
 });
 
 // ---------------------------------------------------------------------------
