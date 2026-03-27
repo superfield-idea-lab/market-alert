@@ -172,3 +172,53 @@ export async function runWorkerLoop(
 
   return { stop };
 }
+
+// ---------------------------------------------------------------------------
+// Admin monitor LISTEN channel
+// ---------------------------------------------------------------------------
+
+/**
+ * Callback invoked with the raw notification payload string from the
+ * `task_queue_admin` channel.
+ */
+export type TaskQueueAdminNotifyCallback = (payload: string) => void;
+
+/**
+ * Handle returned by {@link createAdminChannelListener}.
+ */
+export interface AdminChannelListenerHandle {
+  /** Unlistens from the channel and closes the dedicated connection. */
+  stop(): Promise<void>;
+}
+
+/**
+ * Subscribes to the `task_queue_admin` PostgreSQL LISTEN/NOTIFY channel.
+ *
+ * A dedicated single-connection postgres client is used so the main pool is
+ * not consumed for a long-lived LISTEN connection.
+ *
+ * @param onNotify      Callback invoked with the raw notification payload.
+ * @param databaseUrl   Optional database URL; defaults to DATABASE_URL env var.
+ */
+export async function createAdminChannelListener(
+  onNotify: TaskQueueAdminNotifyCallback,
+  databaseUrl?: string,
+): Promise<AdminChannelListenerHandle> {
+  const url = databaseUrl ?? resolveDatabaseUrls().app;
+  const listenSql = createListenConnection(url);
+
+  const listenMeta = await listenSql.listen('task_queue_admin', (payload) => {
+    onNotify(payload);
+  });
+
+  return {
+    async stop() {
+      try {
+        await listenMeta.unlisten();
+      } catch {
+        // Best-effort unlisten; connection may already be closed.
+      }
+      await listenSql.end({ timeout: 5 });
+    },
+  };
+}

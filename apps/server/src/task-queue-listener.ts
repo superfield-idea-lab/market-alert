@@ -9,21 +9,19 @@
  * `task_queue_admin`. This module receives those notifications and calls
  * `broadcastToAdmins` so the admin dashboard can update in real time.
  *
- * A dedicated single-connection postgres client is used for LISTEN because
- * the main pool multiplexes connections and must not be used for LISTEN.
+ * The LISTEN connection is managed by `createAdminChannelListener` in the
+ * db package, which uses a dedicated single-connection postgres client
+ * (the main pool must not be used for LISTEN).
  *
  * The returned handle exposes a `stop()` method to unlisten and close the
  * connection on graceful shutdown.
  */
 
-import postgres from 'postgres';
-import { resolveDatabaseUrls, buildSslOptions } from 'db';
+import { createAdminChannelListener } from 'db/task-queue-worker';
+import type { AdminChannelListenerHandle } from 'db/task-queue-worker';
 import { broadcastToAdmins } from './websocket';
 
-export interface TaskQueueListenerHandle {
-  /** Stops listening and closes the dedicated connection. */
-  stop(): Promise<void>;
-}
+export type { AdminChannelListenerHandle };
 
 /**
  * Starts the `task_queue_admin` LISTEN connection.
@@ -38,20 +36,8 @@ export interface TaskQueueListenerHandle {
  */
 export async function startTaskQueueListener(
   databaseUrl?: string,
-): Promise<TaskQueueListenerHandle> {
-  const url = databaseUrl ?? resolveDatabaseUrls().app;
-
-  const listenSql = postgres(url, {
-    max: 1,
-    idle_timeout: 0,
-    connect_timeout: 10,
-    ssl: buildSslOptions(),
-    connection: { client_min_messages: 'warning' },
-  });
-
-  const channel = 'task_queue_admin';
-
-  const listenMeta = await listenSql.listen(channel, (payload) => {
+): Promise<AdminChannelListenerHandle> {
+  const handle = await createAdminChannelListener((payload) => {
     let parsed: { event: string; [key: string]: unknown };
     try {
       parsed = JSON.parse(payload) as typeof parsed;
@@ -67,19 +53,9 @@ export async function startTaskQueueListener(
     }
 
     broadcastToAdmins(event, data);
-  });
+  }, databaseUrl);
 
-  console.log(`[task-queue-listener] Listening on "${channel}" for admin monitor events.`);
+  console.log('[task-queue-listener] Listening on "task_queue_admin" for admin monitor events.');
 
-  return {
-    async stop() {
-      try {
-        await listenMeta.unlisten();
-      } catch {
-        // Best-effort unlisten; connection may already be closed.
-      }
-      await listenSql.end({ timeout: 5 });
-      console.log('[task-queue-listener] Stopped.');
-    },
-  };
+  return handle;
 }
