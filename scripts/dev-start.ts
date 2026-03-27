@@ -155,20 +155,28 @@ async function main() {
   });
   apiServerHandle = apiServer;
 
-  // 4. Start Vite in middleware mode — single HTTP entry point, proxies to API
+  // 4. Create the HTTP server first so Vite can attach its HMR WebSocket
+  //    upgrade handler to it instead of spawning a separate listener on 24678.
+  const httpServer = createHttpServer();
+  httpServerHandle = httpServer;
+
+  // 5. Start Vite in middleware mode — pass the HTTP server so HMR WebSocket
+  //    upgrades are handled on the same port as the dev server.
   const vite = await createViteServer({
     configFile: join(REPO_ROOT, 'apps', 'web', 'vite.config.ts'),
     root: join(REPO_ROOT, 'apps', 'web'),
     server: {
       middlewareMode: true,
+      hmr: { server: httpServer },
       proxy: createProxy({ ...process.env, PORT: String(API_PORT) }),
     },
     appType: 'spa',
   });
   viteHandle = vite;
 
-  const httpServer = createHttpServer(vite.middlewares);
-  httpServerHandle = httpServer;
+  // Attach Vite middleware after the server is created so the HMR server
+  // reference is already set before any upgrade events can arrive.
+  httpServer.on('request', vite.middlewares);
 
   httpServer.on('error', async (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
