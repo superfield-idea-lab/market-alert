@@ -1,10 +1,7 @@
 /**
- * Unit tests for admin dashboard rendering logic, access control, and
- * WebSocket reactive task queue update logic.
- *
- * Tests the conditional visibility logic for the admin nav button, the admin
- * view access guard, status badge colours, and the task list merge logic that
- * applies incoming WebSocket events — all without requiring DOM rendering.
+ * Unit tests for admin dashboard rendering logic, access control,
+ * WebSocket reactive task queue update logic, findings tab summary logic,
+ * and severity badge resolution — all without requiring DOM rendering.
  */
 
 import { describe, test, expect } from 'vitest';
@@ -84,6 +81,63 @@ function applyTaskEvent(
     return next;
   }
   return prev;
+}
+
+// ---------------------------------------------------------------------------
+// Findings tab logic
+// ---------------------------------------------------------------------------
+
+type FindingsSummary = Record<string, Record<string, number>>;
+
+/**
+ * Mirror of findings summary aggregation: total counts by severity from all agent
+ * types' counts.
+ */
+function computeTotalBySeverity(summary: FindingsSummary): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const agentCounts of Object.values(summary)) {
+    for (const [sev, count] of Object.entries(agentCounts)) {
+      totals[sev] = (totals[sev] ?? 0) + count;
+    }
+  }
+  return totals;
+}
+
+/**
+ * Mirror of severity badge colour resolution.
+ */
+function resolveSeverityColor(severity: string): string {
+  const SEVERITY_COLORS: Record<string, string> = {
+    critical: 'bg-red-100 text-red-800 border-red-300',
+    high: 'bg-orange-50 text-orange-700 border-orange-200',
+    medium: 'bg-amber-50 text-amber-700 border-amber-200',
+    low: 'bg-yellow-50 text-yellow-600 border-yellow-200',
+    info: 'bg-blue-50 text-blue-600 border-blue-200',
+    unknown: 'bg-zinc-50 text-zinc-500 border-zinc-200',
+  };
+  return SEVERITY_COLORS[severity.toLowerCase()] ?? 'bg-zinc-50 text-zinc-500 border-zinc-200';
+}
+
+/**
+ * Mirror of grouping findings by agent type.
+ */
+interface Finding {
+  task_id: string;
+  agent_type: string;
+  severity: string;
+  file_path: string;
+  description: string;
+  remediation: string;
+  scanned_at: string;
+}
+
+function groupFindingsByAgentType(findings: Finding[]): Record<string, Finding[]> {
+  const groups: Record<string, Finding[]> = {};
+  for (const f of findings) {
+    if (!groups[f.agent_type]) groups[f.agent_type] = [];
+    groups[f.agent_type].push(f);
+  }
+  return groups;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,5 +277,104 @@ describe('Task queue reactive merge logic (applyTaskEvent)', () => {
     );
     expect(result).toHaveLength(50);
     expect(result[0].id).toBe('task-new');
+  });
+});
+
+describe('Findings summary aggregation', () => {
+  test('aggregates counts by severity across agent types', () => {
+    const summary: FindingsSummary = {
+      security: { critical: 2, high: 3 },
+      soc_compliance: { high: 1, medium: 4 },
+      runtime_errors: { low: 2 },
+      code_cleanup: {},
+    };
+    const totals = computeTotalBySeverity(summary);
+    expect(totals.critical).toBe(2);
+    expect(totals.high).toBe(4);
+    expect(totals.medium).toBe(4);
+    expect(totals.low).toBe(2);
+  });
+
+  test('returns empty object for empty summary', () => {
+    expect(computeTotalBySeverity({})).toEqual({});
+  });
+
+  test('handles agent type with no findings', () => {
+    const summary: FindingsSummary = {
+      security: {},
+      code_cleanup: { info: 5 },
+    };
+    const totals = computeTotalBySeverity(summary);
+    expect(totals.info).toBe(5);
+    expect(totals.critical).toBeUndefined();
+  });
+});
+
+describe('Severity badge colour resolution', () => {
+  test('returns correct colour for each known severity', () => {
+    expect(resolveSeverityColor('critical')).toContain('red');
+    expect(resolveSeverityColor('high')).toContain('orange');
+    expect(resolveSeverityColor('medium')).toContain('amber');
+    expect(resolveSeverityColor('low')).toContain('yellow');
+    expect(resolveSeverityColor('info')).toContain('blue');
+    expect(resolveSeverityColor('unknown')).toContain('zinc');
+  });
+
+  test('returns fallback colour for unrecognised severity', () => {
+    expect(resolveSeverityColor('warning')).toBe('bg-zinc-50 text-zinc-500 border-zinc-200');
+  });
+
+  test('is case-insensitive', () => {
+    expect(resolveSeverityColor('CRITICAL')).toContain('red');
+    expect(resolveSeverityColor('High')).toContain('orange');
+  });
+});
+
+describe('Findings grouping by agent type', () => {
+  const sampleFindings: Finding[] = [
+    {
+      task_id: 'task-1',
+      agent_type: 'security',
+      severity: 'high',
+      file_path: 'src/auth.ts',
+      description: 'SQL injection risk',
+      remediation: 'Use parameterised queries',
+      scanned_at: '2026-03-27T10:00:00Z',
+    },
+    {
+      task_id: 'task-1',
+      agent_type: 'security',
+      severity: 'medium',
+      file_path: 'src/api/users.ts',
+      description: 'Missing rate limit',
+      remediation: 'Add rate limiting middleware',
+      scanned_at: '2026-03-27T10:00:00Z',
+    },
+    {
+      task_id: 'task-2',
+      agent_type: 'code_cleanup',
+      severity: 'low',
+      file_path: 'src/utils.ts',
+      description: 'Unused import',
+      remediation: 'Remove unused import',
+      scanned_at: '2026-03-27T11:00:00Z',
+    },
+  ];
+
+  test('groups findings by agent type', () => {
+    const groups = groupFindingsByAgentType(sampleFindings);
+    expect(groups['security']).toHaveLength(2);
+    expect(groups['code_cleanup']).toHaveLength(1);
+  });
+
+  test('groups preserve agent_type for each finding', () => {
+    const groups = groupFindingsByAgentType(sampleFindings);
+    for (const f of groups['security']) {
+      expect(f.agent_type).toBe('security');
+    }
+  });
+
+  test('returns empty object for empty findings array', () => {
+    expect(groupFindingsByAgentType([])).toEqual({});
   });
 });
