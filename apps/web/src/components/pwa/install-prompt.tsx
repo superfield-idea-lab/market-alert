@@ -3,20 +3,30 @@
  *
  * PWA install prompt component.  Handles two distinct platforms:
  *
- * Android (Chrome) — native install
- * ----------------------------------
+ * Android (Chrome / Brave) — native install or fallback instructions
+ * -------------------------------------------------------------------
  * The browser fires a `beforeinstallprompt` event when PWA install criteria
  * are met.  We intercept it, suppress the default mini-infobar, and show our
  * own banner.  On user tap we call `event.prompt()` and await the choice.
+ * When no deferred prompt is available (Brave, post-uninstall cooldown) we
+ * show inline browser-menu install instructions instead.
  *
- * iOS (Safari) — guided overlay
- * ------------------------------
- * iOS Safari never fires `beforeinstallprompt`.  Instead we show a guided
- * overlay with step-by-step "Add to Home Screen" instructions when:
- *   - the OS is iOS
- *   - the browser is Safari
+ * iOS (all browsers) — guided overlay
+ * -------------------------------------
+ * iOS Safari never fires `beforeinstallprompt`, and neither do Chrome iOS,
+ * Firefox iOS, or Brave iOS.  For all iOS browsers (detected via os='ios') we
+ * show a guided overlay with step-by-step "Share → Add to Home Screen"
+ * instructions.  The overlay is shown when:
+ *   - the OS is ios (any browser, including iPadOS 13+)
  *   - the app is not already in standalone mode
- *   - the user has not previously dismissed the overlay (stored in localStorage)
+ *   - the user has not dismissed within the last 90 days
+ *   - the user has not chosen "Maybe later" for this session
+ *
+ * Dismissal TTL
+ * -------------
+ * Dismissal is stored as a Unix-millisecond timestamp string in localStorage.
+ * The gate reappears after 90 days.  A legacy boolean 'true' value (from the
+ * prior implementation) is treated as expired (NaN date → expired).
  *
  * State machine
  * -------------
@@ -32,7 +42,22 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { usePlatform } from '../../hooks/use-platform';
 
-const DISMISSED_KEY = 'calypso:pwa-install-dismissed';
+export const DISMISSED_KEY = 'calypso:pwa-install-dismissed';
+
+/** Duration in milliseconds before a dismissed gate reappears (90 days) */
+export const DISMISS_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Returns true when the stored dismissal value is within the 90-day TTL.
+ * A missing value, a legacy boolean 'true', or any non-numeric string is
+ * treated as expired / not dismissed.
+ */
+export function isDismissalActive(stored: string | null): boolean {
+  if (stored === null) return false;
+  const ts = Number(stored);
+  if (!Number.isFinite(ts)) return false; // legacy boolean 'true' → NaN → expired
+  return Date.now() - ts < DISMISS_TTL_MS;
+}
 
 type InstallState = 'not-eligible' | 'eligible' | 'prompted' | 'installed' | 'dismissed';
 
@@ -50,10 +75,12 @@ interface BeforeInstallPromptEvent extends Event {
  * Mount this component near the root of the app (e.g. in App.tsx).
  */
 export function InstallPrompt() {
-  const { os, browser, isStandalone } = usePlatform();
+  const { os, isStandalone } = usePlatform();
 
   const [installState, setInstallState] = useState<InstallState>('not-eligible');
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  // Session-level "maybe later" skip — no localStorage write
+  const [skippedForSession, setSkippedForSession] = useState(false);
 
   // Determine eligibility on mount
   useEffect(() => {
@@ -63,9 +90,9 @@ export function InstallPrompt() {
       return;
     }
 
-    // Check if the user previously dismissed the iOS overlay
-    const wasDismissed = localStorage.getItem(DISMISSED_KEY) === 'true';
-    if (wasDismissed) {
+    // Check if the user has an active dismissal within the 90-day TTL
+    const stored = localStorage.getItem(DISMISSED_KEY);
+    if (isDismissalActive(stored)) {
       setInstallState('dismissed');
       return;
     }
@@ -86,8 +113,8 @@ export function InstallPrompt() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
     window.addEventListener('appinstalled', handleInstalled);
 
-    // iOS Safari: eligible if iOS + Safari browser
-    if (os === 'ios' && browser === 'safari') {
+    // iOS (all browsers): eligible whenever os is ios
+    if (os === 'ios') {
       setInstallState('eligible');
     }
 
@@ -95,7 +122,7 @@ export function InstallPrompt() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleInstalled);
     };
-  }, [isStandalone, os, browser]);
+  }, [isStandalone, os]);
 
   // Android: trigger the deferred native prompt
   const handleAndroidInstall = useCallback(async () => {
@@ -107,9 +134,14 @@ export function InstallPrompt() {
     setInstallState(outcome === 'accepted' ? 'installed' : 'dismissed');
   }, [deferredPrompt]);
 
-  // Dismiss handler (both platforms)
+  // "Maybe later" — session skip, no localStorage write
+  const handleMaybeLater = useCallback(() => {
+    setSkippedForSession(true);
+  }, []);
+
+  // "Dismiss" — write 90-day TTL timestamp to localStorage
   const handleDismiss = useCallback(() => {
-    localStorage.setItem(DISMISSED_KEY, 'true');
+    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
     setInstallState('dismissed');
   }, []);
 
@@ -117,12 +149,13 @@ export function InstallPrompt() {
   if (
     installState === 'not-eligible' ||
     installState === 'installed' ||
-    installState === 'dismissed'
+    installState === 'dismissed' ||
+    skippedForSession
   ) {
     return null;
   }
 
-  // Android install banner
+  // Android install banner (with deferred prompt available)
   if (deferredPrompt) {
     return (
       <div
@@ -146,7 +179,7 @@ export function InstallPrompt() {
             Install
           </button>
           <button
-            onClick={handleDismiss}
+            onClick={handleMaybeLater}
             className="px-3 py-1.5 rounded-lg text-zinc-400 text-xs hover:text-zinc-600 transition-colors"
           >
             Not now
@@ -156,8 +189,62 @@ export function InstallPrompt() {
     );
   }
 
-  // iOS Safari guided overlay
-  if (os === 'ios' && browser === 'safari' && installState === 'eligible') {
+  // Android fallback — no deferred prompt (Brave, post-uninstall cooldown)
+  if (os === 'android' && !deferredPrompt && installState === 'eligible') {
+    return (
+      <div
+        role="banner"
+        className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm z-50 bg-white border border-zinc-200 rounded-2xl shadow-xl p-4 flex flex-col gap-3"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center">
+            <span className="text-white font-black text-lg">C</span>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-zinc-900">Install Calypso</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Add to your home screen</p>
+          </div>
+        </div>
+        <ol className="flex flex-col gap-2 text-xs text-zinc-700">
+          <li className="flex items-start gap-2">
+            <span className="flex-shrink-0 w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+              1
+            </span>
+            <span>
+              Tap the <span className="font-medium text-zinc-900">⋮ Menu</span> in your browser.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="flex-shrink-0 w-4 h-4 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+              2
+            </span>
+            <span>
+              Select{' '}
+              <span className="font-medium text-zinc-900">&ldquo;Add to Home screen&rdquo;</span> or{' '}
+              <span className="font-medium text-zinc-900">&ldquo;Install app&rdquo;</span>.
+            </span>
+          </li>
+        </ol>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={handleMaybeLater}
+            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+          >
+            Maybe later
+          </button>
+          <button
+            onClick={handleDismiss}
+            className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // iOS guided overlay (all iOS browsers)
+  if (os === 'ios' && installState === 'eligible') {
     return (
       <div
         role="dialog"
@@ -203,7 +290,7 @@ export function InstallPrompt() {
                     <line x1="12" y1="2" x2="12" y2="15" />
                   </svg>
                 </span>{' '}
-                button in the Safari toolbar.
+                button in your browser toolbar.
               </span>
             </li>
             <li className="flex items-start gap-2">
@@ -224,13 +311,21 @@ export function InstallPrompt() {
             </li>
           </ol>
 
-          {/* Dismiss button */}
-          <button
-            onClick={handleDismiss}
-            className="mt-1 self-center text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
-          >
-            Maybe later
-          </button>
+          {/* Action buttons */}
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={handleMaybeLater}
+              className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+            >
+              Maybe later
+            </button>
+            <button
+              onClick={handleDismiss}
+              className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       </div>
     );

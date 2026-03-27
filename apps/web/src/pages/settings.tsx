@@ -1,0 +1,155 @@
+/**
+ * @file settings.tsx
+ *
+ * Account settings page.
+ *
+ * Includes a conditional "Install app" row that is shown whenever the app is
+ * not running in standalone mode.  The row triggers the same platform-aware
+ * install flow as the mobile gate page.
+ *
+ * Canonical docs
+ * ---------------
+ * - display-mode media query: https://developer.mozilla.org/en-US/docs/Web/CSS/@media/display-mode
+ * - beforeinstallprompt: https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeinstallprompt_event
+ */
+
+import React, { useEffect, useState, useCallback } from 'react';
+import { Smartphone } from 'lucide-react';
+import { usePlatform } from '../hooks/use-platform';
+
+/** Minimal typing for the non-standard BeforeInstallPromptEvent */
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+export function SettingsPage() {
+  const { os, isStandalone } = usePlatform();
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showIosSteps, setShowIosSteps] = useState(false);
+  const [showAndroidFallback, setShowAndroidFallback] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallRow = useCallback(async () => {
+    setShowIosSteps(false);
+    setShowAndroidFallback(false);
+
+    if (os === 'ios') {
+      setShowIosSteps(true);
+      return;
+    }
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      setDeferredPrompt(null);
+      if (outcome === 'dismissed') {
+        // User cancelled — nothing to do
+      }
+    } else {
+      setShowAndroidFallback(true);
+    }
+  }, [os, deferredPrompt]);
+
+  return (
+    <div className="p-8 max-w-lg">
+      <h2 className="text-base font-semibold text-zinc-900 mb-6">Account settings</h2>
+
+      {/* Install app row — hidden in standalone mode */}
+      {!isStandalone && (
+        <div className="border border-zinc-200 rounded-xl divide-y divide-zinc-100">
+          <button
+            onClick={handleInstallRow}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors text-left"
+          >
+            <Smartphone size={18} className="text-zinc-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-zinc-900">Install app</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Add Calypso to your home screen for a faster experience
+              </p>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Inline iOS instructions */}
+      {showIosSteps && (
+        <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+          <p className="text-xs font-semibold text-indigo-700 mb-3">
+            Follow these steps in your browser:
+          </p>
+          <ol className="flex flex-col gap-2 text-sm text-zinc-700">
+            <li className="flex items-start gap-2">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                1
+              </span>
+              <span>
+                Tap the <span className="font-medium text-zinc-900">Share</span> button in your
+                browser toolbar.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                2
+              </span>
+              <span>Scroll down in the share sheet.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                3
+              </span>
+              <span>
+                Tap{' '}
+                <span className="font-medium text-zinc-900">&ldquo;Add to Home Screen&rdquo;</span>{' '}
+                and confirm.
+              </span>
+            </li>
+          </ol>
+        </div>
+      )}
+
+      {/* Inline Android fallback instructions */}
+      {showAndroidFallback && (
+        <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+          <p className="text-xs font-semibold text-indigo-700 mb-3">
+            Follow these steps in your browser:
+          </p>
+          <ol className="flex flex-col gap-2 text-sm text-zinc-700">
+            <li className="flex items-start gap-2">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                1
+              </span>
+              <span>
+                Tap the <span className="font-medium text-zinc-900">⋮ Menu</span> in your browser.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                2
+              </span>
+              <span>
+                Select{' '}
+                <span className="font-medium text-zinc-900">&ldquo;Add to Home screen&rdquo;</span>{' '}
+                or <span className="font-medium text-zinc-900">&ldquo;Install app&rdquo;</span>.
+              </span>
+            </li>
+          </ol>
+        </div>
+      )}
+
+      {isStandalone && (
+        <p className="text-sm text-zinc-400 mt-4">
+          You are already running Calypso as an installed app.
+        </p>
+      )}
+    </div>
+  );
+}

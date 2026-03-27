@@ -66,12 +66,31 @@ export interface PlatformInfo {
   };
 }
 
-/** Parse operating system from user-agent string */
-function detectOs(ua: string): PlatformInfo['os'] {
+/** Parse operating system from user-agent string.
+ *
+ * iPadOS 13+ quirk: iPads running iOS 13 and later report a Macintosh UA
+ * (identical to desktop Safari on macOS) to receive full-site layouts. The
+ * only reliable runtime signal is navigator.maxTouchPoints > 1, which is
+ * always 0 on macOS and ≥ 5 on iPad.  We therefore promote `macos` → `ios`
+ * when maxTouchPoints > 1 is detected alongside a Macintosh UA.
+ *
+ * Ref: https://developer.apple.com/forums/thread/119186
+ */
+function detectOs(ua: string, maxTouchPoints?: number): PlatformInfo['os'] {
   if (/android/i.test(ua)) return 'android';
   if (/iphone|ipad|ipod/i.test(ua)) return 'ios';
   if (/windows/i.test(ua)) return 'windows';
-  if (/macintosh|mac os x/i.test(ua)) return 'macos';
+  if (/macintosh|mac os x/i.test(ua)) {
+    // iPadOS 13+ masquerades as macOS — promote to ios when touch is present
+    const touchPoints =
+      maxTouchPoints !== undefined
+        ? maxTouchPoints
+        : typeof navigator !== 'undefined'
+          ? navigator.maxTouchPoints
+          : 0;
+    if (touchPoints > 1) return 'ios';
+    return 'macos';
+  }
   if (/linux/i.test(ua)) return 'linux';
   return 'unknown';
 }
@@ -100,9 +119,10 @@ function detectStandalone(): boolean {
 /** Build the full PlatformInfo snapshot for the current browser environment */
 function buildPlatformInfo(): PlatformInfo {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const maxTouchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints : 0;
 
   return {
-    os: detectOs(ua),
+    os: detectOs(ua, maxTouchPoints),
     browser: detectBrowser(ua),
     isStandalone: detectStandalone(),
     supports: {
