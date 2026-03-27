@@ -6,8 +6,9 @@
  * database or authenticator device.
  */
 
-import { describe, test, expect, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { getRpConfig } from '../../src/api/passkey';
+import { verifyCsrf } from '../../src/auth/csrf';
 
 describe('passkey route matching', () => {
   test('register/begin path is distinct from /api/auth/register', () => {
@@ -173,5 +174,61 @@ describe('getRpConfig', () => {
     const config = getRpConfig(req);
     expect(config.rpId).toBe('my-container');
     expect(config.origin).toBe('http://my-container:3000');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CSRF guard on register/complete
+// ---------------------------------------------------------------------------
+
+describe('register/complete CSRF guard', () => {
+  beforeEach(() => {
+    delete process.env.CSRF_DISABLED;
+  });
+
+  afterEach(() => {
+    delete process.env.CSRF_DISABLED;
+  });
+
+  function makeCompleteRequest(csrfHeader?: string, csrfCookie?: string): Request {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (csrfHeader) headers['X-CSRF-Token'] = csrfHeader;
+    const cookies: Record<string, string> = {};
+    if (csrfCookie) cookies['__Host-csrf-token'] = csrfCookie;
+    return new Request('http://localhost/api/auth/passkey/register/complete', {
+      method: 'POST',
+      headers,
+    });
+  }
+
+  test('returns 403 when X-CSRF-Token header is missing', () => {
+    const req = makeCompleteRequest(undefined, 'valid-token');
+    const cookies = { '__Host-csrf-token': 'valid-token' };
+    const res = verifyCsrf(req, cookies);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(403);
+  });
+
+  test('returns 403 when CSRF token in header does not match cookie', () => {
+    const req = makeCompleteRequest('wrong-token', 'valid-token');
+    const cookies = { '__Host-csrf-token': 'valid-token' };
+    const res = verifyCsrf(req, cookies);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(403);
+  });
+
+  test('returns null (allowed) when CSRF tokens match', () => {
+    const token = 'a'.repeat(64);
+    const req = makeCompleteRequest(token, token);
+    const cookies = { '__Host-csrf-token': token };
+    const res = verifyCsrf(req, cookies);
+    expect(res).toBeNull();
+  });
+
+  test('CSRF check is bypassed when CSRF_DISABLED=true', () => {
+    process.env.CSRF_DISABLED = 'true';
+    const req = makeCompleteRequest(undefined, undefined);
+    const res = verifyCsrf(req, {});
+    expect(res).toBeNull();
   });
 });
