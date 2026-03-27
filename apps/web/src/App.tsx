@@ -5,6 +5,48 @@ import { Settings, Plus, User, LayoutDashboard, Smartphone, Shield } from 'lucid
 import { TaskListView } from './components/TaskListView';
 import { PwaDemoPage } from './pages/pwa-demo';
 import { AdminDashboard } from './pages/admin-dashboard';
+import { MobileInstallPage } from './pages/mobile-install';
+import { SettingsPage } from './pages/settings';
+import { usePlatform } from './hooks/use-platform';
+import { isDismissalActive, DISMISSED_KEY } from './components/pwa/install-prompt';
+
+/** Returns true when the visitor is on a mobile platform (android or ios) */
+function isMobilePlatform(os: string): boolean {
+  return os === 'android' || os === 'ios';
+}
+
+/**
+ * Mobile install gate wrapper.
+ *
+ * Renders MobileInstallPage for mobile non-standalone visitors who have not
+ * already dismissed (within 90 days) or skipped for the session.
+ * Falls through to the main app otherwise.
+ */
+function MobileGate({ children }: { children: React.ReactNode }) {
+  const { os, isStandalone } = usePlatform();
+  const [sessionSkipped, setSessionSkipped] = useState(false);
+
+  // Check dismissal TTL from localStorage
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(DISMISSED_KEY) : null;
+  const dismissed = isDismissalActive(stored);
+
+  const shouldShowGate = isMobilePlatform(os) && !isStandalone && !dismissed && !sessionSkipped;
+
+  if (shouldShowGate) {
+    return (
+      <MobileInstallPage
+        onSkip={() => setSessionSkipped(true)}
+        onDone={() => {
+          // Force re-render — the dismissal or install state has changed.
+          // isDismissalActive will re-read localStorage on next render.
+          setSessionSkipped(true);
+        }}
+      />
+    );
+  }
+
+  return <>{children}</>;
+}
 
 function App() {
   const { user, logout, loading } = useAuth();
@@ -109,9 +151,7 @@ function App() {
                 Access denied. Superadmin privileges required.
               </div>
             )}
-            {activeView === 'settings' && (
-              <div className="p-8 text-zinc-400 text-sm">Settings coming soon.</div>
-            )}
+            {activeView === 'settings' && <SettingsPage />}
           </div>
         </div>
       </main>
@@ -122,7 +162,9 @@ function App() {
 export default function Root() {
   return (
     <AuthProvider>
-      <App />
+      <MobileGate>
+        <App />
+      </MobileGate>
     </AuthProvider>
   );
 }

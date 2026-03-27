@@ -5,7 +5,8 @@
  * re-implement the equivalent inline logic here rather than reaching into
  * internal module boundaries. The public contract under test is:
  *
- * 1. detectOs — classifies a user-agent string into one of the known OS tokens
+ * 1. detectOs — classifies a user-agent string into one of the known OS tokens,
+ *    including iPadOS 13+ which sends a Macintosh UA with maxTouchPoints > 1
  * 2. detectBrowser — classifies a user-agent string into one of the known browser tokens
  * 3. The hook exports a PlatformInfo object with the expected shape
  */
@@ -16,11 +17,18 @@ import { describe, test, expect } from 'vitest';
 // Pure helper logic mirrored from use-platform.ts for isolated unit testing
 // ---------------------------------------------------------------------------
 
-function detectOs(ua: string): 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'unknown' {
+function detectOs(
+  ua: string,
+  maxTouchPoints?: number,
+): 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'unknown' {
   if (/android/i.test(ua)) return 'android';
   if (/iphone|ipad|ipod/i.test(ua)) return 'ios';
   if (/windows/i.test(ua)) return 'windows';
-  if (/macintosh|mac os x/i.test(ua)) return 'macos';
+  if (/macintosh|mac os x/i.test(ua)) {
+    // iPadOS 13+ masquerades as macOS
+    if ((maxTouchPoints ?? 0) > 1) return 'ios';
+    return 'macos';
+  }
   if (/linux/i.test(ua)) return 'linux';
   return 'unknown';
 }
@@ -96,6 +104,26 @@ describe('detectOs', () => {
       'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/113.0 Mobile Safari/537.36';
     expect(detectOs(androidUa)).toBe('android');
   });
+
+  // iPadOS 13+ sends a Macintosh UA; maxTouchPoints > 1 is the only signal
+  test('detects iPadOS 13+ (Macintosh UA + maxTouchPoints > 1) as ios', () => {
+    const iPadOsUa =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+    expect(detectOs(iPadOsUa, 5)).toBe('ios');
+  });
+
+  test('does not misclassify real macOS (maxTouchPoints=0) as ios', () => {
+    const macOsUa =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15';
+    expect(detectOs(macOsUa, 0)).toBe('macos');
+  });
+
+  test('detects Chrome iOS (CriOS) UA as ios', () => {
+    // Chrome on iOS uses CriOS token; UA still says iPhone
+    const chromeIosUa =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/113.0.5672.121 Mobile/15E148 Safari/604.1';
+    expect(detectOs(chromeIosUa)).toBe('ios');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -144,6 +172,14 @@ describe('detectBrowser', () => {
 
   test('returns unknown for empty UA', () => {
     expect(detectBrowser('')).toBe('unknown');
+  });
+
+  test('detects Chrome iOS (CriOS) as chrome', () => {
+    expect(
+      detectBrowser(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/113.0.5672.121 Mobile/15E148 Safari/604.1',
+      ),
+    ).toBe('chrome');
   });
 });
 
