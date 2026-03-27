@@ -8,6 +8,7 @@
 import { CronScheduler } from './scheduler';
 import { registerStaleClaimRecoveryJob } from './jobs/stale-claim-recovery';
 import { registerSecurityScannerJob } from './jobs/security-scanner';
+import { registerSocComplianceReviewJob } from './jobs/soc-compliance-review';
 
 let scheduler: CronScheduler | null = null;
 
@@ -25,6 +26,7 @@ export function startCronScheduler(): CronScheduler {
   // Register jobs
   registerStaleClaimRecoveryJob(scheduler);
   registerSecurityScannerJob(scheduler);
+  registerSocComplianceReviewJob(scheduler);
 
   scheduler.start();
   return scheduler;
