@@ -256,6 +256,55 @@ test('PATCH /api/tasks-queue/:id returns 400 for an invalid status', async () =>
   expect(patchRes.status).toBe(400);
 });
 
+test('claude_sample job: enqueue via API, claim, and submit result (full lifecycle)', async () => {
+  const stamp = Date.now();
+
+  // 1. Enqueue a claude_sample job via the API
+  const enqRes = await fetch(`${BASE}/api/tasks-queue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+    body: JSON.stringify({
+      idempotency_key: `sample-${stamp}`,
+      agent_type: `sample_agent_${stamp}`,
+      job_type: 'claude_sample',
+      payload: { prompt_ref: 'pref_abc123' },
+    }),
+  });
+  expect(enqRes.status).toBe(200);
+  const task = await enqRes.json();
+  expect(task.job_type).toBe('claude_sample');
+  expect(task.status).toBe('pending');
+  expect(task.payload).toEqual({ prompt_ref: 'pref_abc123' });
+
+  // 2. Claim the task (simulating worker claim step)
+  const claimRes = await fetch(`${BASE}/api/tasks-queue/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+    body: JSON.stringify({ agent_type: `sample_agent_${stamp}` }),
+  });
+  expect(claimRes.status).toBe(200);
+  const claimed = await claimRes.json();
+  expect(claimed.id).toBe(task.id);
+  expect(claimed.job_type).toBe('claude_sample');
+  expect(claimed.status).toBe('claimed');
+
+  // 3. Submit a sample result (simulating worker execute + submit step)
+  const resultRes = await fetch(`${BASE}/api/tasks-queue/${task.id}/result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+    body: JSON.stringify({
+      result: { result: 'dev stub result for pref_abc123', status: 'completed', stub: true },
+    }),
+  });
+  expect(resultRes.status).toBe(200);
+  const completed = await resultRes.json();
+  expect(completed.status).toBe('completed');
+  expect(completed.result).toMatchObject({
+    result: 'dev stub result for pref_abc123',
+    status: 'completed',
+  });
+});
+
 test('POST /api/tasks-queue/:id/result submits a result and marks task completed', async () => {
   const stamp = Date.now();
 
