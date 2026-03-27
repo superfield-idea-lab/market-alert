@@ -48,6 +48,18 @@ BEGIN
 END
 $$;
 
--- Grant CONNECT on the app database to both agent roles
+-- Per-type code_cleanup agent role
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_code_cleanup') THEN
+    CREATE ROLE agent_code_cleanup WITH LOGIN PASSWORD 'agent_code_cleanup_dev_password' IN ROLE agent_worker;
+  ELSE
+    ALTER ROLE agent_code_cleanup WITH LOGIN PASSWORD 'agent_code_cleanup_dev_password';
+  END IF;
+END
+$$;
+
+-- Grant CONNECT on the app database to all agent roles
 GRANT CONNECT ON DATABASE calypso_app TO agent_coding;
 GRANT CONNECT ON DATABASE calypso_app TO agent_analysis;
+GRANT CONNECT ON DATABASE calypso_app TO agent_code_cleanup;

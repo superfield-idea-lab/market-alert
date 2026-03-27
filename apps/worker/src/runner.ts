@@ -75,6 +75,12 @@ import {
   buildRuntimeTraceCliPayload,
   validateRuntimeTraceResult,
 } from './runtime-tracer-job';
+import {
+  CODE_CLEANUP_JOB_TYPE,
+  CODE_CLEANUP_TIMEOUT_MS,
+  buildCodeCleanupCliPayload,
+  validateCodeCleanupResult,
+} from './code-cleanup-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -212,8 +218,9 @@ async function tryClaimAndExecute(
 
     // Route to the appropriate CLI based on job type.
     // claude_sample jobs go through the Claude CLI integration; security_scan,
-    // soc_compliance_review, and runtime_trace jobs go through Claude CLI with
-    // a hard timeout and read-only access; all others use the existing Codex path.
+    // soc_compliance_review, runtime_trace, and code_cleanup jobs go through
+    // Claude CLI with a hard timeout and read-only access; all others use the
+    // existing Codex path.
     let result: Record<string, unknown>;
     if (task.job_type === SAMPLE_JOB_TYPE) {
       const cliPayload = buildCliPayload(task.id, agentType, task.payload);
@@ -251,6 +258,15 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateRuntimeTraceResult(rawResult);
+    } else if (task.job_type === CODE_CLEANUP_JOB_TYPE) {
+      const cliPayload = buildCodeCleanupCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs: CODE_CLEANUP_TIMEOUT_MS,
+        sigtermGraceMs,
+      });
+      result = validateCodeCleanupResult(rawResult);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

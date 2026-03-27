@@ -61,6 +61,7 @@ describe('init-remote helpers', () => {
         ANALYTICS_W_PASSWORD: 'analytics_pw',
         AGENT_CODING_PASSWORD: 'coding_pw',
         AGENT_ANALYSIS_PASSWORD: 'analysis_pw',
+        AGENT_CODE_CLEANUP_PASSWORD: 'code_cleanup_pw',
       } as NodeJS.ProcessEnv),
     ).toEqual({
       adminDatabaseUrl: 'postgres://admin:secret@example.com/postgres',
@@ -71,6 +72,7 @@ describe('init-remote helpers', () => {
         agents: {
           coding: 'coding_pw',
           analysis: 'analysis_pw',
+          code_cleanup: 'code_cleanup_pw',
         },
       },
       databases: {
@@ -84,10 +86,12 @@ describe('init-remote helpers', () => {
   it('derives per-type agent role names from agent type', () => {
     expect(agentRoleName('coding')).toBe('agent_coding');
     expect(agentRoleName('analysis')).toBe('agent_analysis');
+    expect(agentRoleName('code_cleanup')).toBe('agent_code_cleanup');
   });
 
   it('derives per-type view names from agent type', () => {
     expect(agentViewName('coding')).toBe('task_queue_view_coding');
     expect(agentViewName('analysis')).toBe('task_queue_view_analysis');
+    expect(agentViewName('code_cleanup')).toBe('task_queue_view_code_cleanup');
   });
 });

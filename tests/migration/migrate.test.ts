@@ -12,6 +12,7 @@ const EXPECTED_TABLES = [
   'revoked_tokens',
   'task_queue',
   'task_queue_view_analysis',
+  'task_queue_view_code_cleanup',
   'task_queue_view_coding',
   'worker_credentials',
 ] as const;

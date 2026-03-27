@@ -31,7 +31,7 @@ const AGENT_BASE_ROLE = 'agent_worker';
  *
  * Blueprint: WORKER-P-008 (agent-type-isolation), TQ-D-004 (per-type-filtered-views)
  */
-export const AGENT_TYPES = ['coding', 'analysis'] as const;
+export const AGENT_TYPES = ['coding', 'analysis', 'code_cleanup'] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 export function agentRoleName(agentType: AgentType): string {
