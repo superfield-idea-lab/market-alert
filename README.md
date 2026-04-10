@@ -1,8 +1,10 @@
-# calypso-starter
+# superfield-kb
+
+An autolearning knowledge base — a system that continuously ingests, indexes, and surfaces knowledge from connected sources, improving its retrieval and summarization quality over time.
 
 Core project documentation lives in [docs/README.md](docs/README.md).
 
-Canonical blueprint documentation is sourced from the `./calypso-blueprint` git submodule. Agent scripts live in the `.agents` git submodule. After a fresh clone, initialise both submodules:
+Blueprint documentation is sourced from the `./calypso-blueprint` git submodule. Agent scripts live in the `.agents` git submodule. After a fresh clone, initialise both submodules:
 
 ```sh
 git submodule update --init
