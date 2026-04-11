@@ -18,7 +18,6 @@ const EXPECTED_TABLES = [
   'revoked_tokens',
   'task_queue',
   'task_queue_view_analysis',
-  // Phase 0 scout: worker-phase views (issue #5, TQ-D-001)
   'task_queue_view_annotation',
   'task_queue_view_autolearn',
   'task_queue_view_bdm_summary',
