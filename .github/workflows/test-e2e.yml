@@ -3,8 +3,20 @@ name: Full-Page User Story Tests
 on:
   push:
     branches: [main, 'UX/**', 'feat/**', 'fix/**']
+    paths:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - 'packages/core/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/test-e2e.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/ui/**'
+      - 'packages/core/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/test-e2e.yml'
   workflow_dispatch:
 
 jobs:

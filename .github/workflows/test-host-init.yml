@@ -3,8 +3,20 @@ name: Host Init Tests
 on:
   push:
     branches: [main, 'feat/**', 'fix/**']
+    paths:
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'k8s/**'
+      - '.github/workflows/test-host-init.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'k8s/**'
+      - '.github/workflows/test-host-init.yml'
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:

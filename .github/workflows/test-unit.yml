@@ -3,8 +3,22 @@ name: Unit Tests
 on:
   push:
     branches: [main, 'UX/**', 'feat/**', 'fix/**']
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'calypso-blueprint/**'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'README.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'calypso-blueprint/**'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'README.md'
   workflow_dispatch:
   workflow_call:
 

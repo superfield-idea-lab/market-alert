@@ -3,14 +3,119 @@ name: Container
 on:
   release:
     types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/server/**'
+      - 'apps/worker/**'
+      - 'packages/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'Dockerfile.worker'
+      - 'Dockerfile.agent-worker'
+      - '.github/workflows/container.yml'
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build-test-push:
+  # ── Detect which components changed (used by PR jobs) ─────────────────────
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+      - name: Detect changed components
+        id: filter
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            # On release, always build all components
+            echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+          else
+            # On pull_request, check which component files changed
+            BASE=${{ github.event.pull_request.base.sha }}
+            HEAD=${{ github.event.pull_request.head.sha }}
+            CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+
+            APP_CHANGED=false
+            WORKER_CHANGED=false
+
+            while IFS= read -r file; do
+              case "$file" in
+                apps/web/*|apps/server/*|packages/*|Dockerfile|Dockerfile.release)
+                  APP_CHANGED=true ;;
+                apps/worker/*|Dockerfile.worker|Dockerfile.agent-worker)
+                  WORKER_CHANGED=true ;;
+              esac
+            done <<< "$CHANGED"
+
+            echo "app=$APP_CHANGED" >> "$GITHUB_OUTPUT"
+            echo "worker=$WORKER_CHANGED" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── PR build: main app image (no push, no release artifacts required) ─────
+  build-app-pr:
+    needs: changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && needs.changes.outputs.app == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build main app image (build check only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: ghcr.io/${{ github.repository }}:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── PR build: worker image (no push) ─────────────────────────────────────
+  build-worker-pr:
+    needs: changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && needs.changes.outputs.worker == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build worker image (build check only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: false
+          tags: ghcr.io/${{ github.repository }}/worker:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Release: main application image (Dockerfile.release, with push) ───────
+  build-test-push-app:
+    needs: changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && needs.changes.outputs.app == 'true'
 
     services:
       postgres:
@@ -119,3 +224,37 @@ jobs:
         run: |
           docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           docker push ghcr.io/${{ github.repository }}:latest
+
+  # ── Release: worker image (Dockerfile.worker, with push) ─────────────────
+  build-test-push-worker:
+    needs: changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && needs.changes.outputs.worker == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/worker:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -3,8 +3,16 @@ name: PG container tests
 on:
   push:
     branches: [main, 'UX/**', 'feat/**', 'fix/**']
+    paths:
+      - 'packages/db/**'
+      - 'apps/server/**'
+      - '.github/workflows/test-pg-container.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'packages/db/**'
+      - 'apps/server/**'
+      - '.github/workflows/test-pg-container.yml'
   workflow_dispatch:
 
 concurrency:

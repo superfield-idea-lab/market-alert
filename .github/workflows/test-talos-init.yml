@@ -3,8 +3,20 @@ name: Talos Host Init Tests
 on:
   push:
     branches: [main, 'feat/**', 'fix/**']
+    paths:
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'k8s/**'
+      - '.github/workflows/test-talos-init.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'k8s/**'
+      - '.github/workflows/test-talos-init.yml'
 
 jobs:
   test-talos-local:

@@ -3,6 +3,10 @@ name: Migration Smoke Tests
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/server/**'
+      - 'packages/db/**'
+      - '.github/workflows/test-migration.yml'
   workflow_dispatch:
 
 jobs:

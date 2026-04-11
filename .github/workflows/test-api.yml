@@ -3,8 +3,22 @@ name: API Integration Tests
 on:
   push:
     branches: [main, 'UX/**', 'feat/**', 'fix/**']
+    paths:
+      - 'apps/server/**'
+      - 'apps/worker/**'
+      - 'packages/**'
+      - 'tests/unit/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/test-api.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/server/**'
+      - 'apps/worker/**'
+      - 'packages/**'
+      - 'tests/unit/**'
+      - 'tests/e2e/**'
+      - '.github/workflows/test-api.yml'
   workflow_dispatch:
 
 jobs:
