@@ -104,7 +104,7 @@ docker run --rm --network=host postgres:16-alpine \
 echo "    calypso_app tables OK"
 
 docker run --rm --network=host postgres:16-alpine \
-  psql "${AUDIT_DATABASE_URL}" -c "\dt" | grep "audit_log"
+  psql "${AUDIT_DATABASE_URL}" -c "\dt" | grep "audit_events"
 echo "    calypso_audit tables OK"
 
 docker run --rm --network=host postgres:16-alpine \
@@ -116,8 +116,8 @@ echo "    calypso_analytics tables OK"
 echo "==> Verify audit_w INSERT grant"
 docker run --rm --network=host postgres:16-alpine \
   psql "${AUDIT_DATABASE_URL}" \
-  -c "INSERT INTO audit_log (id, action, entity_type, entity_id, changes)
-      VALUES ('ci-verify-$(date +%s)', 'create', 'test', 'test-1', '{}')"
+  -c "INSERT INTO audit_events (actor_id, action, entity_type, entity_id, ts, prev_hash, hash)
+      VALUES ('ci-verify', 'ci.verify', 'test', 'test-1', NOW(), 'genesis', 'ci-verify-hash')"
 echo "    INSERT OK"
 
 echo ""

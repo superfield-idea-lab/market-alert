@@ -206,22 +206,35 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 
 async function configureAuditDatabase(auditAdmin: ReturnType<typeof makePool>): Promise<void> {
   await auditAdmin.unsafe(`
-CREATE TABLE IF NOT EXISTS audit_log (
-  id TEXT PRIMARY KEY,
-  action TEXT NOT NULL,
-  entity_type TEXT,
-  entity_id TEXT,
-  changes JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action);
-CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_audit_log_status ON audit_log (status);
 GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.audit)};
-GRANT INSERT, SELECT ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
-GRANT UPDATE(status) ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
+
+-- Append-only hash-chained audit event log.
+-- audit_w may INSERT and SELECT only. No UPDATE, DELETE, or TRUNCATE.
+-- This is the primary audit store used by emitAuditEvent.
+CREATE TABLE IF NOT EXISTS audit_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    before JSONB,
+    after JSONB,
+    ip TEXT,
+    user_agent TEXT,
+    correlation_id TEXT,
+    ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    prev_hash TEXT NOT NULL,
+    hash TEXT NOT NULL
+);
+
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS correlation_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_ts ON audit_events(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id);
+
+-- audit_w: INSERT and SELECT only — no UPDATE, DELETE, or TRUNCATE.
+GRANT INSERT, SELECT ON TABLE audit_events TO ${quoteIdentifier(ROLE_NAMES.audit)};
 `);
 }
 
@@ -441,7 +454,7 @@ async function verifyTableGrant(
   return count >= 1 ? null : `${roleName} missing ${privilegeType} on ${tableName}`;
 }
 
-async function verifyColumnGrant(
+async function _verifyColumnGrant(
   db: ReturnType<typeof makePool>,
   tableName: string,
   columnName: string,
@@ -559,13 +572,12 @@ async function verifyInitRemote(
     verifyDatabaseConnect(admin, config.databases.audit, ROLE_NAMES.audit),
     verifyDatabaseConnect(admin, config.databases.analytics, ROLE_NAMES.analytics),
     verifyDatabaseConnect(admin, config.databases.dictionary, ROLE_NAMES.dictionary),
-    verifyTable(auditAdmin, 'audit_log'),
+    verifyTable(auditAdmin, 'audit_events'),
     verifyTable(analyticsAdmin, 'analytics_events'),
     verifyTable(analyticsAdmin, 'audit_replica'),
     verifyTable(dictAdmin, 'identity_tokens'),
-    verifyTableGrant(auditAdmin, 'audit_log', ROLE_NAMES.audit, 'INSERT'),
-    verifyTableGrant(auditAdmin, 'audit_log', ROLE_NAMES.audit, 'SELECT'),
-    verifyColumnGrant(auditAdmin, 'audit_log', 'status', ROLE_NAMES.audit, 'UPDATE'),
+    verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.audit, 'INSERT'),
+    verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.audit, 'SELECT'),
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'INSERT'),
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'SELECT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'INSERT'),
