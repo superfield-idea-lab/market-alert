@@ -11,9 +11,18 @@
  *   POST /api/auth/passkey/login/begin   → PublicKeyCredentialRequestOptions
  *   POST /api/auth/passkey/login/complete → verify assertion, issue JWT
  *
+ * Key recovery (AUTH-C-016/017, AUTH-D-007):
+ *   POST /api/auth/passkey/recovery/setup    → set recovery passphrase for authenticated user
+ *   POST /api/auth/passkey/recovery/begin    → verify passphrase, issue recovery challenge
+ *   POST /api/auth/passkey/recovery/complete → verify second factor, re-enroll passkey
+ *
  * Challenges are 32-byte random values stored in the passkey_challenges table
  * with a 5-minute TTL. Counter-based clone detection rejects authentication if
  * the presented counter ≤ stored counter.
+ *
+ * Progressive lockout (AUTH-C-024, AUTH-C-032):
+ *   Failed assertions increment a per-user counter with exponential delay.
+ *   All error responses are generic — no account-existence leakage.
  */
 
 import {
@@ -28,6 +37,13 @@ import { getCorsHeaders, getAuthenticatedUser, parseCookies } from './auth';
 import { verifyCsrf, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { signJwt } from '../auth/jwt';
 import { authCookieHeader } from '../auth/cookie-config';
+import { checkLockout, recordFailedAttempt, resetLockout } from 'db/auth-lockout';
+import {
+  setRecoveryPassphrase,
+  checkRecoveryPassphrase,
+  revokeOldPasskeys,
+  notifyDevicesOfRecovery,
+} from 'db/recovery';
 
 // The Relying Party name (display only, not security-critical).
 const RP_NAME = process.env.RP_NAME ?? 'Calypso';
@@ -367,13 +383,18 @@ export async function handlePasskeyRequest(
 
   // ------------------------------------------------------------------
   // POST /api/auth/passkey/login/complete
+  //
+  // Progressive lockout (AUTH-C-024, AUTH-C-032):
+  //   Failed attempts increment a per-user exponential delay counter.
+  //   All error responses are generic — no account-existence leakage.
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/login/complete') {
     try {
       const { response } = (await req.json()) as { response: AuthenticationResponseJSON };
 
       if (!response) {
-        return json({ error: 'response required' }, 400, corsHeaders);
+        // Generic error — do not reveal whether credential exists (AUTH-C-032)
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
       }
 
       // Look up the credential by credential ID
@@ -386,7 +407,8 @@ export async function handlePasskeyRequest(
         LIMIT 1
       `;
       if (credRows.length === 0) {
-        return json({ error: 'Credential not found' }, 401, corsHeaders);
+        // Generic error — do not reveal whether the credential or account exists
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
       }
       const cred = credRows[0] as {
         id: string;
@@ -398,6 +420,20 @@ export async function handlePasskeyRequest(
         username: string;
       };
 
+      // Progressive lockout check — must happen before challenge consumption
+      // so a locked-out user cannot drain challenges (AUTH-C-024).
+      const lockoutState = await checkLockout(cred.user_id);
+      if (lockoutState.blocked) {
+        return new Response(JSON.stringify({ error: 'Authentication failed' }), {
+          status: 429,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Retry-After': String(lockoutState.retryAfterSeconds),
+          },
+        });
+      }
+
       // Retrieve unexpired authentication challenge
       const challengeRows = await sql`
         SELECT id, challenge FROM passkey_challenges
@@ -408,7 +444,8 @@ export async function handlePasskeyRequest(
         LIMIT 1
       `;
       if (challengeRows.length === 0) {
-        return json({ error: 'No valid challenge found' }, 400, corsHeaders);
+        await recordFailedAttempt(cred.user_id);
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
       }
       const challengeRow = challengeRows[0] as { id: string; challenge: string };
 
@@ -432,18 +469,17 @@ export async function handlePasskeyRequest(
       });
 
       if (!verification.verified) {
-        return json({ error: 'Authentication verification failed' }, 401, corsHeaders);
+        await recordFailedAttempt(cred.user_id);
+        // Generic error — do not reveal credential or account details (AUTH-C-032)
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
       }
 
       const newCounter = verification.authenticationInfo.newCounter;
 
       // Counter-based clone detection: reject if new counter ≤ stored counter
       if (newCounter <= cred.counter && newCounter !== 0) {
-        return json(
-          { error: 'Credential counter invalid — possible cloned authenticator' },
-          401,
-          corsHeaders,
-        );
+        await recordFailedAttempt(cred.user_id);
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
       }
 
       // Update counter and last_used_at
@@ -452,6 +488,9 @@ export async function handlePasskeyRequest(
         SET counter = ${newCounter}, last_used_at = NOW()
         WHERE id = ${cred.id}
       `;
+
+      // Successful authentication — reset the lockout counter
+      await resetLockout(cred.user_id);
 
       // Issue JWT and session cookie with HttpOnly, Secure (in HTTPS mode), SameSite=Strict.
       // CSRF token is issued alongside so the browser can attach it to subsequent
@@ -471,6 +510,248 @@ export async function handlePasskeyRequest(
       return loginRes;
     } catch (err) {
       console.error('PASSKEY LOGIN COMPLETE ERROR:', err);
+      return json({ error: 'Authentication failed' }, 500, corsHeaders);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // POST /api/auth/passkey/recovery/setup
+  //
+  // Store a recovery passphrase for the authenticated user (AUTH-C-016).
+  // Requires an active session.
+  // ------------------------------------------------------------------
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/recovery/setup') {
+    const user = await getAuthenticatedUser(req);
+    if (!user) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+
+    // CSRF guard — user is authenticated so double-submit applies
+    const cookies = parseCookies(req.headers.get('Cookie'));
+    const csrfError = verifyCsrf(req, cookies);
+    if (csrfError) return csrfError;
+
+    try {
+      const body = (await req.json()) as { passphrase?: string };
+      if (!body.passphrase || typeof body.passphrase !== 'string' || body.passphrase.length < 16) {
+        return json({ error: 'passphrase must be at least 16 characters' }, 400, corsHeaders);
+      }
+      await setRecoveryPassphrase(user.id, body.passphrase);
+      return json({ ok: true }, 200, corsHeaders);
+    } catch (err) {
+      console.error('RECOVERY SETUP ERROR:', err);
+      return json({ error: 'Internal Server Error' }, 500, corsHeaders);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // POST /api/auth/passkey/recovery/begin
+  //
+  // First factor: verify recovery passphrase, issue a recovery challenge
+  // that the client must satisfy with a WebAuthn second factor.
+  // No session cookie is required — the user is locked out of their passkey.
+  // ------------------------------------------------------------------
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/recovery/begin') {
+    try {
+      const body = (await req.json()) as { userId?: string; passphrase?: string };
+      if (!body.userId || !body.passphrase) {
+        return json({ error: 'Authentication failed' }, 400, corsHeaders);
+      }
+
+      // Verify the recovery passphrase (first factor)
+      const passphraseOk = await checkRecoveryPassphrase(body.userId, body.passphrase);
+      if (!passphraseOk) {
+        // Generic error — do not reveal whether account or passphrase exists
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
+      }
+
+      // Generate a WebAuthn challenge for the second factor (any enrolled credential).
+      const existingCreds = await sql`
+        SELECT credential_id FROM passkey_credentials WHERE user_id = ${body.userId}
+      `;
+      const allowCredentials = (existingCreds as unknown as { credential_id: string }[]).map(
+        (row) => ({ id: row.credential_id }),
+      );
+
+      const { rpId } = getRpConfig(req);
+      const options = await generateAuthenticationOptions({
+        rpID: rpId,
+        allowCredentials,
+        userVerification: 'preferred',
+        timeout: 60_000,
+      });
+
+      // Store the challenge with type='recovery'
+      await sql`
+        INSERT INTO passkey_challenges (user_id, challenge, type)
+        VALUES (${body.userId}, ${options.challenge}, 'recovery')
+      `;
+
+      return json(options, 200, corsHeaders);
+    } catch (err) {
+      console.error('RECOVERY BEGIN ERROR:', err);
+      return json({ error: 'Internal Server Error' }, 500, corsHeaders);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // POST /api/auth/passkey/recovery/complete
+  //
+  // Second factor: verify WebAuthn assertion against the recovery challenge,
+  // then re-enroll a new passkey (provided as a registration response),
+  // revoke all old passkeys, and notify enrolled devices (AUTH-C-016/017).
+  // ------------------------------------------------------------------
+  if (req.method === 'POST' && url.pathname === '/api/auth/passkey/recovery/complete') {
+    try {
+      const body = (await req.json()) as {
+        userId?: string;
+        assertionResponse?: AuthenticationResponseJSON;
+        registrationResponse?: RegistrationResponseJSON;
+      };
+
+      if (!body.userId || !body.assertionResponse || !body.registrationResponse) {
+        return json({ error: 'Authentication failed' }, 400, corsHeaders);
+      }
+
+      // Look up the credential used for the second-factor assertion
+      const credRows = await sql`
+        SELECT pc.id, pc.user_id, pc.credential_id, pc.public_key, pc.counter, pc.transports
+        FROM passkey_credentials pc
+        WHERE pc.credential_id = ${body.assertionResponse.id}
+          AND pc.user_id = ${body.userId}
+        LIMIT 1
+      `;
+      if (credRows.length === 0) {
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
+      }
+      const cred = credRows[0] as {
+        id: string;
+        user_id: string;
+        credential_id: string;
+        public_key: Buffer;
+        counter: number;
+        transports: string[];
+      };
+
+      // Retrieve the unexpired recovery challenge
+      const challengeRows = await sql`
+        SELECT id, challenge FROM passkey_challenges
+        WHERE type = 'recovery'
+          AND user_id = ${body.userId}
+          AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+      if (challengeRows.length === 0) {
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
+      }
+      const challengeRow = challengeRows[0] as { id: string; challenge: string };
+
+      // Consume the challenge immediately (single-use)
+      await sql`DELETE FROM passkey_challenges WHERE id = ${challengeRow.id}`;
+
+      const { rpId, origin: rpOrigin } = getRpConfig(req);
+
+      // Verify the second-factor assertion
+      const assertionVerification = await verifyAuthenticationResponse({
+        response: body.assertionResponse,
+        expectedChallenge: challengeRow.challenge,
+        expectedOrigin: rpOrigin,
+        expectedRPID: rpId,
+        credential: {
+          id: cred.credential_id,
+          publicKey: new Uint8Array(cred.public_key),
+          counter: cred.counter,
+          transports: cred.transports as AuthenticatorTransport[],
+        },
+        requireUserVerification: true,
+      });
+
+      if (!assertionVerification.verified) {
+        return json({ error: 'Authentication failed' }, 401, corsHeaders);
+      }
+
+      // Verify the new passkey registration (re-enrollment)
+      // The registration challenge was the same challenge value embedded in
+      // the registration options generated by the client via its own begin call.
+      // For recovery, the client must have already obtained a registration
+      // challenge from /register/begin using the same userId.
+      const regChallengeRows = await sql`
+        SELECT id, challenge FROM passkey_challenges
+        WHERE type = 'registration'
+          AND user_id = ${body.userId}
+          AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+      if (regChallengeRows.length === 0) {
+        return json(
+          { error: 'No valid registration challenge — call register/begin first' },
+          400,
+          corsHeaders,
+        );
+      }
+      const regChallengeRow = regChallengeRows[0] as { id: string; challenge: string };
+      await sql`DELETE FROM passkey_challenges WHERE id = ${regChallengeRow.id}`;
+
+      const regVerification = await verifyRegistrationResponse({
+        response: body.registrationResponse,
+        expectedChallenge: regChallengeRow.challenge,
+        expectedOrigin: rpOrigin,
+        expectedRPID: rpId,
+      });
+
+      if (!regVerification.verified || !regVerification.registrationInfo) {
+        return json({ error: 'Authentication failed' }, 400, corsHeaders);
+      }
+
+      const { credential: newCred, aaguid } = regVerification.registrationInfo;
+
+      // Insert the new credential
+      await sql`
+        INSERT INTO passkey_credentials
+          (user_id, credential_id, public_key, counter, aaguid, transports)
+        VALUES (
+          ${body.userId},
+          ${newCred.id},
+          ${Buffer.from(newCred.publicKey)},
+          ${newCred.counter},
+          ${aaguid ?? ''},
+          ${newCred.transports ?? []}
+        )
+      `;
+
+      // Revoke all old passkeys except the new one (AUTH-C-016)
+      await revokeOldPasskeys(body.userId, newCred.id);
+
+      // Out-of-band notification to all enrolled devices (AUTH-C-017)
+      await notifyDevicesOfRecovery(body.userId);
+
+      // Reset any lockout state
+      await resetLockout(body.userId);
+
+      // Issue a new session token
+      const userRows = await sql`
+        SELECT properties->>'username' AS username
+        FROM entities
+        WHERE id = ${body.userId} AND type = 'user'
+        LIMIT 1
+      `;
+      const username = (userRows[0] as { username: string } | undefined)?.username ?? '';
+      const sessionToken = await signJwt({ id: body.userId, username });
+      const csrfToken = generateCsrfToken();
+
+      const recoveryRes = new Response(
+        JSON.stringify({
+          verified: true,
+          credentialId: newCred.id,
+          user: { id: body.userId, username },
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+      recoveryRes.headers.append('Set-Cookie', authCookieHeader(sessionToken));
+      recoveryRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
+      return recoveryRes;
+    } catch (err) {
+      console.error('RECOVERY COMPLETE ERROR:', err);
       return json({ error: 'Internal Server Error' }, 500, corsHeaders);
     }
   }

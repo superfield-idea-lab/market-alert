@@ -361,6 +361,53 @@ INSERT INTO feature_flags (name, state, owner)
 VALUES ('assemblyai_transcription', 'enabled', 'product')
 ON CONFLICT (name) DO NOTHING;
 
+-- Extend passkey_challenges type to include 'recovery' (AUTH-C-016/017).
+-- The ALTER ... DROP CONSTRAINT / ADD CONSTRAINT pattern is idempotent via
+-- the DO block guard so the schema can be applied to both fresh and existing
+-- databases without errors.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'passkey_challenges_type_check'
+      AND conrelid = 'passkey_challenges'::regclass
+  ) THEN
+    ALTER TABLE passkey_challenges
+      DROP CONSTRAINT passkey_challenges_type_check;
+    ALTER TABLE passkey_challenges
+      ADD CONSTRAINT passkey_challenges_type_check
+      CHECK (type IN ('registration', 'authentication', 'recovery'));
+  END IF;
+END;
+$$;
+
+-- Recovery passphrases (AUTH-C-016).
+-- Stores a bcrypt/argon2-equivalent hash of the user's recovery passphrase.
+-- Only one active passphrase per user at a time (the latest replaces older ones).
+-- passphrase_hash: PBKDF2-SHA-256 derived key stored as hex (rounds=210000).
+CREATE TABLE IF NOT EXISTS recovery_passphrases (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  user_id     TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  passphrase_hash TEXT NOT NULL,
+  created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_recovery_passphrases_user_id
+  ON recovery_passphrases (user_id);
+
+-- Auth lockout — progressive delay state per user (AUTH-C-024, AUTH-C-032).
+-- failed_count: number of consecutive failed passkey assertion attempts.
+-- delay_until:  wall-clock time before the next attempt is accepted.
+-- locked_until: full temporary lockout expiry (set after many failures).
+-- Resets to 0 on a successful assertion.
+CREATE TABLE IF NOT EXISTS auth_lockout (
+  user_id       TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+  failed_count  INTEGER NOT NULL DEFAULT 0,
+  delay_until   TIMESTAMP WITH TIME ZONE,
+  locked_until  TIMESTAMP WITH TIME ZONE,
+  updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Migration version tracking table.
 -- Records each named migration that has been applied to this database.
 -- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.

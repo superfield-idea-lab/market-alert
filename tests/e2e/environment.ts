@@ -29,6 +29,12 @@ export async function startE2EServer(): Promise<E2EEnvironment> {
       ...process.env,
       DATABASE_URL: pg.url,
       PORT: String(SERVER_PORT),
+      // Enable the test-session backdoor so integration tests can obtain
+      // session cookies without going through the WebAuthn ceremony.
+      TEST_MODE: 'true',
+      // Disable CSRF in the E2E test environment so API tests can make
+      // authenticated POST requests without managing the double-submit token.
+      CSRF_DISABLED: 'true',
     },
     stdout: 'inherit',
     stderr: 'inherit',

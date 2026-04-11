@@ -15,7 +15,9 @@
     "./worker-channel": "./worker-channel.ts",
     "./governance": "./governance.ts",
     "./entity-type-registry": "./entity-type-registry.ts",
-    "./feature-flags": "./feature-flags.ts"
+    "./feature-flags": "./feature-flags.ts",
+    "./auth-lockout": "./auth-lockout.ts",
+    "./recovery": "./recovery.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

@@ -1,8 +1,8 @@
 import type { AppState } from '../index';
-import { verifyJwt } from '../auth/jwt';
+import { verifyJwt, signJwt } from '../auth/jwt';
 import { revokeToken } from 'db/revocation';
-import { verifyCsrf } from '../auth/csrf';
-import { authCookieClearHeader, getAuthToken } from '../auth/cookie-config';
+import { verifyCsrf, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
+import { authCookieClearHeader, authCookieHeader, getAuthToken } from '../auth/cookie-config';
 import { getClientIp, globalLimiter, tooManyRequests } from '../security/rate-limiter';
 import { authenticateApiKey } from 'db/api-keys';
 import { isSuperuser } from '../lib/response';
@@ -159,7 +159,54 @@ export async function handleAuthRequest(
     });
   }
 
-  // 4. POST /api/auth/logout
+  // 4. POST /api/auth/token/refresh (AUTH-C-018)
+  //
+  // Token refresh rotation: verify the current session JWT, issue a new one
+  // with a fresh JTI, and revoke the old JTI immediately so the old token
+  // returns 401 on any subsequent request. This prevents token theft via log
+  // scraping — only the newest token in the rotation chain is valid.
+  if (req.method === 'POST' && url.pathname === '/api/auth/token/refresh') {
+    const cookies = parseCookies(req.headers.get('Cookie'));
+    const token = getAuthToken(cookies);
+
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    try {
+      // Full verification (signature + expiry + revocation check)
+      const payload = await verifyJwt<{ id: string; username: string; jti: string; exp: number }>(
+        token,
+      );
+
+      // Issue a new token with the same claims but a fresh JTI
+      const newToken = await signJwt({ id: payload.id, username: payload.username });
+
+      // Revoke the old JTI so it can no longer be used
+      const oldExpiresAt = new Date(payload.exp * 1000);
+      await revokeToken(payload.jti, oldExpiresAt);
+
+      const csrfToken = generateCsrfToken();
+      const refreshRes = new Response(
+        JSON.stringify({ user: { id: payload.id, username: payload.username } }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+      refreshRes.headers.append('Set-Cookie', authCookieHeader(newToken));
+      refreshRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
+      return refreshRes;
+    } catch {
+      // Token invalid, expired, or already revoked — do not leak details
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // 5. POST /api/auth/logout
   if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
     const cookies = parseCookies(req.headers.get('Cookie'));
     const token = getAuthToken(cookies);
