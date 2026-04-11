@@ -1,0 +1,27 @@
+name: Golden-Path Canary
+
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**', 'chore/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  canary:
+    name: e2e canary (/health)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+      - name: Install Dependencies
+        run: bun install
+      - name: Run Canary E2E Test
+        # Spins up a real Postgres container and Bun server, hits /health,
+        # and tears everything down.  Docker is available on ubuntu-latest.
+        run: bun --bun vitest run --config tests/e2e/vitest.config.ts --reporter=verbose tests/e2e/canary.spec.ts
