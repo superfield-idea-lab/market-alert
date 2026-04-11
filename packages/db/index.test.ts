@@ -11,6 +11,7 @@ describe('resolveDatabaseUrls', () => {
       app: 'postgres://app_rw:app_rw_password@localhost:5432/calypso_app',
       audit: 'postgres://audit_w:audit_w_password@localhost:5432/calypso_audit',
       analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics',
+      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/calypso_dictionary',
     });
   });
 
@@ -20,15 +21,17 @@ describe('resolveDatabaseUrls', () => {
         DATABASE_URL: 'postgres://app@example/calypso_app',
         AUDIT_DATABASE_URL: 'postgres://audit@example/calypso_audit',
         ANALYTICS_DATABASE_URL: 'postgres://analytics@example/calypso_analytics',
+        DICTIONARY_DATABASE_URL: 'postgres://dict@example/calypso_dictionary',
       } as NodeJS.ProcessEnv),
     ).toEqual({
       app: 'postgres://app@example/calypso_app',
       audit: 'postgres://audit@example/calypso_audit',
       analytics: 'postgres://analytics@example/calypso_analytics',
+      dictionary: 'postgres://dict@example/calypso_dictionary',
     });
   });
 
-  it('falls back independently when audit or analytics URLs are missing', () => {
+  it('falls back independently when audit, analytics or dictionary URLs are missing', () => {
     expect(
       resolveDatabaseUrls({
         DATABASE_URL: 'postgres://app@example/calypso_app',
@@ -38,6 +41,7 @@ describe('resolveDatabaseUrls', () => {
       app: 'postgres://app@example/calypso_app',
       audit: 'postgres://audit@example/calypso_audit',
       analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics',
+      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/calypso_dictionary',
     });
   });
 });

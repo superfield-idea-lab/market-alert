@@ -7,12 +7,15 @@ const DEFAULT_DATABASE_NAMES = {
   app: 'calypso_app',
   audit: 'calypso_audit',
   analytics: 'calypso_analytics',
+  dictionary: 'calypso_dictionary',
 } as const;
 
 const ROLE_NAMES = {
   app: 'app_rw',
   audit: 'audit_w',
   analytics: 'analytics_w',
+  /** IdentityDictionary service role — read/write on kb_dictionary only. */
+  dictionary: 'dict_rw',
 } as const;
 
 /**
@@ -48,6 +51,8 @@ export interface InitRemoteConfig {
     app: string;
     audit: string;
     analytics: string;
+    /** IdentityDictionary service role password. */
+    dictionary: string;
     /** Per-type agent role passwords keyed by agent type (e.g. coding, analysis) */
     agents: Record<AgentType, string>;
   };
@@ -55,6 +60,8 @@ export interface InitRemoteConfig {
     app: string;
     audit: string;
     analytics: string;
+    /** kb_dictionary: IdentityDictionary isolation domain. */
+    dictionary: string;
   };
 }
 
@@ -92,6 +99,7 @@ export function loadInitRemoteConfig(env: NodeJS.ProcessEnv = process.env): Init
     'APP_RW_PASSWORD',
     'AUDIT_W_PASSWORD',
     'ANALYTICS_W_PASSWORD',
+    'DICT_RW_PASSWORD',
   ] as const;
 
   // Agent type passwords: AGENT_<TYPE>_PASSWORD (e.g. AGENT_CODING_PASSWORD)
@@ -115,12 +123,14 @@ export function loadInitRemoteConfig(env: NodeJS.ProcessEnv = process.env): Init
       app: env.APP_RW_PASSWORD!,
       audit: env.AUDIT_W_PASSWORD!,
       analytics: env.ANALYTICS_W_PASSWORD!,
+      dictionary: env.DICT_RW_PASSWORD!,
       agents,
     },
     databases: {
       app: env.APP_DB || DEFAULT_DATABASE_NAMES.app,
       audit: env.AUDIT_DB || DEFAULT_DATABASE_NAMES.audit,
       analytics: env.ANALYTICS_DB || DEFAULT_DATABASE_NAMES.analytics,
+      dictionary: env.DICTIONARY_DB || DEFAULT_DATABASE_NAMES.dictionary,
     },
   };
 }
@@ -154,6 +164,10 @@ async function ensureDatabase(
   if (!exists) {
     await admin.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
   }
+  // Revoke the default PUBLIC CONNECT privilege so only explicitly granted roles
+  // can connect. This enforces structural cross-pool isolation at the database layer.
+  // DATA-D-006: a role must not be able to connect to a database it does not own.
+  await admin.unsafe(`REVOKE CONNECT ON DATABASE ${quoteIdentifier(databaseName)} FROM PUBLIC`);
 }
 
 async function grantConnect(
@@ -208,6 +222,35 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_status ON audit_log (status);
 GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.audit)};
 GRANT INSERT, SELECT ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
 GRANT UPDATE(status) ON TABLE audit_log TO ${quoteIdentifier(ROLE_NAMES.audit)};
+`);
+}
+
+/**
+ * Configure the kb_dictionary database for dict_rw.
+ *
+ * dict_rw receives SELECT, INSERT, UPDATE, DELETE on identity_tokens only.
+ * No cross-pool access: app_rw has no CONNECT privilege on kb_dictionary, and
+ * dict_rw has no CONNECT privilege on kb_app, kb_audit, or kb_analytics.
+ *
+ * DATA-D-006: structural isolation enforced at the database layer.
+ */
+async function configureDictionaryDatabase(dictAdmin: ReturnType<typeof makePool>): Promise<void> {
+  await dictAdmin.unsafe(`
+CREATE TABLE IF NOT EXISTS identity_tokens (
+    id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+    token       TEXT NOT NULL UNIQUE,
+    real_name   TEXT NOT NULL,
+    real_email  TEXT NOT NULL,
+    real_org    TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_identity_tokens_token ON identity_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_identity_tokens_created_at ON identity_tokens(created_at);
+GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.dictionary)};
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE identity_tokens TO ${quoteIdentifier(ROLE_NAMES.dictionary)};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${quoteIdentifier(ROLE_NAMES.dictionary)};
 `);
 }
 
@@ -500,21 +543,26 @@ async function verifyInitRemote(
   appAdmin: ReturnType<typeof makePool>,
   auditAdmin: ReturnType<typeof makePool>,
   analyticsAdmin: ReturnType<typeof makePool>,
+  dictAdmin: ReturnType<typeof makePool>,
   config: InitRemoteConfig,
 ): Promise<void> {
   const checks = await Promise.all([
     verifyRole(admin, ROLE_NAMES.app),
     verifyRole(admin, ROLE_NAMES.audit),
     verifyRole(admin, ROLE_NAMES.analytics),
+    verifyRole(admin, ROLE_NAMES.dictionary),
     verifyDatabase(admin, config.databases.app),
     verifyDatabase(admin, config.databases.audit),
     verifyDatabase(admin, config.databases.analytics),
+    verifyDatabase(admin, config.databases.dictionary),
     verifyDatabaseConnect(admin, config.databases.app, ROLE_NAMES.app),
     verifyDatabaseConnect(admin, config.databases.audit, ROLE_NAMES.audit),
     verifyDatabaseConnect(admin, config.databases.analytics, ROLE_NAMES.analytics),
+    verifyDatabaseConnect(admin, config.databases.dictionary, ROLE_NAMES.dictionary),
     verifyTable(auditAdmin, 'audit_log'),
     verifyTable(analyticsAdmin, 'analytics_events'),
     verifyTable(analyticsAdmin, 'audit_replica'),
+    verifyTable(dictAdmin, 'identity_tokens'),
     verifyTableGrant(auditAdmin, 'audit_log', ROLE_NAMES.audit, 'INSERT'),
     verifyTableGrant(auditAdmin, 'audit_log', ROLE_NAMES.audit, 'SELECT'),
     verifyColumnGrant(auditAdmin, 'audit_log', 'status', ROLE_NAMES.audit, 'UPDATE'),
@@ -522,6 +570,10 @@ async function verifyInitRemote(
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'SELECT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'INSERT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'SELECT'),
+    verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'INSERT'),
+    verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'SELECT'),
+    verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'UPDATE'),
+    verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'DELETE'),
   ]);
 
   const failures = checks.filter((value): value is string => value !== null);
@@ -588,27 +640,33 @@ export async function runInitRemote(env: NodeJS.ProcessEnv = process.env): Promi
   let appAdmin: ReturnType<typeof makePool> | undefined;
   let auditAdmin: ReturnType<typeof makePool> | undefined;
   let analyticsAdmin: ReturnType<typeof makePool> | undefined;
+  let dictAdmin: ReturnType<typeof makePool> | undefined;
 
   try {
     await ensureRole(admin, ROLE_NAMES.app, config.passwords.app);
     await ensureRole(admin, ROLE_NAMES.audit, config.passwords.audit);
     await ensureRole(admin, ROLE_NAMES.analytics, config.passwords.analytics);
+    await ensureRole(admin, ROLE_NAMES.dictionary, config.passwords.dictionary);
 
     await ensureDatabase(admin, config.databases.app);
     await ensureDatabase(admin, config.databases.audit);
     await ensureDatabase(admin, config.databases.analytics);
+    await ensureDatabase(admin, config.databases.dictionary);
 
     await grantConnect(admin, config.databases.app, ROLE_NAMES.app);
     await grantConnect(admin, config.databases.audit, ROLE_NAMES.audit);
     await grantConnect(admin, config.databases.analytics, ROLE_NAMES.analytics);
+    await grantConnect(admin, config.databases.dictionary, ROLE_NAMES.dictionary);
 
     appAdmin = makePool(dbUrl(config.adminDatabaseUrl, config.databases.app));
     auditAdmin = makePool(dbUrl(config.adminDatabaseUrl, config.databases.audit));
     analyticsAdmin = makePool(dbUrl(config.adminDatabaseUrl, config.databases.analytics));
+    dictAdmin = makePool(dbUrl(config.adminDatabaseUrl, config.databases.dictionary));
 
     await configureAppDatabase(appAdmin);
     await configureAuditDatabase(auditAdmin);
     await configureAnalyticsDatabase(analyticsAdmin);
+    await configureDictionaryDatabase(dictAdmin);
 
     // Apply the app database schema using the app_rw role so that app_rw owns
     // the resulting tables. This is idempotent (CREATE TABLE IF NOT EXISTS) and
@@ -636,11 +694,12 @@ export async function runInitRemote(env: NodeJS.ProcessEnv = process.env): Promi
     }
     await configureAgentWorkerRoles(admin, appAdmin, config);
 
-    await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, config);
+    await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
 
     console.log('Genesis database initialisation completed successfully.');
   } finally {
     await Promise.all([
+      dictAdmin?.end({ timeout: 5 }),
       analyticsAdmin?.end({ timeout: 5 }),
       auditAdmin?.end({ timeout: 5 }),
       appAdmin?.end({ timeout: 5 }),

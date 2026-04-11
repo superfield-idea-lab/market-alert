@@ -40,6 +40,18 @@ describe('init-remote helpers', () => {
     );
   });
 
+  it('requires DICT_RW_PASSWORD', () => {
+    expect(() =>
+      loadInitRemoteConfig({
+        ADMIN_DATABASE_URL: 'postgres://admin:secret@example.com/postgres',
+        APP_RW_PASSWORD: 'app_pw',
+        AUDIT_W_PASSWORD: 'audit_pw',
+        ANALYTICS_W_PASSWORD: 'analytics_pw',
+        // Deliberately omit DICT_RW_PASSWORD and agent passwords
+      } as NodeJS.ProcessEnv),
+    ).toThrow('DICT_RW_PASSWORD');
+  });
+
   it('requires AGENT_CODING_PASSWORD and AGENT_ANALYSIS_PASSWORD', () => {
     expect(() =>
       loadInitRemoteConfig({
@@ -47,6 +59,7 @@ describe('init-remote helpers', () => {
         APP_RW_PASSWORD: 'app_pw',
         AUDIT_W_PASSWORD: 'audit_pw',
         ANALYTICS_W_PASSWORD: 'analytics_pw',
+        DICT_RW_PASSWORD: 'dict_pw',
         // Deliberately omit agent passwords
       } as NodeJS.ProcessEnv),
     ).toThrow('AGENT_CODING_PASSWORD');
@@ -59,6 +72,7 @@ describe('init-remote helpers', () => {
         APP_RW_PASSWORD: 'app_pw',
         AUDIT_W_PASSWORD: 'audit_pw',
         ANALYTICS_W_PASSWORD: 'analytics_pw',
+        DICT_RW_PASSWORD: 'dict_pw',
         AGENT_CODING_PASSWORD: 'coding_pw',
         AGENT_ANALYSIS_PASSWORD: 'analysis_pw',
         AGENT_CODE_CLEANUP_PASSWORD: 'code_cleanup_pw',
@@ -69,6 +83,7 @@ describe('init-remote helpers', () => {
         app: 'app_pw',
         audit: 'audit_pw',
         analytics: 'analytics_pw',
+        dictionary: 'dict_pw',
         agents: {
           coding: 'coding_pw',
           analysis: 'analysis_pw',
@@ -79,6 +94,7 @@ describe('init-remote helpers', () => {
         app: 'calypso_app',
         audit: 'calypso_audit',
         analytics: 'calypso_analytics',
+        dictionary: 'calypso_dictionary',
       },
     });
   });
