@@ -18,6 +18,7 @@
  */
 
 import type { sql as SqlPool } from 'db';
+import { log } from 'core';
 import { getSecret } from '../secrets/index';
 
 export interface SeedSuperuserOptions {
@@ -42,13 +43,13 @@ export async function seedSuperuser({ sql }: SeedSuperuserOptions): Promise<void
   `;
 
   if (existing.length > 0) {
-    console.log('[seed] Superuser already exists — skipping seeding.');
+    log('info', '[seed] Superuser already exists — skipping seeding.');
     return;
   }
 
   const email = getSecret('SUPERUSER_EMAIL');
   if (!email) {
-    console.warn('[seed] SUPERUSER_EMAIL is not set — skipping superuser seeding.');
+    log('warn', '[seed] SUPERUSER_EMAIL is not set — skipping superuser seeding.');
     return;
   }
 
@@ -63,7 +64,8 @@ export async function seedSuperuser({ sql }: SeedSuperuserOptions): Promise<void
     // BIP-39 mnemonic treated as a UTF-8 passphrase; bcrypt-hash it directly.
     passwordHash = await Bun.password.hash(mnemonic);
   } else {
-    console.warn(
+    log(
+      'warn',
       '[seed] Neither SUPERUSER_PASSWORD nor SUPERUSER_MNEMONIC is set — skipping superuser seeding.',
     );
     return;
@@ -82,5 +84,6 @@ export async function seedSuperuser({ sql }: SeedSuperuserOptions): Promise<void
     VALUES (${id}, 'user', ${sql.json(properties as never)}, null)
   `;
 
-  console.log(`[seed] Superuser created with email ${email} (id: ${id}).`);
+  // Log the creation event — email is a PII field and will be scrubbed by log().
+  log('info', '[seed] Superuser created', { email, id });
 }

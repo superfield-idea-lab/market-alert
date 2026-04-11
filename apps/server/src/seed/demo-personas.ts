@@ -17,6 +17,7 @@
  */
 
 import type { sql as SqlPool } from 'db';
+import { log } from 'core';
 
 export interface SeedDemoPersonasOptions {
   /** postgres.js connection pool to the app database */
@@ -49,7 +50,7 @@ export async function seedDemoPersonas({ sql }: SeedDemoPersonasOptions): Promis
     return;
   }
 
-  console.log('[demo] DEMO_MODE is enabled — seeding demo personas.');
+  log('info', '[demo] DEMO_MODE is enabled — seeding demo personas.');
 
   for (const persona of DEMO_PERSONAS) {
     const existing = await sql`
@@ -61,7 +62,7 @@ export async function seedDemoPersonas({ sql }: SeedDemoPersonasOptions): Promis
     `;
 
     if (existing.length > 0) {
-      console.log(`[demo] ${persona.label} (${persona.email}) already exists — skipping.`);
+      log('info', `[demo] ${persona.label} already exists — skipping.`);
       continue;
     }
 
@@ -79,11 +80,10 @@ export async function seedDemoPersonas({ sql }: SeedDemoPersonasOptions): Promis
       VALUES (${id}, 'user', ${sql.json(properties as never)}, null)
     `;
 
-    console.log(`[demo] ${persona.label} created (id: ${id}).`);
+    log('info', `[demo] ${persona.label} created`, { id });
   }
 
-  console.log('[demo] Demo credentials:');
-  for (const persona of DEMO_PERSONAS) {
-    console.log(`[demo]   ${persona.label}: email=${persona.email}  password=${persona.password}`);
-  }
+  // Log that demo credentials are available — the actual values are omitted
+  // to prevent PII (email + password) from appearing in server logs.
+  log('info', '[demo] Demo personas seeded. Credentials are defined in DEMO_PERSONAS constant.');
 }

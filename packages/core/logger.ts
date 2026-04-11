@@ -20,6 +20,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { scrubPii } from './scrub-pii';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -230,12 +231,15 @@ export function log(level: LogLevel, message: string, context: LogContext = {}):
 
   const { trace_id = '', ...rest } = context;
 
+  // Scrub PII from context fields before writing to any sink.
+  const scrubbed = scrubPii(rest) as Record<string, unknown>;
+
   const entry: LogEntry = {
     ts: new Date().toISOString(),
     level,
     message,
     trace_id,
-    ...rest,
+    ...scrubbed,
   };
 
   const line = JSON.stringify(entry);

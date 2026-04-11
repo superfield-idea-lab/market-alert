@@ -1,0 +1,21 @@
+{
+  "description": "User registration payload containing PII fields that must be scrubbed before logging",
+  "input": {
+    "id": "user-123",
+    "email": "alice@example.com",
+    "display_name": "Alice Smith",
+    "phone": "+1-555-867-5309",
+    "password": "s3cr3tP@ssw0rd",
+    "role": "member",
+    "created_at": "2024-03-15T10:00:00Z"
+  },
+  "expected_scrubbed": {
+    "id": "user-123",
+    "email": "[REDACTED]",
+    "display_name": "[REDACTED]",
+    "phone": "[REDACTED]",
+    "password": "[REDACTED]",
+    "role": "member",
+    "created_at": "2024-03-15T10:00:00Z"
+  }
+}

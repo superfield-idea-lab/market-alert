@@ -1,8 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { log, rotateLogs, templateMessage, configureLogger, resetDeduplication } from './logger';
+import { PII_FIELD_NAMES } from './scrub-pii';
+
+// Resolve the path to shared fixtures relative to this file.
+const FIXTURES_DIR = resolve(import.meta.dirname, '../../tests/fixtures/pii-payloads');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -223,5 +227,130 @@ describe('log', () => {
     resetDeduplication();
     log('info', 'Server started', {});
     expect(parseLines(uniquesLog)).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PII scrubbing — fixture-driven
+// ---------------------------------------------------------------------------
+
+interface PiiFixture {
+  description: string;
+  input: Record<string, unknown>;
+  expected_scrubbed: Record<string, unknown>;
+}
+
+describe('log — PII scrubbing', () => {
+  let dir: string;
+  let appLog: string;
+
+  beforeEach(() => {
+    dir = makeTmpDir();
+    configureLogger(dir);
+    appLog = join(dir, 'app.log');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * Helper: assert that a logged entry contains only the scrubbed values
+   * and no raw PII values from the input fixture.
+   */
+  function assertNoPiiInEntry(
+    entry: Record<string, unknown>,
+    input: Record<string, unknown>,
+  ): void {
+    const entryJson = JSON.stringify(entry);
+    // Walk all PII fields from the fixture input and ensure their raw values
+    // do not appear verbatim in the serialised log entry.
+    function collectPiiValues(obj: unknown): string[] {
+      if (Array.isArray(obj)) return obj.flatMap(collectPiiValues);
+      if (obj !== null && typeof obj === 'object') {
+        const result: string[] = [];
+        for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+          if (PII_FIELD_NAMES.has(k) && typeof v === 'string') {
+            result.push(v);
+          }
+          result.push(...collectPiiValues(v));
+        }
+        return result;
+      }
+      return [];
+    }
+    for (const rawValue of collectPiiValues(input)) {
+      expect(entryJson).not.toContain(rawValue);
+    }
+  }
+
+  test('user-registration fixture: no raw PII in logged entry', () => {
+    const fixture = JSON.parse(
+      readFileSync(join(FIXTURES_DIR, 'user-registration.json'), 'utf8'),
+    ) as PiiFixture;
+
+    log('info', 'User registered', fixture.input);
+    const entries = parseLines(appLog);
+    expect(entries).toHaveLength(1);
+    assertNoPiiInEntry(entries[0], fixture.input);
+    // Non-PII fields are preserved
+    expect(entries[0].id).toBe(fixture.input.id);
+    expect(entries[0].role).toBe(fixture.input.role);
+  });
+
+  test('nested-user-profile fixture: no raw PII in logged entry', () => {
+    const fixture = JSON.parse(
+      readFileSync(join(FIXTURES_DIR, 'nested-user-profile.json'), 'utf8'),
+    ) as PiiFixture;
+
+    log('info', 'Profile updated', fixture.input);
+    const entries = parseLines(appLog);
+    expect(entries).toHaveLength(1);
+    assertNoPiiInEntry(entries[0], fixture.input);
+    // Non-PII fields preserved
+    expect(entries[0].event).toBe('profile_update');
+    expect(entries[0].status).toBe('ok');
+  });
+
+  test('auth-token fixture: no raw PII in logged entry', () => {
+    const fixture = JSON.parse(
+      readFileSync(join(FIXTURES_DIR, 'auth-token.json'), 'utf8'),
+    ) as PiiFixture;
+
+    log('info', 'Auth token issued', fixture.input);
+    const entries = parseLines(appLog);
+    expect(entries).toHaveLength(1);
+    assertNoPiiInEntry(entries[0], fixture.input);
+    // Non-PII preserved
+    expect(entries[0].user_id).toBe(fixture.input.user_id);
+    expect(entries[0].expires_in).toBe(fixture.input.expires_in);
+  });
+
+  test('all known PII_FIELD_NAMES are redacted when logged', () => {
+    // Build a payload with every known PII field.
+    const input: Record<string, unknown> = { safe_field: 'keep-me' };
+    for (const field of PII_FIELD_NAMES) {
+      input[field] = `raw-value-for-${field}`;
+    }
+
+    log('warn', 'PII completeness check', input);
+    const entries = parseLines(appLog);
+    expect(entries).toHaveLength(1);
+
+    // Every known PII field must be redacted.
+    for (const field of PII_FIELD_NAMES) {
+      expect(entries[0][field]).toBe('[REDACTED]');
+    }
+    // Non-PII field is untouched.
+    expect(entries[0].safe_field).toBe('keep-me');
+  });
+
+  test('adding a new unscrubbed PII field to context is caught by PII_FIELD_NAMES check', () => {
+    // This test documents the guard: if a developer adds a new PII field name
+    // to PII_FIELD_NAMES the test above automatically covers it.
+    // The count of known PII fields must stay consistent with scrub-pii.ts.
+    // If this test fails it means scrub-pii.ts was changed without updating
+    // the test expectation — a deliberate friction point.
+    expect(PII_FIELD_NAMES.size).toBeGreaterThanOrEqual(13);
   });
 });

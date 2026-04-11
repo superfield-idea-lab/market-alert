@@ -1,0 +1,49 @@
+{
+  "description": "Nested object with PII in nested properties and arrays — all must be scrubbed",
+  "input": {
+    "event": "profile_update",
+    "user": {
+      "id": "u-789",
+      "email": "bob@example.com",
+      "name": "Bob Jones",
+      "address": "123 Main St, Springfield",
+      "contacts": [
+        {
+          "email": "contact1@example.com",
+          "phone": "+1-555-111-2222"
+        },
+        {
+          "email": "contact2@example.com",
+          "phone": "+1-555-333-4444"
+        }
+      ],
+      "secret": "s3cr3t-api-k3y",
+      "key": "enc-key-material"
+    },
+    "trace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "ok"
+  },
+  "expected_scrubbed": {
+    "event": "profile_update",
+    "user": {
+      "id": "u-789",
+      "email": "[REDACTED]",
+      "name": "[REDACTED]",
+      "address": "[REDACTED]",
+      "contacts": [
+        {
+          "email": "[REDACTED]",
+          "phone": "[REDACTED]"
+        },
+        {
+          "email": "[REDACTED]",
+          "phone": "[REDACTED]"
+        }
+      ],
+      "secret": "[REDACTED]",
+      "key": "[REDACTED]"
+    },
+    "trace_id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "ok"
+  }
+}
