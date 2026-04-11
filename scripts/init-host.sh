@@ -330,9 +330,11 @@ if _is_legacy_call; then
     APP_RW_PASSWORD="$(echo "${_existing_db_url}" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')"
     AUDIT_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AUDIT_W_PASSWORD)"
     ANALYTICS_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets ANALYTICS_W_PASSWORD)"
+    DICT_RW_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets DICT_RW_PASSWORD)"
     AGENT_CODING_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_CODING_PASSWORD)"
     AGENT_ANALYSIS_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_ANALYSIS_PASSWORD)"
     AGENT_CODE_CLEANUP_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_CODE_CLEANUP_PASSWORD)"
+    DICT_RW_PASSWORD="${DICT_RW_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD:-$(openssl rand -hex 24)}"
@@ -348,6 +350,7 @@ if _is_legacy_call; then
     APP_RW_PASSWORD="$(openssl rand -hex 24)"
     AUDIT_W_PASSWORD="$(openssl rand -hex 24)"
     ANALYTICS_W_PASSWORD="$(openssl rand -hex 24)"
+    DICT_RW_PASSWORD="$(openssl rand -hex 24)"
     AGENT_CODING_PASSWORD="$(openssl rand -hex 24)"
     AGENT_ANALYSIS_PASSWORD="$(openssl rand -hex 24)"
     AGENT_CODE_CLEANUP_PASSWORD="$(openssl rand -hex 24)"
@@ -425,6 +428,7 @@ if _is_legacy_call; then
     --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}"
     --from-literal=AUDIT_W_PASSWORD="${AUDIT_W_PASSWORD}"
     --from-literal=ANALYTICS_W_PASSWORD="${ANALYTICS_W_PASSWORD}"
+    --from-literal=DICT_RW_PASSWORD="${DICT_RW_PASSWORD}"
     --from-literal=AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD}"
     --from-literal=AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD}"
     --from-literal=AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD}"
@@ -443,6 +447,7 @@ if _is_legacy_call; then
     --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}"
     --from-literal=AUDIT_W_PASSWORD="${AUDIT_W_PASSWORD}"
     --from-literal=ANALYTICS_W_PASSWORD="${ANALYTICS_W_PASSWORD}"
+    --from-literal=DICT_RW_PASSWORD="${DICT_RW_PASSWORD}"
     --from-literal=AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD}"
     --from-literal=AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD}"
     --from-literal=AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD}"
@@ -608,6 +613,11 @@ spec:
                 secretKeyRef:
                   name: calypso-db-init-secret
                   key: ANALYTICS_W_PASSWORD
+            - name: DICT_RW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-db-init-secret
+                  key: DICT_RW_PASSWORD
             - name: AGENT_CODING_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -1405,9 +1415,11 @@ if [[ "$(_extract_secret exists)" == "yes" ]]; then
   ENCRYPTION_MASTER_KEY="$(_extract_secret ENCRYPTION_MASTER_KEY)"
   AUDIT_W_PASSWORD="$(_extract_secret AUDIT_W_PASSWORD)"
   ANALYTICS_W_PASSWORD="$(_extract_secret ANALYTICS_W_PASSWORD)"
+  DICT_RW_PASSWORD="$(_extract_secret DICT_RW_PASSWORD)"
   AGENT_CODING_PASSWORD="$(_extract_secret AGENT_CODING_PASSWORD)"
   AGENT_ANALYSIS_PASSWORD="$(_extract_secret AGENT_ANALYSIS_PASSWORD)"
   AGENT_CODE_CLEANUP_PASSWORD="$(_extract_secret AGENT_CODE_CLEANUP_PASSWORD)"
+  DICT_RW_PASSWORD="${DICT_RW_PASSWORD:-$(openssl rand -hex 24)}"
   AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD:-$(openssl rand -hex 24)}"
   AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD:-$(openssl rand -hex 24)}"
   AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD:-$(openssl rand -hex 24)}"
@@ -1422,6 +1434,7 @@ else
   APP_RW_PASSWORD="$(openssl rand -hex 24)"
   AUDIT_W_PASSWORD="$(openssl rand -hex 24)"
   ANALYTICS_W_PASSWORD="$(openssl rand -hex 24)"
+  DICT_RW_PASSWORD="$(openssl rand -hex 24)"
   AGENT_CODING_PASSWORD="$(openssl rand -hex 24)"
   AGENT_ANALYSIS_PASSWORD="$(openssl rand -hex 24)"
   AGENT_CODE_CLEANUP_PASSWORD="$(openssl rand -hex 24)"
@@ -1476,6 +1489,7 @@ kubectl create secret generic calypso-db-secrets \
   --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}" \
   --from-literal=AUDIT_W_PASSWORD="${AUDIT_W_PASSWORD}" \
   --from-literal=ANALYTICS_W_PASSWORD="${ANALYTICS_W_PASSWORD}" \
+  --from-literal=DICT_RW_PASSWORD="${DICT_RW_PASSWORD}" \
   --from-literal=AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD}" \
   --from-literal=AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD}" \
   --from-literal=AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD}"
@@ -1487,6 +1501,7 @@ kubectl create secret generic calypso-db-init-secret \
   --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}" \
   --from-literal=AUDIT_W_PASSWORD="${AUDIT_W_PASSWORD}" \
   --from-literal=ANALYTICS_W_PASSWORD="${ANALYTICS_W_PASSWORD}" \
+  --from-literal=DICT_RW_PASSWORD="${DICT_RW_PASSWORD}" \
   --from-literal=AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD}" \
   --from-literal=AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD}" \
   --from-literal=AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD}"

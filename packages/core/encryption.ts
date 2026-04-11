@@ -23,6 +23,7 @@
  */
 
 import type { EntityType } from './types';
+import { kmsGenerateDataKey, _resetKmsBackend } from './kms';
 
 // ---------------------------------------------------------------------------
 // Sensitivity class — determines HKDF key domain
@@ -97,11 +98,19 @@ export const SENSITIVE_FIELDS: Partial<Record<EntityType, string[]>> = {
 
 const ENC_PREFIX = 'enc:v1:';
 
-/** Cache of derived CryptoKey objects, keyed by entity type. */
+/**
+ * Cache of AES-256-GCM CryptoKey objects, keyed by entity type.
+ *
+ * Keys are sourced from the active KMS backend (via kmsGenerateDataKey). In
+ * local dev and CI the LocalDevKmsBackend derives keys deterministically from
+ * ENCRYPTION_MASTER_KEY using HKDF, which is equivalent to the previous
+ * direct-HKDF approach and maintains backward compatibility with existing
+ * enc:v1: ciphertext blobs.
+ *
+ * In staging/production the active backend (AwsKmsBackend, VaultKmsBackend)
+ * generates real KMS-protected data keys.
+ */
 const derivedKeyCache = new Map<string, CryptoKey>();
-
-/** Cached imported master key (raw bytes). */
-let cachedMasterKeyMaterial: CryptoKey | null = null;
 
 /**
  * Returns true when encryption is active.
@@ -114,76 +123,39 @@ function isEncryptionEnabled(): boolean {
 }
 
 /**
- * Imports the raw master key bytes as a CryptoKey suitable for HKDF derivation.
- */
-async function getMasterKeyMaterial(): Promise<CryptoKey> {
-  if (cachedMasterKeyMaterial) return cachedMasterKeyMaterial;
-
-  const masterKeyHex = process.env.ENCRYPTION_MASTER_KEY!;
-  // Accept hex or base64; detect by trying hex first (must be 64 hex chars = 32 bytes)
-  let rawBytes: Uint8Array<ArrayBuffer>;
-  if (/^[0-9a-fA-F]{64}$/.test(masterKeyHex)) {
-    const pairs = masterKeyHex.match(/.{2}/g)!;
-    const buf = new ArrayBuffer(pairs.length);
-    rawBytes = new Uint8Array(buf);
-    for (let i = 0; i < pairs.length; i++) {
-      rawBytes[i] = parseInt(pairs[i], 16);
-    }
-  } else {
-    // treat as base64
-    const binaryString = atob(masterKeyHex);
-    const buf = new ArrayBuffer(binaryString.length);
-    rawBytes = new Uint8Array(buf);
-    for (let i = 0; i < binaryString.length; i++) {
-      rawBytes[i] = binaryString.charCodeAt(i);
-    }
-  }
-
-  cachedMasterKeyMaterial = await crypto.subtle.importKey(
-    'raw',
-    rawBytes,
-    { name: 'HKDF' },
-    false,
-    ['deriveKey'],
-  );
-  return cachedMasterKeyMaterial;
-}
-
-/**
- * Derives an AES-256-GCM key for the given entity type, with caching.
+ * Returns an AES-256-GCM CryptoKey for the given entity type.
  *
- * The HKDF `info` parameter is `<sensitivity-class>/<entity-type>` so that
- * keys for different sensitivity classes are cryptographically independent,
- * even if the entity type names were to collide across class boundaries.
- * Entity types without a mapped sensitivity class fall back to using the
- * bare entity type name as the info parameter (legacy / non-sensitive).
+ * Key material is resolved through the active KMS backend so that field
+ * encryption helpers only ever see key bytes via the KMS abstraction.
+ *
+ * The encryption context passed to the KMS backend encodes the sensitivity
+ * class and entity type, enforcing key-domain separation at the KMS layer.
+ *
+ * Keys are cached in memory for the lifetime of the process to avoid repeated
+ * KMS round-trips for the same entity type.
  */
 async function getDerivedKey(entityType: string): Promise<CryptoKey> {
   const cached = derivedKeyCache.get(entityType);
   if (cached) return cached;
 
-  const masterKey = await getMasterKeyMaterial();
-  const encoder = new TextEncoder();
-  // Include sensitivity class in the HKDF info to enforce key-domain separation
   const sensitivityClass = ENTITY_SENSITIVITY_CLASS[entityType as EntityType];
-  const infoString = sensitivityClass ? `${sensitivityClass}/${entityType}` : entityType;
-  const info = encoder.encode(infoString);
+  const domain = sensitivityClass ? `${sensitivityClass}/${entityType}` : entityType;
 
-  const derived = await crypto.subtle.deriveKey(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new Uint8Array(32), // fixed zero salt — the info provides domain separation
-      info,
-    },
-    masterKey,
+  // Resolve the data key through the KMS abstraction.
+  // LocalDevKmsBackend: deterministic HKDF derivation from ENCRYPTION_MASTER_KEY
+  // AwsKmsBackend / VaultKmsBackend: real KMS-generated data key
+  const dataKey = await kmsGenerateDataKey({ domain, purpose: 'field-enc' });
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    dataKey.plaintextKey.buffer as ArrayBuffer,
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt'],
   );
 
-  derivedKeyCache.set(entityType, derived);
-  return derived;
+  derivedKeyCache.set(entityType, cryptoKey);
+  return cryptoKey;
 }
 
 /**
@@ -340,8 +312,11 @@ export class PlaintextWriteError extends Error {
 
 /**
  * Resets all internal key caches. Only intended for use in tests.
+ *
+ * Also resets the active KMS backend to LocalDevKmsBackend so that a change
+ * to ENCRYPTION_MASTER_KEY between tests is picked up correctly.
  */
 export function _resetEncryptionCaches(): void {
   derivedKeyCache.clear();
-  cachedMasterKeyMaterial = null;
+  _resetKmsBackend();
 }

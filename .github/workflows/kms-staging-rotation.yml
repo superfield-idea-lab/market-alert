@@ -1,0 +1,118 @@
+name: KMS Staging Key Rotation
+
+# Exercises key rotation against a real staging KMS (AWS KMS primary;
+# Vault Transit as the on-prem fallback). Runs on every push to feat/**
+# branches that touch KMS-related files, and on workflow_dispatch for
+# manual rotation runs.
+#
+# Required secrets (set in the repository or environment):
+#   AWS_KMS_KEY_ID       — ARN of the staging AWS KMS CMK
+#   AWS_ACCESS_KEY_ID    — staging IAM access key with kms:GenerateDataKey + kms:Decrypt
+#   AWS_SECRET_ACCESS_KEY
+#   AWS_REGION           — e.g. us-east-1
+#
+# Optional (Vault fallback):
+#   VAULT_ADDR           — e.g. https://vault.staging.internal:8200
+#   VAULT_TOKEN          — staging Vault token with transit encrypt/decrypt/rotate
+
+on:
+  push:
+    branches:
+      - 'feat/**'
+      - main
+    paths:
+      - 'packages/core/kms.ts'
+      - 'packages/core/kms.test.ts'
+      - 'packages/core/encryption.ts'
+      - 'scripts/rotate-data-keys.ts'
+      - '.github/workflows/kms-staging-rotation.yml'
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: 'KMS backend to test (aws | vault | both)'
+        required: false
+        default: 'aws'
+
+concurrency:
+  group: kms-staging-${{ github.ref }}
+  cancel-in-progress: false # never cancel a key rotation in progress
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Contract tests — LocalDev backend (always runs; no external creds needed)
+  # ---------------------------------------------------------------------------
+  contract-local:
+    name: KMS contract tests (LocalDev backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Run KMS contract tests (LocalDev)
+        run: bun --bun vitest run packages/core/kms.test.ts
+        env:
+          ENCRYPTION_MASTER_KEY: ${{ secrets.ENCRYPTION_MASTER_KEY || 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }}
+
+  # ---------------------------------------------------------------------------
+  # AWS KMS — round-trip + key rotation against real staging CMK
+  # ---------------------------------------------------------------------------
+  kms-aws-staging:
+    name: AWS KMS staging — round-trip + key rotation
+    runs-on: ubuntu-latest
+    # Only run when AWS credentials are available
+    if: ${{ vars.AWS_KMS_KEY_ID != '' || secrets.AWS_KMS_KEY_ID != '' }}
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Run AWS KMS contract tests (staging)
+        run: bun --bun vitest run packages/core/kms.test.ts
+        env:
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Run end-to-end key rotation against staging AWS KMS
+        run: bun run scripts/rotate-data-keys.ts
+        env:
+          AWS_KMS_KEY_ID: ${{ secrets.AWS_KMS_KEY_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+  # ---------------------------------------------------------------------------
+  # Vault Transit — round-trip + key rotation against real staging Vault
+  # ---------------------------------------------------------------------------
+  kms-vault-staging:
+    name: Vault Transit staging — round-trip + key rotation
+    runs-on: ubuntu-latest
+    # Only run when Vault credentials are available
+    if: ${{ vars.VAULT_ADDR != '' || secrets.VAULT_ADDR != '' }}
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Run Vault KMS contract tests (staging)
+        run: bun --bun vitest run packages/core/kms.test.ts
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR || vars.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+      - name: Run end-to-end key rotation against staging Vault
+        run: bun run scripts/rotate-data-keys.ts
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR || vars.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
