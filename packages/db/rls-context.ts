@@ -1,0 +1,84 @@
+/**
+ * @file rls-context
+ * Session-context binding for Postgres restrictive RLS policies.
+ *
+ * `withRlsContext()` wraps a database operation in a transaction that first
+ * sets `app.current_user_id` and `app.current_tenant_id` as session-local
+ * Postgres config variables so that RLS policies on customer-scoped tables
+ * (`entities`, `relations`) can reference them via `current_setting(...)`.
+ *
+ * Using `SET LOCAL` scoping means each variable is automatically reset when
+ * the transaction ends — there is no risk of leaking a stale context into
+ * subsequent queries on the same connection.
+ *
+ * Usage:
+ * ```ts
+ * import { withRlsContext, sql } from 'db';
+ *
+ * const rows = await withRlsContext(sql, { userId: 'u1', tenantId: 'tenant-a' }, async (tx) => {
+ *   return tx<Row[]>`SELECT * FROM entities WHERE id = ${id}`;
+ * });
+ * ```
+ *
+ * Blueprint: DATA blueprint — restrictive RLS, structural DB blocks replace
+ * application-layer filtering (PRD §7).
+ */
+
+import postgres from 'postgres';
+
+type Sql = postgres.Sql;
+
+/**
+ * `postgres.TransactionSql` extends `Omit<Sql, ...>` which strips the call
+ * signatures that make tagged-template queries work. Typing the callback as
+ * `Sql` preserves those signatures while remaining structurally compatible at
+ * runtime (TransactionSql is a strict subset).
+ */
+type TxSql = Sql;
+
+export interface RlsSessionContext {
+  /** The authenticated user's entity ID. */
+  userId: string;
+  /** The tenant the user belongs to. Null for superusers or system operations. */
+  tenantId: string | null;
+}
+
+/**
+ * Escapes a string value for safe embedding in a `SET LOCAL` statement.
+ * Replaces single quotes with doubled single quotes (standard SQL escaping).
+ */
+function escapeConfigValue(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/**
+ * Executes `callback` inside a PostgreSQL transaction that opens with:
+ *   SET LOCAL app.current_user_id  = '<userId>'
+ *   SET LOCAL app.current_tenant_id = '<tenantId>'
+ *
+ * The `SET LOCAL` scoping ensures the variables are reset when the transaction
+ * ends, so no stale context leaks across requests on the same connection.
+ *
+ * Restrictive RLS policies on `entities` and `relations` reference these
+ * variables via `current_setting('app.current_tenant_id', true)` to enforce
+ * that every query can only see rows belonging to the current tenant.
+ *
+ * @param sqlPool  - A `postgres` connection pool (e.g. `sql` from `db`).
+ * @param context  - Session context supplying userId and tenantId.
+ * @param callback - A function that receives the transaction client and returns a Promise.
+ */
+export function withRlsContext<T>(
+  sqlPool: Sql,
+  context: RlsSessionContext,
+  callback: (tx: TxSql) => Promise<T>,
+): Promise<T> {
+  const { userId, tenantId } = context;
+  return sqlPool.begin((tx) => {
+    const userIdEsc = escapeConfigValue(userId);
+    const tenantIdEsc = tenantId !== null ? escapeConfigValue(tenantId) : '';
+    return tx
+      .unsafe(`SET LOCAL app.current_user_id = '${userIdEsc}'`)
+      .then(() => tx.unsafe(`SET LOCAL app.current_tenant_id = '${tenantIdEsc}'`))
+      .then(() => callback(tx as unknown as Sql));
+  }) as unknown as Promise<T>;
+}

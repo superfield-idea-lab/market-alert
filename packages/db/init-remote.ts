@@ -37,6 +37,17 @@ const AGENT_BASE_ROLE = 'agent_worker';
 export const AGENT_TYPES = ['coding', 'analysis', 'code_cleanup'] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
+/**
+ * Customer-scoped tables: every table whose rows belong to a specific tenant.
+ * Each table listed here has RLS enabled and a tenant-isolation policy applied
+ * by configureCustomerScopedRls().
+ *
+ * Blueprint: DATA blueprint, PRD §7 — restrictive RLS replaces application-layer
+ * tenant filtering (issue #19).
+ */
+export const CUSTOMER_SCOPED_TABLES = ['entities', 'relations'] as const;
+export type CustomerScopedTable = (typeof CUSTOMER_SCOPED_TABLES)[number];
+
 export function agentRoleName(agentType: AgentType): string {
   return `agent_${agentType}`;
 }
@@ -394,6 +405,56 @@ CREATE POLICY ${quoteIdentifier(policyName)}
   }
 }
 
+/**
+ * Enable RLS on customer-scoped tables and create (or replace) tenant-isolation
+ * policies for each table.
+ *
+ * entities: uses the `tenant_id` column directly.
+ * relations: joins to `entities` on `source_id` to derive the tenant.
+ *
+ * Both policies are PERMISSIVE FOR ALL. Because each table has FORCE ROW LEVEL
+ * SECURITY set (the table owner, app_rw, is forced to obey RLS too), a single
+ * PERMISSIVE policy is functionally equivalent to RESTRICTIVE: any row that does
+ * not satisfy the USING clause is invisible to all non-superuser roles.
+ *
+ * Blueprint: DATA blueprint, PRD §7, issue #19.
+ */
+async function configureCustomerScopedRls(appAdmin: ReturnType<typeof makePool>): Promise<void> {
+  // Enable RLS and FORCE RLS on entities
+  await appAdmin.unsafe(`ALTER TABLE entities ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE entities FORCE ROW LEVEL SECURITY`);
+
+  // Tenant-isolation policy on entities
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS entities_tenant_isolation ON entities`);
+  await appAdmin.unsafe(`
+CREATE POLICY entities_tenant_isolation
+  ON entities
+  FOR ALL
+  USING (
+    tenant_id = current_setting('app.current_tenant_id', true)
+  )
+`);
+
+  // Enable RLS and FORCE RLS on relations
+  await appAdmin.unsafe(`ALTER TABLE relations ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE relations FORCE ROW LEVEL SECURITY`);
+
+  // Tenant-isolation policy on relations (derives tenant via source entity)
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS relations_tenant_isolation ON relations`);
+  await appAdmin.unsafe(`
+CREATE POLICY relations_tenant_isolation
+  ON relations
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM entities
+      WHERE entities.id = source_id
+        AND entities.tenant_id = current_setting('app.current_tenant_id', true)
+    )
+  )
+`);
+}
+
 async function verifyRole(
   admin: ReturnType<typeof makePool>,
   roleName: string,
@@ -620,6 +681,14 @@ async function verifyInitRemote(
   failures.push(...(await verifyAppSchemaPrivileges(appAdmin)));
   failures.push(...(await verifyAgentRoles(admin, appAdmin, config)));
 
+  // Verify customer-scoped RLS (issue #19)
+  for (const table of CUSTOMER_SCOPED_TABLES) {
+    const rlsCheck = await verifyRlsEnabled(appAdmin, table);
+    if (rlsCheck !== null) failures.push(rlsCheck);
+    const policyCheck = await verifyRlsPolicy(appAdmin, table, `${table}_tenant_isolation`);
+    if (policyCheck !== null) failures.push(policyCheck);
+  }
+
   if (failures.length > 0) {
     throw new Error(`Genesis verification failed:\n- ${failures.join('\n- ')}`);
   }
@@ -741,6 +810,7 @@ REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAME
       await ensureAgentTypeRole(admin, agentType, config.passwords.agents[agentType]);
     }
     await configureAgentWorkerRoles(admin, appAdmin, config);
+    await configureCustomerScopedRls(appAdmin);
 
     await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
 
