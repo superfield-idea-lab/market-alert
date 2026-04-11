@@ -331,3 +331,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_used_at TIMESTAMPTZ
 );
+
+-- Migration version tracking table.
+-- Records each named migration that has been applied to this database.
+-- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.
+-- ENV-C-016: migrate() records the baseline migration name here after applying
+--            the schema so CI can verify a fresh bootstrap produces exactly one row.
+CREATE TABLE IF NOT EXISTS _schema_version (
+  migration TEXT PRIMARY KEY,
+  applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Baseline migration record: marks the initial schema as applied.
+-- INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+INSERT INTO _schema_version (migration) VALUES ('baseline-001')
+  ON CONFLICT (migration) DO NOTHING;

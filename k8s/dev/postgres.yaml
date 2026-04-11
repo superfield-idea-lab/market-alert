@@ -1,0 +1,110 @@
+# StatefulSet + Service for the dev Postgres instance running inside k3d.
+#
+# ENV-D-002: dev/CI/prod share the same container topology.
+# This manifest uses the same postgres:16-alpine image as production but with
+# simplified storage (emptyDir) suitable for a local dev cluster.
+#
+# Credentials are sourced from the dev-secrets ConfigMap in dev-secrets.yaml.
+# These are dev-only plain-text credentials — never use in CI or production.
+#
+# Apply order (handled by scripts/dev-k3d.ts):
+#   kubectl apply -f k8s/dev/dev-secrets.yaml
+#   kubectl apply -f k8s/dev/postgres.yaml
+#   kubectl rollout status statefulset/calypso-dev-postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: calypso-dev-postgres
+  labels:
+    app: calypso-dev-postgres
+    env: dev
+spec:
+  serviceName: calypso-dev-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-dev-postgres
+  template:
+    metadata:
+      labels:
+        app: calypso-dev-postgres
+        env: dev
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: calypso-dev-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: calypso-dev-config
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: calypso-dev-config
+                  key: POSTGRES_DB
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+            limits:
+              cpu: '500m'
+              memory: '256Mi'
+          # emptyDir volume: data is lost when the pod restarts.
+          # This is intentional for dev — no persistent storage dependency.
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calypso-dev-postgres
+  labels:
+    app: calypso-dev-postgres
+    env: dev
+spec:
+  selector:
+    app: calypso-dev-postgres
+  ports:
+    - name: postgres
+      protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP

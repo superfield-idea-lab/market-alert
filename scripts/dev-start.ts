@@ -1,11 +1,18 @@
 #!/usr/bin/env bun
 /**
- * dev-start — Spins up an ephemeral Postgres container, runs migrations,
- * then starts the API server subprocess and Vite in middleware mode as the
- * single HTTP entry point. Proxies /api through to the API server.
- * Tears down the container on exit.
+ * dev-start — Starts the API server subprocess and Vite in middleware mode as
+ * the single HTTP entry point. Proxies /api through to the API server.
  *
- * Run via: bun run dev
+ * ENV-D-002: Postgres is provided by the k3d dev cluster (not an ephemeral
+ * Docker container). Run `pnpm dev:cluster` to create the cluster and
+ * `pnpm db:migrate` to apply the baseline migration before running this script.
+ * The `pnpm dev` shortcut runs all three steps in sequence.
+ *
+ * Integration tests (ENV-X-009) still use ephemeral Docker containers via
+ * packages/db/pg-container.ts — they never run against the cluster database.
+ *
+ * Run via: pnpm dev  (preferred — runs cluster setup + migrate + this script)
+ *          bun run scripts/dev-start.ts  (if cluster is already running)
  */
 
 import { join } from 'path';
@@ -13,8 +20,11 @@ import { createServer as createHttpServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { createServer as createViteServer } from 'vite';
-import { startPostgres } from '../packages/db/pg-container';
 import { createProxy } from '../apps/web/vite.config';
+
+// Dev cluster Postgres URL (k3d loadbalancer exposes port 5432 on localhost)
+const DEV_DATABASE_URL =
+  process.env.DATABASE_URL ?? 'postgres://calypso:calypso@localhost:5432/calypso';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const WEB_PORT_BASE = Number(process.env.PORT ?? 5174);
@@ -59,7 +69,6 @@ async function findFreePort(base: number): Promise<number> {
 
 // Cleanup state — tracks resources that need to be torn down.
 let cleanupCalled = false;
-let pgHandle: { stop: () => Promise<void> } | null = null;
 let apiServerHandle: { kill: () => void } | null = null;
 let viteHandle: { close: () => Promise<void> } | null = null;
 let httpServerHandle: ReturnType<typeof createHttpServer> | null = null;
@@ -84,11 +93,8 @@ async function cleanup() {
   } catch {
     // best-effort
   }
-  try {
-    await pgHandle?.stop();
-  } catch {
-    // best-effort
-  }
+  // Note: the k3d cluster continues running after dev-start exits.
+  // Use `pnpm dev:cluster:delete` to tear it down explicitly.
   console.log('  Done.');
 }
 
@@ -121,33 +127,26 @@ process.on('uncaughtException', async (err) => {
 
 async function main() {
   console.log('\n⬡ Starting dev environment');
+  console.log(`  Database: ${DEV_DATABASE_URL.replace(/:[^:@]+@/, ':***@')}`);
+
+  // Set database env vars from the k3d cluster URL (ENV-D-002).
+  // pnpm dev:cluster and pnpm db:migrate already ran; Postgres is up and migrated.
+  process.env.DATABASE_URL = DEV_DATABASE_URL;
+  process.env.AUDIT_DATABASE_URL = process.env.AUDIT_DATABASE_URL ?? DEV_DATABASE_URL;
+  process.env.ANALYTICS_DATABASE_URL = process.env.ANALYTICS_DATABASE_URL ?? DEV_DATABASE_URL;
 
   // 0. Probe WEB_PORT; increment if occupied
   const WEB_PORT = await findFreePort(WEB_PORT_BASE);
   const API_PORT = WEB_PORT + 1;
 
-  // 1. Start ephemeral Postgres
-  console.log('  Starting Postgres container...');
-  const pg = await startPostgres();
-  pgHandle = pg;
-  console.log(`  Postgres ready at: ${pg.url}`);
-  process.env.DATABASE_URL = pg.url;
-  process.env.AUDIT_DATABASE_URL = pg.url;
-  process.env.ANALYTICS_DATABASE_URL = pg.url;
-
-  // 2. Run migrations (dynamic import deferred until env vars are set)
-  const { migrate } = await import('../packages/db/index');
-  await migrate({ databaseUrl: pg.url });
-  console.log('  Schema migrated.');
-
-  // 3. Spawn API server subprocess with all DB URLs set
+  // 1. Spawn API server subprocess with all DB URLs set
   const apiServer = Bun.spawn(['bun', 'run', '--hot', 'src/index.ts'], {
     cwd: join(REPO_ROOT, 'apps', 'server'),
     env: {
       ...process.env,
-      DATABASE_URL: pg.url,
-      AUDIT_DATABASE_URL: pg.url,
-      ANALYTICS_DATABASE_URL: pg.url,
+      DATABASE_URL: DEV_DATABASE_URL,
+      AUDIT_DATABASE_URL: process.env.AUDIT_DATABASE_URL,
+      ANALYTICS_DATABASE_URL: process.env.ANALYTICS_DATABASE_URL,
       PORT: String(API_PORT),
     },
     stdout: 'inherit',
@@ -155,12 +154,12 @@ async function main() {
   });
   apiServerHandle = apiServer;
 
-  // 4. Create the HTTP server first so Vite can attach its HMR WebSocket
+  // 2. Create the HTTP server first so Vite can attach its HMR WebSocket
   //    upgrade handler to it instead of spawning a separate listener on 24678.
   const httpServer = createHttpServer();
   httpServerHandle = httpServer;
 
-  // 5. Start Vite in middleware mode — pass the HTTP server so HMR WebSocket
+  // 3. Start Vite in middleware mode — pass the HTTP server so HMR WebSocket
   //    upgrades are handled on the same port as the dev server.
   const vite = await createViteServer({
     configFile: join(REPO_ROOT, 'apps', 'web', 'vite.config.ts'),
