@@ -15,6 +15,7 @@ on:
       - 'Dockerfile.worker'
       - 'Dockerfile.agent-worker'
       - '.github/workflows/container.yml'
+      - '.github/workflows/**'
 
 permissions:
   contents: read

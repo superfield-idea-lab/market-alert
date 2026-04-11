@@ -1,0 +1,155 @@
+name: Fixture Refresh
+
+# Scheduled monthly fixture recorder run.
+#
+# - Calls live external APIs to record fresh request/response pairs.
+# - Diffs the new fixtures against the previous committed versions.
+# - Alerts on schema drift (new or removed top-level response fields).
+# - Commits updated fixtures back to main if they changed.
+# - Enforces TEST-C-025: fails if any fixture is older than 30 days.
+#
+# Blueprint refs:
+#   TEST-D-001 golden-fixture-recording
+#   TEST-A-003 fixture-refresh-pipeline
+#   TEST-C-019 fixture-refresh-pipeline
+#   TEST-C-025 fixtures-refreshed
+
+on:
+  schedule:
+    # First day of every month at 04:00 UTC
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to refresh (default: anthropic)'
+        required: false
+        default: 'anthropic'
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  refresh-fixtures:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      # ── Record fresh fixtures ──────────────────────────────────────────────
+
+      - name: Record Anthropic fixtures
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          bun run scripts/record-fixture.ts \
+            --service anthropic \
+            --output tests/fixtures/anthropic
+        continue-on-error: false
+
+      # ── Schema drift check ─────────────────────────────────────────────────
+
+      - name: Check schema drift
+        id: drift
+        run: |
+          bun run - <<'EOF'
+          import { readdirSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { checkSchemaDrift } from './scripts/record-fixture.ts';
+
+          const dir = 'tests/fixtures/anthropic';
+          const files = readdirSync(dir).filter(f => f.endsWith('.json')).sort();
+
+          if (files.length < 2) {
+            console.log('Not enough fixtures to diff — skipping drift check.');
+            process.exit(0);
+          }
+
+          // Compare the two most-recent fixtures
+          const prev = JSON.parse(readFileSync(join(dir, files[files.length - 2]), 'utf-8'));
+          const curr = JSON.parse(readFileSync(join(dir, files[files.length - 1]), 'utf-8'));
+
+          const result = checkSchemaDrift(prev, curr);
+
+          if (result.drifted) {
+            console.error('SCHEMA DRIFT DETECTED');
+            console.error('Added fields:  ', result.added);
+            console.error('Removed fields:', result.removed);
+            // Write drift summary for the GitHub Actions summary
+            const summary = [
+              '## Schema Drift Detected',
+              '',
+              `**Added fields:** ${result.added.join(', ') || 'none'}`,
+              `**Removed fields:** ${result.removed.join(', ') || 'none'}`,
+              '',
+              'Review the new fixture and update integration tests if needed.',
+            ].join('\n');
+            const fs = await import('node:fs');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? '/dev/null', summary + '\n');
+            process.exit(1);
+          } else {
+            console.log('No schema drift detected.');
+          }
+          EOF
+        continue-on-error: true
+
+      - name: Open drift issue if schema changed
+        if: steps.drift.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "chore: schema drift detected in Anthropic fixtures" \
+            --body "The monthly fixture refresh detected schema drift in \`tests/fixtures/anthropic\`. Review the updated fixtures and update integration tests as needed. See the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." \
+            --label "bug" \
+            || echo "Issue creation failed (may already exist)"
+
+      # ── Staleness gate (TEST-C-025) ────────────────────────────────────────
+
+      - name: Assert fixtures are fresh (TEST-C-025)
+        run: |
+          bun run - <<'EOF'
+          import { readdirSync, readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { assertFixturesFresh } from './tests/fixtures/msw-handler.ts';
+
+          const dir = 'tests/fixtures/anthropic';
+          const files = readdirSync(dir).filter(f => f.endsWith('.json')).sort();
+          const fixtures = files.map(f => JSON.parse(readFileSync(join(dir, f), 'utf-8')));
+
+          assertFixturesFresh(fixtures);
+          console.log(`All ${fixtures.length} fixture(s) are fresh.`);
+          EOF
+
+      # ── Commit updated fixtures ────────────────────────────────────────────
+
+      - name: Commit updated fixtures
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage only fixture files — never accidentally commit secrets
+          git add tests/fixtures/anthropic/
+
+          if git diff --cached --quiet; then
+            echo "No fixture changes to commit."
+          else
+            git commit -m "chore(fixtures): monthly refresh of golden fixtures [skip ci]"
+            git push origin main
+            echo "Fixtures committed and pushed."
+          fi
+
+      # ── Run integration tests with fresh fixtures ──────────────────────────
+
+      - name: Run fixture integration tests
+        run: bun --bun vitest run tests/unit/fixture-recorder.test.ts
