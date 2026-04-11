@@ -99,6 +99,17 @@ export default [
       },
     },
   },
+  // Allow underscore-prefixed parameters in stub/placeholder functions.
+  // Stubs throw NotImplementedError immediately, so their parameters are
+  // intentionally unreferenced. Pattern: any identifier beginning with _.
+  {
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
+  },
   // Zero-mock enforcement for top-level tests/ (Phase 0 scaffold)
   noMockRule,
   // No-direct-env-secret enforcement for app and package source files (Phase 0 secrets)
