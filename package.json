@@ -36,6 +36,7 @@
     "postgres": "^3.4.8"
   },
   "devDependencies": {
+    "@types/react": "^18.2.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.40.0",
     "@vitest/coverage-v8": "2.1.9",

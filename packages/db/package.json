@@ -14,7 +14,8 @@
     "./worker-credentials": "./worker-credentials.ts",
     "./worker-channel": "./worker-channel.ts",
     "./governance": "./governance.ts",
-    "./entity-type-registry": "./entity-type-registry.ts"
+    "./entity-type-registry": "./entity-type-registry.ts",
+    "./feature-flags": "./feature-flags.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

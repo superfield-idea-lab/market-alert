@@ -332,6 +332,35 @@ CREATE TABLE IF NOT EXISTS api_keys (
   last_used_at TIMESTAMPTZ
 );
 
+-- Feature flags table (PRUNE-D-002, PRUNE-D-003, PRUNE-C-002)
+-- Stores each shipped-but-gated feature as a row with lifecycle columns.
+-- state CHECK constraint enforces the three-value lifecycle: enabled →
+-- deprecated → disabled.
+-- scheduled_disable_at: when the cron job should flip state to disabled
+-- disabled_at:          when the row was actually disabled
+-- removal_eligible_at:  earliest date a code-removal PR is allowed
+CREATE TABLE IF NOT EXISTS feature_flags (
+  name                TEXT PRIMARY KEY,
+  state               TEXT NOT NULL DEFAULT 'enabled'
+                        CHECK (state IN ('enabled', 'deprecated', 'disabled')),
+  owner               TEXT NOT NULL,
+  created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  scheduled_disable_at TIMESTAMP WITH TIME ZONE,
+  disabled_at         TIMESTAMP WITH TIME ZONE,
+  removal_eligible_at  TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_flags_state ON feature_flags (state);
+CREATE INDEX IF NOT EXISTS idx_feature_flags_scheduled_disable
+  ON feature_flags (scheduled_disable_at)
+  WHERE scheduled_disable_at IS NOT NULL AND state = 'enabled';
+
+-- Seed row: assemblyai_transcription legacy path (PRUNE-A-003)
+-- Phase 5 ships this route off-by-default via DB flag, not env var.
+INSERT INTO feature_flags (name, state, owner)
+VALUES ('assemblyai_transcription', 'enabled', 'product')
+ON CONFLICT (name) DO NOTHING;
+
 -- Migration version tracking table.
 -- Records each named migration that has been applied to this database.
 -- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.

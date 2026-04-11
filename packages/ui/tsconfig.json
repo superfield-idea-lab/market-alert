@@ -9,7 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "react"]
   },
   "exclude": ["node_modules", "dist"]
 }
