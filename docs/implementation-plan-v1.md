@@ -1,11 +1,13 @@
 # Implementation Plan v1 — Superfield KB
 
-<!-- last-edited: 2026-04-10 -->
+<!-- last-edited: 2026-04-11 -->
+<!-- reviewed: docs/review/plan-review-2026-04-11.md -->
 
 CONTEXT MAP
 this ──implements─────▶ docs/PRD.md
 this ──feeds──────────▶ GitHub "Implementation Plan" tracking issue
-this ──references─────▶ calypso-blueprint/rules/blueprints/ (arch, auth, data, worker, ux, process, test)
+this ──references─────▶ calypso-blueprint/rules/blueprints/ (arch, auth, data, deploy, env, process, prune, task-queue, test, ux, worker)
+this ──reuses─────────▶ ~/calypso-distribution (k3d cluster, task queue, IMAP ETL worker, GitHub workflows)
 this ──references─────▶ calypso-blueprint/development/product-owner-interview.md
 this ──references─────▶ docs/technical/db-architecture.md
 this ──references─────▶ docs/technical/security.md
@@ -55,11 +57,20 @@ These constraints shape every phase below. They are extracted from
 
 - Postgres from the first commit; no embedded-DB-to-migrate-later path (DATA
   blueprint).
+- **Four-pool** Postgres architecture from Phase 1: `kb_app`, `kb_audit`,
+  `kb_analytics`, `kb_dictionary` — disjoint roles and key domains. The analytics
+  tier is a structural separation (`DATA-D-006`), not just RLS on the app tier.
+  The dictionary pool is orthogonal to analytics (`DATA-X-003`).
 - RLS is restrictive, not permissive. Structural DB blocks replace
   application-layer filtering wherever possible (PRD §7, DATA blueprint).
 - Worker DB role is read-only; all writes route through the API layer with
   short-lived scoped tokens (WORKER blueprint, PRD §8).
 - No long-lived agent credentials. Max 24h TTL, single-use, task-scoped.
+- **Task queue** (not ad-hoc cron): every worker phase claims tasks from a
+  PostgreSQL task queue using `SELECT … FOR UPDATE SKIP LOCKED`. Cron is a
+  _producer_ that inserts task rows; workers are _consumers_ that claim them.
+  Reuse `calypso-distribution/packages/db/task-queue.ts` and the API endpoints
+  in `apps/server/src/api/tasks.ts` (`TQ-D-001` through `TQ-D-006`).
 - Passkey-only authentication from the first user-facing commit (AUTH
   blueprint); no password fallback.
 
@@ -82,6 +93,21 @@ These constraints shape every phase below. They are extracted from
 - No `any` in API contracts (ARCH-C-012). Strict TypeScript throughout.
 - Workspace aliases for imports; no `../../../` deep relative paths.
 - Every external dependency requires a documented buy-vs-build justification.
+- **Dev environment = k3d** (not Docker Compose). Reuse
+  `calypso-distribution/scripts/local-demo.ts` and `deploy/base/` manifests.
+  `ENV-D-002`: dev/CI/prod use the same container topology. `ENV-X-009`: tests
+  never run against a cluster database — integration tests use ephemeral k3d-local
+  containers on randomised ports.
+- **Twelve-check CI gate** (not nine): build, lint, format, unit, integration,
+  e2e, coverage, checklist, depends-on, **issue-checklist**, **conflicts**,
+  **single-issue**. Coverage threshold = 99% line coverage. All check names
+  pre-registered before branch protection is enabled (`PROCESS-C-024`).
+  Reuse `calypso-distribution/.github/workflows/` as the starting set.
+- **Test suite time budget**: all four suites complete in under 5 minutes total
+  in CI (`TEST-C-020`).
+- **Feature flags table** (`PRUNE-D-002`): `feature_flags` DB table with
+  evaluation middleware from Phase 0. All shipped-but-gated features (AssemblyAI
+  path, etc.) are backed by DB rows, not config constants (`PRUNE-A-003`).
 
 **Agent assignment (per user policy, 2026-04-10).**
 
@@ -121,32 +147,64 @@ Postgres, and deploy a trivial service to a k3s cluster, all through CI
 gates that will remain in place for the life of the project.
 
 **Scout issue.** _Scaffold the monorepo and land a "hello" service behind
-the full nine-check CI gate._ The scout must produce: (a) the
+the full **twelve-check** CI gate._ The scout must produce: (a) the
 `apps/server`, `apps/web`, `packages/core`, `tests/` skeleton per ARCH
-blueprint; (b) a single `/health` endpoint and a single empty PWA route;
-(c) the CI pipeline with build, lint, format, unit, integration, e2e,
-coverage, checklist, and depends-on checks wired and failing closed; (d)
-local dev commands identical to CI commands.
+blueprint; (b) a single `/health` endpoint (liveness + readiness + deep,
+`DEPLOY-C-030/031/032`) and a single empty PWA route; (c) the CI pipeline
+with build, lint, format, unit, integration, e2e, coverage, checklist,
+depends-on, issue-checklist, conflicts, and single-issue checks wired and
+failing closed — 99% coverage threshold; (d) local dev commands identical to
+CI commands; (e) k3d cluster via `calypso-distribution/scripts/local-demo.ts`
+(not Docker Compose — `ENV-D-002`).
 
 **Follow-on issues (gated behind the scout).**
 
-- Dev Postgres via Docker Compose; migration runner; baseline schema with
-  only a `_schema_version` table.
+- **k3d dev cluster scaffold** — reuse `calypso-distribution/deploy/base/`
+  manifests (api-server, worker, postgres, ingress). Replace Docker Compose.
+  `pnpm dev` = `k3d cluster create && kubectl apply`. Ephemeral test DB
+  containers on randomised ports for integration tests (`ENV-D-003`).
+- **Task queue scaffold** — reuse `calypso-distribution/packages/db/task-queue.ts`
+  and `apps/server/src/api/tasks.ts` (claim, complete, fail, heartbeat
+  endpoints). Extend `TaskType` for autolearn, ingestion, transcription,
+  correction, deepclean, bdm-summary. Per-type views, DLQ monitoring
+  (`TQ-D-001` through `TQ-D-006`, `TQ-C-001/002/003`). Payload no-PII
+  validator (`TQ-C-004`). Idempotency key enforcement (`TQ-C-005`).
 - Property graph entity-type registry skeleton (empty registry, the
   insertion path, and the "adding an entity is data, not a schema
   change" invariant encoded in a test).
 - Structured logger with PII scrubbing from the start (CLAUDE.md, AUTH
-  blueprint — no raw PII in logs, ever).
-- Trace-ID propagation across the backend; one test per boundary hop.
+  blueprint — no raw PII in logs, ever). Dual log: chronological + uniques
+  dedup (`DEPLOY-D-002`). Browser-to-server error forwarding (`DEPLOY-D-003`).
+- **Trace-ID propagation browser→server→DB** (`DEPLOY-D-004`); one test per
+  boundary hop including the browser side. Given a trace ID, all related
+  log entries retrievable in one query (`DEPLOY-C-021`).
 - k3s deployment manifests for server, web, worker image; image builds
-  produce distroless-style containers (WORKER blueprint).
+  produce distroless-style containers (WORKER blueprint). Reuse
+  `calypso-distribution/k8s/agent-worker.yaml` as the worker manifest
+  baseline (includes NetworkPolicy blocking pod→DB direct access).
 - Secrets abstraction layer (env-var shim in dev, KMS-backed in prod;
   abstraction from day one so no plaintext env vars ever ship).
+- **Deployment audit record** (`deployments.jsonl`) — every deployment
+  writes a structured JSON record with timestamp, operator, release tag,
+  environment, outcome, image digest (`DEPLOY-D-006`, `DEPLOY-C-035`).
+- **Design system skeleton** — color/type/space tokens, one button
+  primitive, static catalog page, Playwright screenshot review loop. Serve
+  via headless Chromium (`UX-D-004`, `UX-C-002`, `UX-X-005`). Service flow
+  maps for Phases 4–8 land here as documentation (design, not code) so
+  Phase 4 builds from an existing design system (`UX-D-001`, `UX-C-001`).
+- **Feature flags table** — `feature_flags` table + evaluation middleware.
+  AssemblyAI gate (Phase 5) is backed by a DB row from day one (`PRUNE-D-002`,
+  `PRUNE-C-002`, avoids `PRUNE-A-003`).
+- **Golden fixture recorder** — tool that records real HTTP request/response
+  pairs to `tests/fixtures/`; scheduled 30-day refresh pipeline; schema drift
+  alerts (`TEST-D-001`, `TEST-C-003/019/025`).
 - Golden-path end-to-end test that boots the stack, hits `/health`, and
   tears down — the canary that every subsequent PR must keep green.
 
 **Exit criteria.** CI is all-green on a PR that does nothing except touch
-a comment. Dev onboarding is `git clone && pnpm install && pnpm dev`.
+a comment. Dev onboarding is `git clone && pnpm install && pnpm dev` with
+k3d. All twelve CI check names pre-registered in GitHub before branch
+protection is enabled.
 
 ---
 
@@ -168,17 +226,39 @@ entity type. Nothing else in Phase 1 may land until this is merged.
   SameSite=Strict cookies, HTTP-only, Secure). Passkey credential
   management already exists at `8d9bc1b`'s parent commits — verify
   reuse rather than rewrite.
-- Three-pool Postgres architecture: application pool, audit pool,
-  dictionary pool — disjoint roles, disjoint key domains (PRD §7,
-  DATA blueprint).
+- **Passkey key recovery flow** — recovery passphrase + second factor →
+  re-enrollment of new passkey (no magic links, no password fallback).
+  Recovery events notify all enrolled devices (`AUTH-D-007`,
+  `AUTH-C-016/017`, avoids `AUTH-X-008`).
+- **Token refresh rotation, progressive lockout, generic error messages** —
+  each refresh produces a new token and invalidates the old (`AUTH-C-018`);
+  failed auth attempts trigger progressive delays (`AUTH-C-024`); all auth
+  errors are generic with no account-existence leakage (`AUTH-C-032`).
+- **Four-pool Postgres architecture**: `kb_app`, `kb_audit`, `kb_analytics`,
+  `kb_dictionary` — disjoint roles, disjoint key domains (PRD §7, DATA
+  blueprint). The analytics pool starts empty; it will be populated in
+  Phase 7. The dictionary pool holds `IdentityDictionary` under its own
+  role and key domain. See `docs/technical/db-architecture.md` for the
+  canonical three-database schema (app/audit/analytics); dictionary is the
+  fourth isolation domain.
+- **Auth incident response runbook** — four scenarios tested before customer
+  data lands: signing key compromise, agent credential compromise, admin
+  account compromise, mass session invalidation (`AUTH-C-030`). This is a
+  Phase 1 deliverable; the SOC 2 evidence wrapper stays in Phase 8.
+- **Business journal distinct from audit log** — the audit log is the access
+  trail (auth events, reads, writes); the business journal is replay-able
+  facts for consequential operations with compensation support. Ledger replay
+  tests: genesis replay, checkpoint replay, materialized-state comparison
+  (`DATA-D-004`, `DATA-C-026/027`, `TEST-D-006`, `TEST-C-014`).
 - Field-level AES-256-GCM encryption for the sensitive fields
   enumerated in PRD §7 — corpus bodies, transcripts, CRM notes,
   customer names, customer interests, synthesised wiki content,
   every dictionary field. KMS-managed keys partitioned by
   sensitivity class.
-- KMS abstraction landing real cloud-provider KMS in staging (AWS
-  KMS target; Vault fallback for on-prem). Resolves PRD §7 "Key
-  management" requirement.
+- KMS abstraction landing real **HSM-backed** cloud-provider KMS in staging
+  (AWS KMS or GCP KMS with HSM-backed root keys; HashiCorp Vault in HSM mode
+  for on-prem). Key material never leaves KMS boundary. ≤90-day rotation.
+  Resolves PRD §7 "Key management" requirement (`DATA-C-023`).
 - Audit store: append-only, hash-chained, written on a role the
   application role cannot read or modify. Audit-before-read
   enforcement: a failed audit write denies the read.
@@ -200,7 +280,9 @@ entity type. Nothing else in Phase 1 may land until this is merged.
 **Exit criteria.** A BDM test session cannot read a customer row even
 when it tries; the database, not the app, blocks it. An audit query
 against any sensitive read returns a matching event. Key rotation can
-be invoked end-to-end against a staging KMS.
+be invoked end-to-end against a **HSM-backed** staging KMS. Auth incident
+response runbook has been executed for all four scenarios against the
+staging environment.
 
 ---
 
@@ -218,8 +300,14 @@ ingestion substrate.
 
 **Follow-on issues.**
 
-- IMAP ingestion worker: reuse `calypso-distribution` IMAP client (PRD
-  §6); schedule, retry, failure handling.
+- IMAP ingestion worker: reuse `calypso-distribution/packages/core/imap-etl-worker.ts`
+  (two-phase landing + classify, PII encryption, `EtlStore` abstraction). The
+  cron dispatcher inserts a task row into the task queue (`calypso-distribution/
+apps/server/src/cron/imap-etl-dispatch.ts` pattern); the worker claims it via
+  the HTTP task-queue API (`ApiEtlStore` pattern). Extend `TaskType` to include
+  `EMAIL_INGEST`. Use Greenmail test container for integration tests
+  (`calypso-distribution/packages/db/imap-container.ts`). PRD §6; schedule,
+  retry, and failure handling via task queue stale-claim recovery.
 - PII tokeniser: stable tokens, per-tenant salt, round-trip via the
   dictionary service. Test corpus: curated sample of realistic
   customer-interaction emails.
@@ -269,22 +357,41 @@ scales.
 
 - Kubernetes ephemeral pod spec: distroless, read-only root FS, no
   shell, service account bound to (dept, customer) scope (WORKER
-  blueprint).
+  blueprint). Reuse `calypso-distribution/k8s/agent-worker.yaml` as
+  the baseline manifest.
+- **Worker NetworkPolicy** — `NetworkPolicy` blocking the worker pod from
+  reaching the database port directly (`WORKER-C-006`). The
+  `calypso-distribution/k8s/agent-worker.yaml` already enforces this:
+  egress allows only api-server (port 80) and HTTPS (443) + DNS (53).
+- **Worker egress restriction** — outbound connections restricted to declared
+  vendor API hostnames only (Anthropic API). No other external egress
+  (`WORKER-C-024`).
 - Scoped worker token mint path: `POST /internal/worker/tokens`
   issues a single-use task-scoped token with pod-lifetime TTL.
   Consumed tokens are invalidated at pod terminate.
 - Temp-filesystem stager: writes anonymised ground truth +
   current wiki markdown to `/tmp/` inside the pod; destroyed on
   terminate.
-- Claude CLI wrapper: invokes the CLI, captures stdout/stderr,
-  enforces hard timeout (WORKER blueprint), captures the diff
-  between input and output wiki.
+- **Claude CLI wrapper** — invokes the CLI via **array-form spawn**
+  (never shell-string interpolation — `WORKER-C-007`, `WORKER-X-006`).
+  Vendor CLI version pinned in Dockerfile; binary copied at build time,
+  never downloaded at runtime (`WORKER-C-023`, avoids `WORKER-X-007`).
+  Enforces hard timeout. Captures stdout/stderr and the diff between
+  input and output wiki. Audit events store **input/output hashes**,
+  not plaintext prompts/responses (`WORKER-C-018`, avoids `WORKER-X-008`).
 - `POST /internal/wiki/versions` write endpoint; validates,
   authorises against the worker token scope, commits the new
   `WikiPageVersion` in `draft` state.
-- Cron scheduler for gardening runs (PRD §4.3, open question:
-  frequency — Phase 3 picks a default of 15 min, revisable via
-  config).
+- **Cron scheduler for gardening runs** — cron is a _task producer_: it
+  inserts an `AUTOLEARN` task row into the task queue every 15 minutes
+  (default, tenant-overridable via `feature_flags` or a policy row — not a
+  hard-coded constant). Workers claim from the queue (`TQ-D-005` wake via
+  LISTEN/NOTIFY). PRD §4.3.
+- **Autolearn digital twin sandbox mode** — autolearn pod requests a
+  sandboxed twin containing only the relevant production-state slice.
+  Sandbox execution cannot commit production state without a separate
+  promotion step (`DATA-D-011`, `TEST-C-016`, `WORKER-D-006`,
+  `WORKER-C-011/012`). Production-state unchanged is verified by test.
 - Deepclean path (PRD §4.5): on-demand trigger, full-ground-truth
   fetch, always routes to `AWAITING_REVIEW` and always requires
   human approval regardless of materiality.
@@ -445,9 +552,16 @@ tests; the summary generation comes after.
 - Restrictive RLS policies for BDM sessions per PRD §4.7: blocks on
   customers, wikis, ground-truth emails, customer interests,
   dictionary, and traversal relations that link transcripts to
-  customers.
+  customers. The database layer enforces this; application-layer filtering
+  is defense-in-depth.
+- **Analytics tier population** — BDM campaign queries execute against
+  `kb_analytics`, not `kb_app`. Phase 0 created the empty `kb_analytics`
+  database; this issue populates it with pseudonymised session events and
+  the anonymised chunk materialization that BDM queries need (`DATA-D-006`,
+  `DATA-D-007`, `DATA-C-010/011`, avoids `DATA-X-003`). Session pseudonyms
+  rotate per session via HMAC-SHA256; no direct read path back to `kb_app`.
 - Campaign analysis view in `apps/web`: asset-manager/fund picker,
-  query endpoint that returns anonymised chunks.
+  query endpoint that returns anonymised chunks (queried from `kb_analytics`).
 - Summary generation: Claude API call on anonymised chunks, structured
   1-pager output (themes, topics, sentiment, frequency). Fallback to
   raw chunk list on API failure per PRD §4.7.
@@ -510,16 +624,18 @@ vertical slice) but they must land with or before the phases that
 depend on them. The Plan issue will attach each to the earliest phase
 that needs it.
 
-| Concern                         | Lands with | Rationale                                                                          |
-| ------------------------------- | ---------- | ---------------------------------------------------------------------------------- |
-| Structured logging + PII scrub  | Phase 0    | Nothing can ever log PII, not even in scaffolding                                  |
-| Trace-ID propagation            | Phase 0    | Needed for debugging from the first real request                                   |
-| mTLS service mesh (Linkerd)     | Phase 1    | PRD §7 resolved requirement; must be in place before multi-service traffic         |
-| KMS integration                 | Phase 1    | Field-level encryption is a Phase 1 gate; KMS is its backing store                 |
-| Rate limiting                   | Phase 1    | Auth endpoints need it from first login; embedding column reads need it per PRD §7 |
-| Observability (metrics, traces) | Phase 2    | Ingestion pipeline is the first thing with a latency SLA                           |
-| Backup + restore runbook        | Phase 2    | As soon as customer data lands, a recovery path must exist                         |
-| Incident response runbook       | Phase 8    | SOC 2 evidence; must predate attestation audit                                     |
+| Concern                                         | Lands with | Rationale                                                                                            |
+| ----------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
+| Structured logging + PII scrub + dual log       | Phase 0    | Nothing can ever log PII; dual log (chronological + uniques) and browser error forwarding from start |
+| Trace-ID propagation (browser → server → DB)    | Phase 0    | End-to-end from browser side; needed for debugging from the first real request                       |
+| k3d cluster + task queue + design system        | Phase 0    | Foundation for all subsequent phases; Docker Compose not used                                        |
+| mTLS service mesh (Linkerd) — issues #88        | Phase 1    | PRD §7 resolved requirement; must be in place before multi-service traffic                           |
+| KMS integration (HSM-backed)                    | Phase 1    | Field-level encryption is a Phase 1 gate; KMS must be HSM-backed in staging                          |
+| Rate limiting — issue #89                       | Phase 1    | Auth endpoints need it from first login; embedding column reads need it per PRD §7                   |
+| Auth incident response runbook (four scenarios) | Phase 1    | Must predate any customer data; runbook for signing key compromise, agent cred, admin, mass revoke   |
+| Observability (metrics, traces)                 | Phase 2    | Ingestion pipeline is the first thing with a latency SLA                                             |
+| Backup + restore runbook                        | Phase 2    | As soon as customer data lands, a recovery path must exist                                           |
+| SOC 2 evidence wrapper + incident runbook wrap  | Phase 8    | SOC 2 audit artifact; auth-scenario runbook already exists from Phase 1                              |
 
 ---
 
@@ -546,12 +662,13 @@ affect begins.
 
 | Question                                              | Blocks  | Current proposed default                                                                          |
 | ----------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------- |
-| Gardening cron frequency                              | Phase 3 | 15 minutes, tenant-overridable                                                                    |
+| Gardening cron frequency                              | Phase 3 | 15 minutes, tenant-overridable via policy row (not a hard-coded constant)                         |
 | Edge-path recording length threshold                  | Phase 5 | 10 minutes — above this, worker path is used                                                      |
 | Materiality threshold for autolearn publication gate  | Phase 6 | "No new claims" — phrasing/citation edits auto-publish; anything adding a claim requires approval |
 | SOC 2 attestation target date                         | Phase 8 | 12 months from Phase 0 merge                                                                      |
 | Which cloud provider hosts v1 production              | Phase 1 | GCP (existing infra work at `feat/255`–`feat/265`)                                                |
 | Tenant configuration UI — self-service or admin-only? | Phase 8 | Admin-only for v1                                                                                 |
+| Differential privacy on analytics exports             | Phase 7 | Deferred to post-v1; Phase 7 ships pseudonymised session events and per-tenant scoping only       |
 
 ---
 
