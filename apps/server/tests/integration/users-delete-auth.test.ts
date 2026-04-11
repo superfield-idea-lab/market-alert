@@ -6,10 +6,14 @@
  *  - Authenticated non-superuser deleting a different user returns 403
  *  - Authenticated user deleting their own account returns 200
  *  - Superuser deleting any user returns 200
+ *
+ * Session setup uses the test backdoor (TEST_MODE=true) since all HTTP auth
+ * is passkey-only (issue #14, AUTH blueprint). No password-based endpoints.
  */
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31424;
 const BASE = `http://localhost:${PORT}`;
@@ -27,7 +31,8 @@ let userBId = '';
 beforeAll(async () => {
   pg = await startPostgres();
 
-  // Start server with a placeholder SUPERUSER_ID so we can register users first
+  // Start server with TEST_MODE and a placeholder SUPERUSER_ID so we can
+  // create sessions before we know the superuser's id.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -36,6 +41,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       SUPERUSER_ID: '__placeholder__',
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -43,34 +49,20 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // Register superuser
-  const suRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `su_${Date.now()}`, password: 'testpass123' }),
-  });
-  const suBody = await suRes.json();
-  superuserId = suBody.user?.id ?? '';
-  superuserCookie = (suRes.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create superuser session
+  const suSession = await createTestSession(BASE, { username: `su_${Date.now()}` });
+  superuserId = suSession.userId;
+  superuserCookie = suSession.cookie;
 
-  // Register user A
-  const resA = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `usera_${Date.now()}`, password: 'testpass123' }),
-  });
-  userACookie = (resA.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create user A session
+  const aSession = await createTestSession(BASE, { username: `usera_${Date.now()}` });
+  userACookie = aSession.cookie;
 
-  // Register user B
-  const resB = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `userb_${Date.now()}`, password: 'testpass123' }),
-  });
-  const bodyB = await resB.json();
-  userBId = bodyB.user?.id ?? '';
+  // Create user B (only need the id for the delete target)
+  const bSession = await createTestSession(BASE, { username: `userb_${Date.now()}` });
+  userBId = bSession.userId;
 
-  // Restart server with SUPERUSER_ID set to the registered superuser
+  // Restart server with SUPERUSER_ID set to the created superuser
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -80,6 +72,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       SUPERUSER_ID: superuserId,
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -112,19 +105,12 @@ test('DELETE /api/users/:id returns 403 when a non-superuser tries to delete ano
 });
 
 test('DELETE /api/users/:id returns 200 when user deletes their own account', async () => {
-  // Register a fresh user for self-deletion so other tests are unaffected
-  const selfRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `self_${Date.now()}`, password: 'testpass123' }),
-  });
-  const selfBody = await selfRes.json();
-  const selfId = selfBody.user?.id ?? '';
-  const selfCookie = (selfRes.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create a fresh user for self-deletion so other tests are unaffected
+  const selfSession = await createTestSession(BASE, { username: `self_${Date.now()}` });
 
-  const res = await fetch(`${BASE}/api/users/${selfId}`, {
+  const res = await fetch(`${BASE}/api/users/${selfSession.userId}`, {
     method: 'DELETE',
-    headers: { Cookie: selfCookie },
+    headers: { Cookie: selfSession.cookie },
   });
   expect(res.status).toBe(200);
   const body = await res.json();
@@ -132,16 +118,10 @@ test('DELETE /api/users/:id returns 200 when user deletes their own account', as
 });
 
 test('DELETE /api/users/:id returns 200 when superuser deletes another user', async () => {
-  // Register a target user for the superuser to delete
-  const targetRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `target_${Date.now()}`, password: 'testpass123' }),
-  });
-  const targetBody = await targetRes.json();
-  const targetId = targetBody.user?.id ?? '';
+  // Create a target user for the superuser to delete
+  const targetSession = await createTestSession(BASE, { username: `target_${Date.now()}` });
 
-  const res = await fetch(`${BASE}/api/users/${targetId}`, {
+  const res = await fetch(`${BASE}/api/users/${targetSession.userId}`, {
     method: 'DELETE',
     headers: { Cookie: superuserCookie },
   });

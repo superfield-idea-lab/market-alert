@@ -1,6 +1,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 // Each test run gets its own isolated postgres container + server process.
 // No external infrastructure required — just Docker.
@@ -24,7 +25,13 @@ beforeAll(async () => {
   // 2. Start the server as a subprocess, pointed at the container
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DATABASE_URL: pg.url, AUDIT_DATABASE_URL: pg.url, PORT: String(PORT) },
+    env: {
+      ...process.env,
+      DATABASE_URL: pg.url,
+      AUDIT_DATABASE_URL: pg.url,
+      PORT: String(PORT),
+      TEST_MODE: 'true',
+    },
     stdout: 'ignore',
     stderr: 'ignore',
   });
@@ -32,27 +39,10 @@ beforeAll(async () => {
   // 3. Wait until the server is accepting requests
   await waitForServer(BASE);
 
-  // 4. Register a test user and capture the session cookie + CSRF token
-  const username = `test_${Date.now()}`;
-  const res = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'testpass123' }),
-  });
-  // Collect all Set-Cookie headers (auth session + CSRF token)
-  const setCookies = res.headers.getSetCookie
-    ? res.headers.getSetCookie()
-    : [res.headers.get('set-cookie') ?? ''];
-  const cookiePairs: string[] = [];
-  for (const raw of setCookies) {
-    const pair = raw.split(';')[0].trim();
-    if (pair) cookiePairs.push(pair);
-    // Extract CSRF token value
-    if (pair.startsWith('__Host-csrf-token=')) {
-      csrfToken = pair.split('=').slice(1).join('=');
-    }
-  }
-  authCookie = cookiePairs.join('; ');
+  // 4. Create a test session (passkey-only auth, issue #14 — no password endpoint)
+  const session = await createTestSession(BASE);
+  authCookie = session.cookie;
+  csrfToken = session.csrfToken;
 }, 60_000);
 
 afterAll(async () => {

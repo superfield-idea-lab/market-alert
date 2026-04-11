@@ -27,6 +27,7 @@ import { startDemoHealthCheck } from './cron/demo-health-check';
 import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
 import { handleHealthRequest } from './api/health';
+import { handleTestSessionRequest, isTestMode } from './api/test-session';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -192,6 +193,14 @@ export default {
     if (url.pathname.startsWith('/api/auth')) {
       const authRes = await handleAuthRequest(req, url, appState);
       if (authRes) return withTrace(authRes);
+    }
+
+    // Test-only session backdoor — available only when TEST_MODE=true.
+    // Used by integration tests to obtain a session cookie without going through
+    // the passkey ceremony. Never enabled in production.
+    if (isTestMode() && url.pathname === '/api/test/session') {
+      const testRes = await handleTestSessionRequest(req, url, appState);
+      if (testRes) return testRes;
     }
 
     if (url.pathname.startsWith('/api/tasks')) {

@@ -1,3 +1,13 @@
+/**
+ * @file full.spec.ts
+ *
+ * Full end-to-end smoke tests using a real Playwright browser against the
+ * full-stack environment (real Postgres + real Bun server + compiled web app).
+ *
+ * These tests verify the passkey-only auth UI introduced in issue #14.
+ * Password form fields are intentionally absent; the login page shows only
+ * the "Sign in with a passkey" button and a toggle to switch to registration.
+ */
 import { chromium, type Browser, expect as playwrightExpect } from '@playwright/test';
 import { afterAll, beforeAll, expect as vitestExpect, test } from 'vitest';
 import { startE2EServer, stopE2EServer, type E2EEnvironment } from './environment';
@@ -21,7 +31,7 @@ function isExpectedError(msg: string) {
   return INVALID_ERROR_PATTERNS.some((pattern) => msg.includes(pattern));
 }
 
-test('app loads and shows login screen', async () => {
+test('app loads and shows passkey login screen', async () => {
   const consoleErrors: string[] = [];
   const page = await browser.newPage();
   page.on('console', (msg) => {
@@ -31,13 +41,18 @@ test('app loads and shows login screen', async () => {
   await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
   await playwrightExpect(page.getByRole('heading', { name: 'Calypso' })).toBeVisible();
-  await playwrightExpect(page.getByPlaceholder('••••••••')).toBeVisible();
+  // Passkey-only UI: no password field
+  await playwrightExpect(page.getByPlaceholder('••••••••')).not.toBeVisible();
+  // "Sign in with a passkey" button visible in login mode
+  await playwrightExpect(
+    page.getByRole('button', { name: 'Sign in with a passkey' }),
+  ).toBeVisible();
   vitestExpect(consoleErrors.filter((e) => !isExpectedError(e))).toHaveLength(0);
 
   await page.close();
 });
 
-test('register and login renders the Calypso layout shell', async () => {
+test('register toggle shows username field and passkey register button', async () => {
   const consoleErrors: string[] = [];
   const page = await browser.newPage();
   page.on('console', (msg) => {
@@ -46,15 +61,16 @@ test('register and login renders the Calypso layout shell', async () => {
 
   await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
+  // Switch to register mode
   await page.getByRole('button', { name: 'Need an account? Register' }).click();
-  const username = `e2e_smoke_${Date.now()}`;
-  await page.getByPlaceholder('e.g. yourname').fill(username);
-  await page.getByPlaceholder('••••••••').fill('smokepass123');
-  await page.getByRole('button', { name: 'Create Account' }).click();
 
-  await playwrightExpect(page.getByRole('heading', { name: 'Main Project' })).toBeVisible({
-    timeout: 15_000,
-  });
+  // Username field should be visible, no password field
+  await playwrightExpect(page.getByPlaceholder('e.g. yourname')).toBeVisible();
+  await playwrightExpect(page.getByPlaceholder('••••••••')).not.toBeVisible();
+  // Register passkey button visible
+  await playwrightExpect(
+    page.getByRole('button', { name: 'Register with a passkey' }),
+  ).toBeVisible();
   vitestExpect(consoleErrors.filter((e) => !isExpectedError(e))).toHaveLength(0);
 
   await page.close();

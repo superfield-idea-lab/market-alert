@@ -16,6 +16,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31425;
 const BASE = `http://localhost:${PORT}`;
@@ -53,6 +54,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       LOG_DIR: `/tmp/trace-test-logs-${PORT}`,
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -60,25 +62,10 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // Register a test user to get an auth cookie for authenticated routes.
-  const username = `trace_test_${Date.now()}`;
-  const res = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'tracepass123' }),
-  });
-  const setCookies = res.headers.getSetCookie
-    ? res.headers.getSetCookie()
-    : [res.headers.get('set-cookie') ?? ''];
-  const cookiePairs: string[] = [];
-  for (const raw of setCookies) {
-    const pair = raw.split(';')[0].trim();
-    if (pair) cookiePairs.push(pair);
-    if (pair.startsWith('__Host-csrf-token=')) {
-      csrfToken = pair.split('=').slice(1).join('=');
-    }
-  }
-  authCookie = cookiePairs.join('; ');
+  // Create a test session (passkey-only auth, issue #14 — no password endpoint)
+  const session = await createTestSession(BASE);
+  authCookie = session.cookie;
+  csrfToken = session.csrfToken;
 }, 60_000);
 
 afterAll(async () => {

@@ -14,6 +14,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31422;
 const BASE = `http://localhost:${PORT}`;
@@ -35,6 +36,7 @@ beforeAll(async () => {
       DATABASE_URL: pg.url,
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -42,14 +44,8 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const username = `tq_test_${Date.now()}`;
-  const res = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'testpass123' }),
-  });
-  const setCookie = res.headers.get('set-cookie') ?? '';
-  authCookie = setCookie.split(';')[0];
+  const session = await createTestSession(BASE);
+  authCookie = session.cookie;
 }, 60_000);
 
 afterAll(async () => {

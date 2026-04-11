@@ -15,6 +15,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31421;
 const BASE = `http://localhost:${PORT}`;
@@ -31,7 +32,8 @@ let regularCookie = '';
 beforeAll(async () => {
   pg = await startPostgres();
 
-  // Start server without a SUPERUSER_ID to register two users first
+  // Start server with TEST_MODE to create sessions without passkey ceremony.
+  // Start with a placeholder SUPERUSER_ID first so we can create sessions.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -40,31 +42,23 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       SUPERUSER_ID: '__placeholder__',
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',
   });
   await waitForServer(BASE);
 
-  // Register superuser
-  const suRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `su_${Date.now()}`, password: 'testpass123' }),
-  });
-  const suBody = await suRes.json();
-  superuserId = suBody.user?.id ?? '';
-  superuserCookie = (suRes.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create superuser session
+  const suSession = await createTestSession(BASE, { username: `su_${Date.now()}` });
+  superuserId = suSession.userId;
+  superuserCookie = suSession.cookie;
 
-  // Register regular user
-  const regRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: `reg_${Date.now()}`, password: 'testpass123' }),
-  });
-  regularCookie = (regRes.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create regular user session
+  const regSession = await createTestSession(BASE, { username: `reg_${Date.now()}` });
+  regularCookie = regSession.cookie;
 
-  // Restart server with the SUPERUSER_ID set to the registered superuser's id
+  // Restart server with the SUPERUSER_ID set to the created superuser's id
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -74,6 +68,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       SUPERUSER_ID: superuserId,
+      TEST_MODE: 'true',
     },
     stdout: 'ignore',
     stderr: 'ignore',

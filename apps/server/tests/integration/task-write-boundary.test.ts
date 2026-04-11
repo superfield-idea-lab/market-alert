@@ -1,6 +1,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31417;
 const BASE = `http://localhost:${PORT}`;
@@ -18,32 +19,22 @@ beforeAll(async () => {
 
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DATABASE_URL: pg.url, AUDIT_DATABASE_URL: pg.url, PORT: String(PORT) },
+    env: {
+      ...process.env,
+      DATABASE_URL: pg.url,
+      AUDIT_DATABASE_URL: pg.url,
+      PORT: String(PORT),
+      TEST_MODE: 'true',
+    },
     stdout: 'ignore',
     stderr: 'ignore',
   });
 
   await waitForServer(BASE);
 
-  const username = `task_patch_${Date.now()}`;
-  const res = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'testpass123' }),
-  });
-  // Collect all Set-Cookie headers (auth session + CSRF token)
-  const setCookies = res.headers.getSetCookie
-    ? res.headers.getSetCookie()
-    : [res.headers.get('set-cookie') ?? ''];
-  const cookiePairs: string[] = [];
-  for (const raw of setCookies) {
-    const pair = raw.split(';')[0].trim();
-    if (pair) cookiePairs.push(pair);
-    if (pair.startsWith('__Host-csrf-token=')) {
-      csrfToken = pair.split('=').slice(1).join('=');
-    }
-  }
-  authCookie = cookiePairs.join('; ');
+  const session = await createTestSession(BASE);
+  authCookie = session.cookie;
+  csrfToken = session.csrfToken;
 }, 60_000);
 
 afterAll(async () => {

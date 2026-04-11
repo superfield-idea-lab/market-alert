@@ -10,6 +10,7 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
+import { createTestSession } from '../helpers/test-session';
 
 const PORT = 31419;
 const BASE = `http://localhost:${PORT}`;
@@ -32,8 +33,9 @@ beforeAll(async () => {
       DATABASE_URL: pg.url,
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
+      TEST_MODE: 'true',
       // Make the test user a superuser so we can test the verify endpoint
-      SUPERUSER_ID: '__will_be_set_after_register__',
+      SUPERUSER_ID: '__will_be_set_after_session__',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -41,18 +43,11 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const username = `audit_test_${Date.now()}`;
-  const res = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'testpass123' }),
-  });
-  const body = await res.json();
-  userId = body.user?.id ?? '';
-  const setCookie = res.headers.get('set-cookie') ?? '';
-  authCookie = setCookie.split(';')[0];
+  const session = await createTestSession(BASE);
+  userId = session.userId;
+  authCookie = session.cookie;
 
-  // Restart server with the SUPERUSER_ID set to the registered user's id
+  // Restart server with the SUPERUSER_ID set to the created user's id
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -61,6 +56,7 @@ beforeAll(async () => {
       DATABASE_URL: pg.url,
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
+      TEST_MODE: 'true',
       SUPERUSER_ID: userId,
     },
     stdout: 'ignore',
@@ -83,17 +79,11 @@ test('GET /api/audit/verify returns 401 when unauthenticated', async () => {
 });
 
 test('GET /api/audit/verify returns 403 for non-superuser', async () => {
-  // Register a second user who is not a superuser
-  const username = `nonsu_${Date.now()}`;
-  const regRes = await fetch(`${BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: 'testpass123' }),
-  });
-  const regCookie = (regRes.headers.get('set-cookie') ?? '').split(';')[0];
+  // Create a second session for a user who is not a superuser
+  const nonSuSession = await createTestSession(BASE, { username: `nonsu_${Date.now()}` });
 
   const res = await fetch(`${BASE}/api/audit/verify`, {
-    headers: { Cookie: regCookie },
+    headers: { Cookie: nonSuSession.cookie },
   });
   expect(res.status).toBe(403);
 });

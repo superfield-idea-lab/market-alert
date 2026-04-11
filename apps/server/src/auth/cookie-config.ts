@@ -1,13 +1,15 @@
 /**
  * Environment-aware auth cookie configuration.
  *
- * When SECURE_COOKIES=true the cookie uses the __Host- prefix, Secure flag, and
- * SameSite=Lax — the correct posture for HTTPS deployments that need __Host-
- * prefix compliance.
+ * Session cookies are always issued HttpOnly and SameSite=Strict — the required
+ * posture for passkey-only authentication per the Phase 1 security foundation
+ * requirements (issue #14, AUTH blueprint).
+ *
+ * When SECURE_COOKIES=true the cookie uses the __Host- prefix and the Secure
+ * flag — the correct posture for HTTPS deployments.
  *
  * When SECURE_COOKIES is unset or false, the cookie uses a plain name without
- * the Secure flag and SameSite=Strict — suitable for local development over
- * HTTP.
+ * the Secure flag — suitable for local development over HTTP.
  *
  * getAuthenticatedUser checks both cookie names so that sessions survive a
  * transition between modes (e.g. deploying HTTPS for the first time).
@@ -32,12 +34,15 @@ export function getAuthCookieName(): string {
 /**
  * Build the Set-Cookie header value for the auth JWT token.
  *
- * HTTPS mode: `__Host-calypso_auth=<token>; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=604800`
+ * HTTPS mode: `__Host-calypso_auth=<token>; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800`
  * Dev mode:   `calypso_auth=<token>; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`
+ *
+ * SameSite=Strict is used in both modes to enforce strict session cookie posture
+ * as required by the Phase 1 security foundation (issue #14, AUTH blueprint).
  */
 export function authCookieHeader(token: string): string {
   if (isSecureCookies()) {
-    return `${COOKIE_NAME_SECURE}=${token}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=604800`;
+    return `${COOKIE_NAME_SECURE}=${token}; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800`;
   }
   return `${COOKIE_NAME_PLAIN}=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`;
 }

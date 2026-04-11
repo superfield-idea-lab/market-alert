@@ -59,11 +59,13 @@ describe('cookie-config', () => {
       expect(header).toBe('calypso_auth=tok123; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800');
     });
 
-    test('HTTPS mode: __Host- prefix, Secure, SameSite=Lax', () => {
+    test('HTTPS mode: __Host- prefix, Secure, SameSite=Strict', () => {
+      // Issue #14: SameSite=Strict is now used in both modes for strict session
+      // cookie posture (AUTH blueprint, Phase 1 security foundation).
       process.env.SECURE_COOKIES = 'true';
       const header = authCookieHeader('tok123');
       expect(header).toBe(
-        '__Host-calypso_auth=tok123; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=604800',
+        '__Host-calypso_auth=tok123; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800',
       );
     });
   });

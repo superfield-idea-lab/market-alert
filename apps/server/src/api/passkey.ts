@@ -25,8 +25,9 @@ import {
 import type { RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser, parseCookies } from './auth';
-import { verifyCsrf } from '../auth/csrf';
+import { verifyCsrf, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { signJwt } from '../auth/jwt';
+import { authCookieHeader } from '../auth/cookie-config';
 
 // The Relying Party name (display only, not security-critical).
 const RP_NAME = process.env.RP_NAME ?? 'Calypso';
@@ -128,25 +129,58 @@ export async function handlePasskeyRequest(
 
   // ------------------------------------------------------------------
   // POST /api/auth/passkey/register/begin
+  //
+  // Accepts either:
+  //   { userId } — add a passkey to an existing authenticated account
+  //   { username } — create a new user entity and begin first passkey registration
+  //
+  // When only a username is provided, a new user entity is created without a
+  // password. No password field exists anywhere in the passkey-only auth flow
+  // (AUTH blueprint, Phase 1 security foundation, issue #14).
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/register/begin') {
     try {
-      const { userId } = await req.json();
+      const body = (await req.json()) as { userId?: string; username?: string };
+      let resolvedUserId: string;
+      let resolvedUsername: string;
 
-      if (!userId) {
-        return json({ error: 'userId required' }, 400, corsHeaders);
+      if (body.userId) {
+        // Existing user — look up by id
+        const users = await sql`
+          SELECT id, properties->>'username' AS username
+          FROM entities
+          WHERE id = ${body.userId} AND type = 'user'
+        `;
+        if (users.length === 0) {
+          return json({ error: 'User not found' }, 404, corsHeaders);
+        }
+        const u = users[0] as { id: string; username: string };
+        resolvedUserId = u.id;
+        resolvedUsername = u.username;
+      } else if (body.username) {
+        // New user registration — check username is not taken
+        const existing = await sql`
+          SELECT id FROM entities
+          WHERE type = 'user' AND properties->>'username' = ${body.username}
+        `;
+        if (existing.length > 0) {
+          return json({ error: 'Username already taken' }, 409, corsHeaders);
+        }
+        // Create a new user entity without a password hash.
+        // Authentication is solely via passkey; no password field is stored.
+        const newId = crypto.randomUUID();
+        await sql`
+          INSERT INTO entities (id, type, properties, tenant_id)
+          VALUES (${newId}, 'user', ${sql.json({ username: body.username })}, null)
+        `;
+        resolvedUserId = newId;
+        resolvedUsername = body.username;
+      } else {
+        return json({ error: 'userId or username required' }, 400, corsHeaders);
       }
 
-      // Look up the user
-      const users = await sql`
-        SELECT id, properties->>'username' AS username
-        FROM entities
-        WHERE id = ${userId} AND type = 'user'
-      `;
-      if (users.length === 0) {
-        return json({ error: 'User not found' }, 404, corsHeaders);
-      }
-      const user = users[0] as { id: string; username: string };
+      const userId = resolvedUserId;
+      const user = { id: resolvedUserId, username: resolvedUsername };
 
       // Fetch existing credentials so the browser can exclude them
       const existingCreds = await sql`
@@ -177,7 +211,9 @@ export async function handlePasskeyRequest(
         VALUES (${userId}, ${options.challenge}, 'registration')
       `;
 
-      return json(options, 200, corsHeaders);
+      // Return the options and the resolved userId so the client can pass it
+      // back in the register/complete request.
+      return json({ ...options, _userId: userId }, 200, corsHeaders);
     } catch (err) {
       console.error('PASSKEY REGISTER BEGIN ERROR:', err);
       return json({ error: 'Internal Server Error' }, 500, corsHeaders);
@@ -188,15 +224,21 @@ export async function handlePasskeyRequest(
   // POST /api/auth/passkey/register/complete
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/register/complete') {
-    // CSRF guard: registration mutates server state by adding a new credential
-    // to the authenticated user's account. An attacker could forge a cross-origin
-    // POST to trick the browser into submitting an attacker-controlled attestation.
-    const csrfError = verifyCsrf(req, parseCookies(req.headers.get('Cookie')));
-    if (csrfError)
-      return new Response(csrfError.body, {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // CSRF guard applies only when there is an existing authenticated session
+    // (i.e. adding a passkey to an already-logged-in account). New user
+    // registrations have no session cookie yet, so the double-submit pattern
+    // cannot apply. In that case, the attestation itself is the only required
+    // proof of origin.
+    const cookies = parseCookies(req.headers.get('Cookie'));
+    const hasSession = await getAuthenticatedUser(req);
+    if (hasSession) {
+      const csrfError = verifyCsrf(req, cookies);
+      if (csrfError)
+        return new Response(csrfError.body, {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+    }
 
     try {
       const { userId, response } = (await req.json()) as {
@@ -256,7 +298,26 @@ export async function handlePasskeyRequest(
       `;
       const credentialId = (inserted[0] as { credential_id: string }).credential_id;
 
-      return json({ verified: true, credentialId }, 200, corsHeaders);
+      // Look up the user's username so we can issue a session JWT.
+      // This means a successful passkey registration also logs the user in,
+      // eliminating any need for a separate password-based login step.
+      const userRows = await sql`
+        SELECT properties->>'username' AS username
+        FROM entities
+        WHERE id = ${userId} AND type = 'user'
+        LIMIT 1
+      `;
+      const username = (userRows[0] as { username: string } | undefined)?.username ?? '';
+      const sessionToken = await signJwt({ id: userId, username });
+      const csrfToken = generateCsrfToken();
+
+      const regRes = new Response(
+        JSON.stringify({ verified: true, credentialId, user: { id: userId, username } }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+      regRes.headers.append('Set-Cookie', authCookieHeader(sessionToken));
+      regRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
+      return regRes;
     } catch (err) {
       console.error('PASSKEY REGISTER COMPLETE ERROR:', err);
       return json({ error: 'Internal Server Error' }, 500, corsHeaders);
@@ -392,17 +453,22 @@ export async function handlePasskeyRequest(
         WHERE id = ${cred.id}
       `;
 
-      // Issue JWT (same as password auth)
+      // Issue JWT and session cookie with HttpOnly, Secure (in HTTPS mode), SameSite=Strict.
+      // CSRF token is issued alongside so the browser can attach it to subsequent
+      // state-mutating requests (passkey management, logout, etc.).
       const token = await signJwt({ id: cred.user_id, username: cred.username });
+      const csrfToken = generateCsrfToken();
 
-      return new Response(JSON.stringify({ user: { id: cred.user_id, username: cred.username } }), {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-          'Set-Cookie': `calypso_auth=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
+      const loginRes = new Response(
+        JSON.stringify({ user: { id: cred.user_id, username: cred.username } }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         },
-      });
+      );
+      loginRes.headers.append('Set-Cookie', authCookieHeader(token));
+      loginRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
+      return loginRes;
     } catch (err) {
       console.error('PASSKEY LOGIN COMPLETE ERROR:', err);
       return json({ error: 'Internal Server Error' }, 500, corsHeaders);
