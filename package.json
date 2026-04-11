@@ -32,6 +32,9 @@
     "studio": "bun run studio/scripts/studio-start.ts",
     "studio:down": "bun run studio/scripts/studio-down.ts"
   },
+  "dependencies": {
+    "postgres": "^3.4.8"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.40.0",

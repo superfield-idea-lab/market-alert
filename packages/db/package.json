@@ -13,7 +13,8 @@
     "./api-keys": "./api-keys.ts",
     "./worker-credentials": "./worker-credentials.ts",
     "./worker-channel": "./worker-channel.ts",
-    "./governance": "./governance.ts"
+    "./governance": "./governance.ts",
+    "./entity-type-registry": "./entity-type-registry.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
