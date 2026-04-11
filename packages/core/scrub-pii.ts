@@ -19,6 +19,15 @@ export const PII_FIELD_NAMES: ReadonlySet<string> = new Set([
   'secret',
   'key',
   'authorization',
+  // PRD §7 sensitive column names — must never appear in plaintext in logs
+  'body',
+  'subject',
+  'content',
+  'tags',
+  'shard_data',
+  'real_name',
+  'real_email',
+  'real_org',
 ]);
 
 /**

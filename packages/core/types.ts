@@ -1,4 +1,31 @@
-export type EntityType = 'user' | 'task' | 'tag' | 'github_link' | 'channel' | 'message';
+/**
+ * Entity types for the property-graph model.
+ *
+ * PRD §7 sensitive entities are grouped by sensitivity class:
+ *   HIGH   — corpus_chunk, email, transcript, wiki_page, wiki_page_version, crm_note
+ *   IDENTITY — identity_token (disjoint key domain from operational entities)
+ *   CREDENTIAL — recovery_shard (separate key domain; auth material)
+ *   CRM    — customer (name field encrypted)
+ *   INTEREST — customer_interest (interest tags extracted from meetings/emails)
+ */
+export type EntityType =
+  | 'user'
+  | 'task'
+  | 'tag'
+  | 'github_link'
+  | 'channel'
+  | 'message'
+  // PRD §7 sensitive entity types
+  | 'corpus_chunk'
+  | 'email'
+  | 'transcript'
+  | 'wiki_page'
+  | 'wiki_page_version'
+  | 'crm_note'
+  | 'customer'
+  | 'customer_interest'
+  | 'identity_token'
+  | 'recovery_shard';
 
 export interface Entity {
   id: string;
