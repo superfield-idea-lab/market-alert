@@ -23,6 +23,7 @@ function makeAppState(rows: unknown[] = [], countRows: unknown[] = [{ count: '0'
     sql,
     auditSql: sql,
     analyticsSql: sql,
+    dictionarySql: sql,
   } satisfies import('../../src/index').AppState;
 }
 
@@ -366,6 +367,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest(
@@ -426,6 +428,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest(
@@ -483,6 +486,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest(

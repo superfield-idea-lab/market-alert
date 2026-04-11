@@ -30,6 +30,7 @@ function makeAppState(rows: unknown[] = [], countRows: unknown[] = [{ count: '0'
     sql,
     auditSql: sql,
     analyticsSql: sql,
+    dictionarySql: sql,
   } satisfies import('../../src/index').AppState;
 }
 
@@ -108,6 +109,7 @@ describe('handleUsersRequest()', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest('DELETE', '/api/users/super-id', 'calypso_auth=fake-token');
@@ -141,6 +143,7 @@ describe('handleUsersRequest()', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest('DELETE', '/api/users/super-id', 'calypso_auth=fake-token');
@@ -172,6 +175,7 @@ describe('handleUsersRequest()', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest('DELETE', '/api/users/other-id', 'calypso_auth=fake-token');
@@ -201,6 +205,7 @@ describe('handleUsersRequest()', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest('DELETE', '/api/users/self-id', 'calypso_auth=fake-token');
@@ -232,6 +237,7 @@ describe('handleUsersRequest()', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
 
     const req = makeRequest('DELETE', '/api/users/regular-id', 'calypso_auth=fake-token');

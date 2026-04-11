@@ -247,6 +247,7 @@ describe('passkey credential management routes', () => {
       sql,
       auditSql: sql,
       analyticsSql: sql,
+      dictionarySql: sql,
     } satisfies import('../../src/index').AppState;
   }
 

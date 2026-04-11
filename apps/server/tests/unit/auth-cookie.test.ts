@@ -34,6 +34,7 @@ function makeMinimalAppState() {
     sql: noopSql,
     auditSql: noopSql,
     analyticsSql: noopSql,
+    dictionarySql: noopSql,
   } satisfies import('../../src/index').AppState;
 }
 

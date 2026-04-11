@@ -6,7 +6,15 @@
  * the compiled frontend React application from `apps/web/dist`.
  */
 
-import { analyticsSql, auditSql, migrate, migrateAudit, sql } from 'db';
+import {
+  analyticsSql,
+  auditSql,
+  dictionarySql,
+  migrate,
+  migrateAudit,
+  migrateDictionary,
+  sql,
+} from 'db';
 import { cleanupExpiredRevocations, startRevocationCleanup } from 'db/revocation';
 import { scrubPii } from 'core';
 import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
@@ -28,6 +36,7 @@ import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
 import { handleHealthRequest } from './api/health';
 import { handleTestSessionRequest, isTestMode } from './api/test-session';
+import { handleReidentificationRequest } from './api/reidentification';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -39,6 +48,11 @@ try {
   await migrateAudit();
 } catch (err) {
   console.warn('[db] Audit schema migration skipped — audit database unavailable:', err);
+}
+try {
+  await migrateDictionary();
+} catch (err) {
+  console.warn('[db] Dictionary schema migration skipped — dictionary database unavailable:', err);
 }
 
 // Purge any already-expired revocation rows left from a previous run, then
@@ -81,12 +95,15 @@ export interface AppState {
   sql: typeof sql;
   auditSql: typeof auditSql;
   analyticsSql: typeof analyticsSql;
+  /** IdentityDictionary pool — dict_rw role, kb_dictionary only. */
+  dictionarySql: typeof dictionarySql;
 }
 
 export const appState: AppState = {
   sql,
   auditSql,
   analyticsSql,
+  dictionarySql,
 };
 
 export default {
@@ -231,6 +248,11 @@ export default {
     if (url.pathname.startsWith('/api/users')) {
       const usersRes = await handleUsersRequest(req, url, appState);
       if (usersRes) return withTrace(usersRes);
+    }
+
+    if (url.pathname.startsWith('/api/reidentification')) {
+      const reidentRes = await handleReidentificationRequest(req, url, appState);
+      if (reidentRes) return withTrace(reidentRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
