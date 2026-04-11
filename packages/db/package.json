@@ -15,6 +15,7 @@
     "./worker-channel": "./worker-channel.ts",
     "./governance": "./governance.ts",
     "./entity-type-registry": "./entity-type-registry.ts",
+    "./phase1-entity-types": "./phase1-entity-types.ts",
     "./feature-flags": "./feature-flags.ts",
     "./auth-lockout": "./auth-lockout.ts",
     "./recovery": "./recovery.ts",

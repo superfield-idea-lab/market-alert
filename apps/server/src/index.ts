@@ -15,6 +15,7 @@ import {
   migrateDictionary,
   sql,
 } from 'db';
+import { registerPhase1EntityTypesWithDb } from 'db/phase1-entity-types';
 import { cleanupExpiredRevocations, startRevocationCleanup } from 'db/revocation';
 import { scrubPii } from 'core';
 import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
@@ -54,6 +55,11 @@ try {
 } catch (err) {
   console.warn('[db] Dictionary schema migration skipped — dictionary database unavailable:', err);
 }
+
+// Register all Phase 1 property graph entity types in the in-memory registry
+// and persist each to entity_types via an idempotent INSERT … ON CONFLICT DO NOTHING.
+// Must run after migrate() so the entity_types table exists.
+await registerPhase1EntityTypesWithDb(sql);
 
 // Purge any already-expired revocation rows left from a previous run, then
 // schedule the recurring 24-hour cleanup. The timer is unref'd so it does not
