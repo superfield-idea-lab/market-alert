@@ -1,25 +1,20 @@
 /**
- * Unit tests for the ES256 JWT implementation (issue #135).
+ * Unit tests for the ES256 JWT implementation (issue #22).
  *
  * Covers:
  * - signJwt produces a JWT with alg=ES256 header
  * - verifyJwt accepts a valid ES256-signed token and rejects a tampered one
+ * - Algorithm pinning: tokens claiming alg=none or alg=HS256 are rejected
  * - JWKS endpoint returns correctly formatted JWK with correct key type and use fields
  * - Key rotation: token signed with old key is accepted; after rotation without old key it is rejected
  * - JTI revocation continues to work with ES256 tokens
+ *
+ * No mocks are used. The revocation check is supplied as an injectable
+ * in-memory function via the `options.isRevokedFn` parameter so these
+ * unit tests do not require a live Postgres connection.
  */
 
-import { describe, test, expect, beforeEach, vi } from 'vitest';
-
-// ---------------------------------------------------------------------------
-// Mock 'db/revocation' so these unit tests do not need a real Postgres DB.
-// ---------------------------------------------------------------------------
-vi.mock('db/revocation', () => ({
-  isRevoked: vi.fn(async () => false),
-}));
-
-import { isRevoked } from 'db/revocation';
-const isRevokedMock = isRevoked as ReturnType<typeof vi.fn>;
+import { describe, test, expect, beforeEach } from 'vitest';
 
 import {
   signJwt,
@@ -27,14 +22,24 @@ import {
   getJwks,
   generateEcKeyPair,
   base64UrlDecode,
+  base64UrlEncode,
   _resetKeyStoreForTest,
   _seedKeyPairForTest,
 } from '../../src/auth/jwt';
 
+// ---------------------------------------------------------------------------
+// In-memory revocation store — no mocks, no real database.
+// ---------------------------------------------------------------------------
+
+let revokedJtis = new Set<string>();
+
+async function isRevokedInMemory(jti: string): Promise<boolean> {
+  return revokedJtis.has(jti);
+}
+
 beforeEach(() => {
   _resetKeyStoreForTest();
-  isRevokedMock.mockReset();
-  isRevokedMock.mockResolvedValue(false);
+  revokedJtis = new Set();
 });
 
 // ---------------------------------------------------------------------------
@@ -91,7 +96,9 @@ describe('signJwt', () => {
 describe('verifyJwt', () => {
   test('accepts a freshly signed token and returns the payload', async () => {
     const token = await signJwt({ sub: 'user-2', role: 'admin' });
-    const payload = await verifyJwt<{ sub: string; role: string }>(token);
+    const payload = await verifyJwt<{ sub: string; role: string }>(token, {
+      isRevokedFn: isRevokedInMemory,
+    });
     expect(payload.sub).toBe('user-2');
     expect(payload.role).toBe('admin');
   });
@@ -105,7 +112,9 @@ describe('verifyJwt', () => {
       .replace(/\//g, '_')
       .replace(/=+$/, '');
     const tamperedToken = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
-    await expect(verifyJwt(tamperedToken)).rejects.toThrow('Invalid signature');
+    await expect(verifyJwt(tamperedToken, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid signature',
+    );
   });
 
   test('rejects a token with a tampered signature', async () => {
@@ -115,30 +124,94 @@ describe('verifyJwt', () => {
     const sig = parts[2];
     const tamperedSig = sig.slice(0, -1) + (sig.endsWith('A') ? 'B' : 'A');
     const tamperedToken = `${parts[0]}.${parts[1]}.${tamperedSig}`;
-    await expect(verifyJwt(tamperedToken)).rejects.toThrow('Invalid signature');
+    await expect(verifyJwt(tamperedToken, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid signature',
+    );
   });
 
   test('rejects a token with only two parts', async () => {
-    await expect(verifyJwt('header.payload')).rejects.toThrow('Invalid token format');
+    await expect(verifyJwt('header.payload', { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid token format',
+    );
   });
 
   test('rejects an expired token', async () => {
     const token = await signJwt({ sub: 'user-5' }, -1 / 3600); // -1 second TTL
-    await expect(verifyJwt(token)).rejects.toThrow('Token expired');
+    await expect(verifyJwt(token, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Token expired',
+    );
   });
 
   test('rejects a revoked token', async () => {
-    isRevokedMock.mockResolvedValue(true);
     const token = await signJwt({ sub: 'user-6' });
-    await expect(verifyJwt(token)).rejects.toThrow('Token revoked');
+    const [, encodedPayload] = token.split('.');
+    const payload = JSON.parse(base64UrlDecode(encodedPayload));
+    revokedJtis.add(payload.jti);
+    await expect(verifyJwt(token, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Token revoked',
+    );
   });
 
-  test('passes the jti to isRevoked', async () => {
+  test('passes the jti to the revocation check', async () => {
     const token = await signJwt({ sub: 'user-7' });
     const [, encodedPayload] = token.split('.');
     const payload = JSON.parse(base64UrlDecode(encodedPayload));
-    await verifyJwt(token);
-    expect(isRevokedMock).toHaveBeenCalledWith(payload.jti);
+    const checked: string[] = [];
+    await verifyJwt(token, {
+      isRevokedFn: async (jti) => {
+        checked.push(jti);
+        return false;
+      },
+    });
+    expect(checked).toContain(payload.jti);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Algorithm pinning
+// ---------------------------------------------------------------------------
+
+describe('algorithm pinning', () => {
+  /**
+   * Constructs a token whose header declares the given algorithm but whose
+   * signature is the one from a legitimately signed ES256 token (or an empty
+   * byte string for alg=none). This simulates a JWT library downgrade attack.
+   */
+  async function buildTokenWithAlg(alg: string): Promise<string> {
+    // Sign a real ES256 token to obtain a valid payload + signature structure
+    const real = await signJwt({ sub: 'attacker' });
+    const [, realPayload, realSig] = real.split('.');
+
+    // Craft a header claiming the target algorithm
+    const fakeHeader = base64UrlEncode(JSON.stringify({ alg, typ: 'JWT' }));
+    return `${fakeHeader}.${realPayload}.${realSig}`;
+  }
+
+  test('rejects a token claiming alg=none', async () => {
+    const token = await buildTokenWithAlg('none');
+    await expect(verifyJwt(token, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid algorithm: only ES256 is accepted',
+    );
+  });
+
+  test('rejects a token claiming alg=HS256', async () => {
+    const token = await buildTokenWithAlg('HS256');
+    await expect(verifyJwt(token, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid algorithm: only ES256 is accepted',
+    );
+  });
+
+  test('rejects a token claiming alg=RS256', async () => {
+    const token = await buildTokenWithAlg('RS256');
+    await expect(verifyJwt(token, { isRevokedFn: isRevokedInMemory })).rejects.toThrow(
+      'Invalid algorithm: only ES256 is accepted',
+    );
+  });
+
+  test('accepts a token correctly claiming alg=ES256', async () => {
+    const token = await signJwt({ sub: 'legit' });
+    const payload = await verifyJwt<{ sub: string }>(token, { isRevokedFn: isRevokedInMemory });
+    expect(payload.sub).toBe('legit');
   });
 });
 
@@ -194,7 +267,9 @@ describe('key rotation', () => {
     _seedKeyPairForTest(newKeyPair, oldKeyPair);
 
     // Token signed with old key should still verify
-    const payload = await verifyJwt<{ sub: string }>(tokenSignedWithOldKey);
+    const payload = await verifyJwt<{ sub: string }>(tokenSignedWithOldKey, {
+      isRevokedFn: isRevokedInMemory,
+    });
     expect(payload.sub).toBe('rotation-test');
   });
 
@@ -208,7 +283,9 @@ describe('key rotation', () => {
     const newKeyPair = await generateEcKeyPair();
     _seedKeyPairForTest(newKeyPair); // no old key
 
-    await expect(verifyJwt(tokenSignedWithOldKey)).rejects.toThrow('Invalid signature');
+    await expect(
+      verifyJwt(tokenSignedWithOldKey, { isRevokedFn: isRevokedInMemory }),
+    ).rejects.toThrow('Invalid signature');
   });
 
   test('token signed with new key is accepted after rotation', async () => {
@@ -216,7 +293,9 @@ describe('key rotation', () => {
     const newKeyPair = await generateEcKeyPair();
     _seedKeyPairForTest(newKeyPair, oldKeyPair);
     const token = await signJwt({ sub: 'new-key-user' });
-    const payload = await verifyJwt<{ sub: string }>(token);
+    const payload = await verifyJwt<{ sub: string }>(token, {
+      isRevokedFn: isRevokedInMemory,
+    });
     expect(payload.sub).toBe('new-key-user');
   });
 

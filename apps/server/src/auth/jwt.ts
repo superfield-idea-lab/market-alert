@@ -197,16 +197,43 @@ export async function signJwt(payload: object, expiresInHours = 24 * 7): Promise
 }
 
 /**
+ * Options for verifyJwt, primarily for unit-testing without a real database.
+ */
+export interface VerifyJwtOptions {
+  /**
+   * Override the revocation check. Defaults to the real `isRevoked` from
+   * `db/revocation`. Inject an in-memory alternative in unit tests to avoid
+   * requiring a live Postgres connection.
+   */
+  isRevokedFn?: (jti: string) => Promise<boolean>;
+}
+
+/**
  * Verifies and decodes a JWT token signed with ES256. Throws if invalid, expired, or revoked.
  * During key rotation, tokens signed with the old key are also accepted.
+ *
+ * Algorithm pinning: tokens that declare any algorithm other than ES256 in their
+ * header are rejected immediately, before signature verification, to prevent
+ * algorithm-confusion attacks (e.g. alg=none, alg=HS256).
  */
-export async function verifyJwt<T>(token: string): Promise<T> {
+export async function verifyJwt<T>(token: string, options?: VerifyJwtOptions): Promise<T> {
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Invalid token format');
   }
 
   const [encodedHeader, encodedPayload, encodedSignature] = parts;
+
+  // --- Algorithm pinning ---
+  // Reject any token whose header claims an algorithm other than ES256.
+  // This must happen before cryptographic verification to close the
+  // algorithm-confusion class of attacks (CVE class: "alg=none", RS256→HS256).
+  const headerStr = base64UrlDecode(encodedHeader);
+  const header = JSON.parse(headerStr) as Record<string, unknown>;
+  if (header.alg !== 'ES256') {
+    throw new Error('Invalid algorithm: only ES256 is accepted');
+  }
+
   const dataToVerify = ENCODER.encode(`${encodedHeader}.${encodedPayload}`);
 
   // Decode the signature bytes
@@ -244,7 +271,8 @@ export async function verifyJwt<T>(token: string): Promise<T> {
     throw new Error('Token expired');
   }
 
-  if (payload.jti && (await isRevoked(payload.jti))) {
+  const revocationCheck = options?.isRevokedFn ?? isRevoked;
+  if (payload.jti && (await revocationCheck(payload.jti))) {
     throw new Error('Token revoked');
   }
 
