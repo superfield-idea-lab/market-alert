@@ -70,6 +70,15 @@ export default defineConfig({
           delete store[payload.fixtureId];
           writeFixtureStore(store);
         },
+        saveScreenshot: async (_, payload: { data: number[]; relativePath: string }) => {
+          // Config lives at apps/web/vitest.browser.config.ts.
+          // Climb two levels to reach repo root, then append the relative path.
+          const repoRoot = join(new URL('.', import.meta.url).pathname, '..', '..');
+          const absPath = join(repoRoot, payload.relativePath);
+          const dir = dirname(absPath);
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          writeFileSync(absPath, Buffer.from(payload.data));
+        },
       },
     },
     include: ['tests/component/**/*.test.tsx'],

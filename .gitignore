@@ -28,6 +28,8 @@ dist-ssr
 playwright-report/
 test-results/
 coverage/
+# Vitest browser failure screenshots (auto-generated, not baseline fixtures)
+**/__screenshots__/
 
 # Environment files
 .env

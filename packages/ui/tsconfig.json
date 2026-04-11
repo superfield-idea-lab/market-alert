@@ -8,6 +8,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
-    "noEmit": true
-  }
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "exclude": ["node_modules", "dist"]
 }
