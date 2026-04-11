@@ -1,6 +1,43 @@
 import { sql } from './index';
 
 /**
+ * TaskType enum — canonical job types for the kb-demo worker pipeline.
+ *
+ * Each variant corresponds to a distinct worker phase:
+ *   EMAIL_INGEST   — Phase 2: pull emails into the KB (agent_type: email_ingest)
+ *   AUTOLEARN      — Phase 3: autolearning from ingested content (agent_type: autolearn)
+ *   TRANSCRIPTION  — Phase 5: audio/video transcription (agent_type: transcription)
+ *   ANNOTATION     — Phase 6: entity annotation agent (agent_type: annotation)
+ *   DEEPCLEAN      — Phase 4: deep PII cleaning pass (agent_type: deepclean)
+ *   BDM_SUMMARY    — Phase 7: BDM-ready summary generation (agent_type: bdm_summary)
+ *
+ * Blueprint refs: TQ-D-001 (single-table multi-type queue), issue #95.
+ */
+export const TaskType = {
+  EMAIL_INGEST: 'EMAIL_INGEST',
+  AUTOLEARN: 'AUTOLEARN',
+  TRANSCRIPTION: 'TRANSCRIPTION',
+  ANNOTATION: 'ANNOTATION',
+  DEEPCLEAN: 'DEEPCLEAN',
+  BDM_SUMMARY: 'BDM_SUMMARY',
+} as const;
+
+export type TaskType = (typeof TaskType)[keyof typeof TaskType];
+
+/**
+ * Maps each TaskType to its agent_type string used in the task_queue table
+ * and in per-type views (task_queue_view_<agent_type>).
+ */
+export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
+  [TaskType.EMAIL_INGEST]: 'email_ingest',
+  [TaskType.AUTOLEARN]: 'autolearn',
+  [TaskType.TRANSCRIPTION]: 'transcription',
+  [TaskType.ANNOTATION]: 'annotation',
+  [TaskType.DEEPCLEAN]: 'deepclean',
+  [TaskType.BDM_SUMMARY]: 'bdm_summary',
+};
+
+/**
  * Task status values matching the CHECK constraint in schema.sql.
  *
  * State machine (TQ-D-002):
@@ -313,4 +350,62 @@ export function startStaleClaimRecovery(
   }, intervalMs);
   timer.unref();
   return timer;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dead-letter queue (DLQ) monitoring — TQ-C-003
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Default DLQ depth that triggers an alert (TQ-C-003). */
+export const DLQ_ALERT_THRESHOLD = 10;
+
+export interface DlqDepthRow {
+  agent_type: string;
+  dead_count: number;
+}
+
+/**
+ * Returns the count of tasks in 'dead' status, grouped by agent_type.
+ *
+ * Callers should compare each row's `dead_count` against `DLQ_ALERT_THRESHOLD`
+ * (or a custom threshold) and emit an alert when the value exceeds it.
+ *
+ * Blueprint ref: TQ-C-003 (dead-letter alert threshold).
+ */
+export async function getDlqDepth(): Promise<DlqDepthRow[]> {
+  const rows = await sql<DlqDepthRow[]>`
+    SELECT agent_type, COUNT(*)::INTEGER AS dead_count
+    FROM task_queue
+    WHERE status = 'dead'
+    GROUP BY agent_type
+    ORDER BY dead_count DESC, agent_type ASC
+  `;
+  return rows;
+}
+
+export interface DlqAlertResult {
+  /** Agent types whose dead-task count exceeds the threshold. */
+  breached: DlqDepthRow[];
+  /** Full per-type depth rows. */
+  depth: DlqDepthRow[];
+}
+
+/**
+ * Checks the DLQ depth against the given threshold.
+ *
+ * Returns a `DlqAlertResult` where `breached` contains only the agent types
+ * that have exceeded the threshold. The caller is responsible for emitting the
+ * actual alert (log, webhook, metric, etc.) so this function remains
+ * infrastructure-independent.
+ *
+ * Blueprint ref: TQ-C-003.
+ *
+ * @param threshold - Alert threshold. Defaults to `DLQ_ALERT_THRESHOLD` (10).
+ */
+export async function checkDlqAlertThreshold(
+  threshold = DLQ_ALERT_THRESHOLD,
+): Promise<DlqAlertResult> {
+  const depth = await getDlqDepth();
+  const breached = depth.filter((row) => row.dead_count > threshold);
+  return { breached, depth };
 }

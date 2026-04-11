@@ -26,6 +26,7 @@ import { seedDemoData } from './seed/demo-data';
 import { startDemoHealthCheck } from './cron/demo-health-check';
 import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
+import { handleHealthRequest } from './api/health';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -130,10 +131,13 @@ export default {
       return res;
     }
 
-    // Health check endpoint — used by k8s liveness/readiness probes and CI smoke test
-    if (url.pathname === '/healthz' || url.pathname === '/health') {
-      const version = process.env.RELEASE_TAG ?? 'dev';
-      return withTrace(Response.json({ status: 'ok', version }));
+    // Health check endpoints — liveness, readiness, deep (DEPLOY-C-030/031/032)
+    // Routes: /health/live, /health/ready, /health/deep
+    // Legacy aliases: /health, /healthz -> liveness
+    // See apps/server/src/api/health.ts for three-tier probe design.
+    if (url.pathname.startsWith('/health') || url.pathname === '/healthz') {
+      const healthRes = await handleHealthRequest(url.pathname, appState);
+      if (healthRes !== null) return withTrace(healthRes);
     }
 
     // JWKS endpoint — exposes the current EC P-256 public key(s) for token verification.

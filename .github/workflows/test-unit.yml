@@ -38,3 +38,11 @@ jobs:
         run: bun run lint
       - name: Run Unit Tests
         run: bun --bun vitest run tests/unit apps/*/tests/unit
+      - name: Coverage gate (Phase 0 — health probe)
+        # Note: coverage-v8 requires node:inspector which Bun does not yet
+        # implement (https://github.com/oven-sh/bun/issues/2445). This step
+        # intentionally runs WITHOUT --bun to use Node.js coverage instrumentation.
+        # Must run from apps/server/ so the include path (src/api/health.ts)
+        # resolves to the correct module. Threshold: 99% lines/branches/functions.
+        working-directory: apps/server
+        run: bun vitest run --coverage tests/unit/health.test.ts

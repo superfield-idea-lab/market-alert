@@ -11,6 +11,7 @@ import { registerSecurityScannerJob } from './jobs/security-scanner';
 import { registerSocComplianceReviewJob } from './jobs/soc-compliance-review';
 import { registerRuntimeTracerJob } from './jobs/runtime-tracer';
 import { registerCodeCleanupJob } from './jobs/code-cleanup';
+import { registerDlqMonitorJob } from './jobs/dlq-monitor';
 
 let scheduler: CronScheduler | null = null;
 
@@ -31,6 +32,7 @@ export function startCronScheduler(): CronScheduler {
   registerSocComplianceReviewJob(scheduler);
   registerRuntimeTracerJob(scheduler);
   registerCodeCleanupJob(scheduler);
+  registerDlqMonitorJob(scheduler);
 
   scheduler.start();
   return scheduler;

@@ -161,6 +161,57 @@ CREATE OR REPLACE VIEW task_queue_view_code_cleanup AS
     FROM task_queue
     WHERE agent_type = 'code_cleanup';
 
+-- KB-demo worker-phase views (issue #95, TQ-D-001).
+-- Sensitive columns excluded: delegated_token, created_by, result, error_message.
+
+CREATE OR REPLACE VIEW task_queue_view_email_ingest AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'email_ingest';
+
+CREATE OR REPLACE VIEW task_queue_view_autolearn AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'autolearn';
+
+CREATE OR REPLACE VIEW task_queue_view_transcription AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'transcription';
+
+CREATE OR REPLACE VIEW task_queue_view_annotation AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'annotation';
+
+CREATE OR REPLACE VIEW task_queue_view_deepclean AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'deepclean';
+
+CREATE OR REPLACE VIEW task_queue_view_bdm_summary AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'bdm_summary';
+
 -- LISTEN/NOTIFY trigger: wake the appropriate worker channel on task insertion.
 -- Blueprint: TQ-D-005 (listen-notify-wake)
 CREATE OR REPLACE FUNCTION notify_task_queue_insert()
