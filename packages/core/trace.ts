@@ -65,6 +65,28 @@ export function extractTraceId(req: Request): string {
 }
 
 /**
+ * Returns a `fetch` wrapper bound to a specific trace ID.
+ *
+ * Intended for server-side use where the trace ID for the current request is
+ * already known and should be propagated to every outbound HTTP call made
+ * during that request's lifetime.
+ *
+ * ```ts
+ * const tracedFetch = makeTracedFetch(traceId);
+ * const res = await tracedFetch('https://internal-service/api', { method: 'GET' });
+ * ```
+ */
+export function makeTracedFetch(
+  traceId: string,
+): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const headers = new Headers(init?.headers);
+    headers.set('X-Trace-Id', traceId);
+    return fetch(input, { ...init, headers });
+  };
+}
+
+/**
  * Builds a structured log entry that always includes `trace_id`.
  *
  * @example

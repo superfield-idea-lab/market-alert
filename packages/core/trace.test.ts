@@ -11,6 +11,7 @@ import {
   tracedFetch,
   extractTraceId,
   traceLog,
+  makeTracedFetch,
 } from './trace';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,84 @@ describe('tracedFetch', () => {
       });
       expect(captured.headers?.get('Content-Type')).toBe('application/json');
       expect(captured.headers?.get('X-Trace-Id')).toBeTruthy();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// makeTracedFetch — server-side traced fetch bound to a specific trace ID
+// ---------------------------------------------------------------------------
+
+describe('makeTracedFetch', () => {
+  test('sets X-Trace-Id to the provided trace ID', async () => {
+    let capturedHeader: string | null = null;
+
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      capturedHeader = new Headers(init?.headers).get('X-Trace-Id');
+      return new Response('ok', { status: 200 });
+    };
+
+    try {
+      const tracedFetchForRequest = makeTracedFetch('server-trace-abc-123');
+      await tracedFetchForRequest('http://localhost/api/internal');
+      expect(capturedHeader).toBe('server-trace-abc-123');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('different calls with different trace IDs produce different headers', async () => {
+    const captured: string[] = [];
+
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const id = new Headers(init?.headers).get('X-Trace-Id');
+      if (id) captured.push(id);
+      return new Response('ok', { status: 200 });
+    };
+
+    try {
+      const fetchA = makeTracedFetch('trace-aaa');
+      const fetchB = makeTracedFetch('trace-bbb');
+      await fetchA('http://localhost/');
+      await fetchB('http://localhost/');
+      expect(captured).toEqual(['trace-aaa', 'trace-bbb']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('preserves caller-supplied headers', async () => {
+    const captured: { headers: Headers | null } = { headers: null };
+
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async (
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      captured.headers = new Headers(init?.headers);
+      return new Response('ok', { status: 200 });
+    };
+
+    try {
+      const tracedFetchForRequest = makeTracedFetch('trace-xyz');
+      await tracedFetchForRequest('http://localhost/', {
+        headers: { Authorization: 'Bearer token123' },
+      });
+      expect(captured.headers?.get('Authorization')).toBe('Bearer token123');
+      expect(captured.headers?.get('X-Trace-Id')).toBe('trace-xyz');
     } finally {
       globalThis.fetch = originalFetch;
     }
