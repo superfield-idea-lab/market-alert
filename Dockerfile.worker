@@ -28,11 +28,16 @@ FROM oven/bun:1.2@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be
 
 WORKDIR /app
 
-# Copy workspace manifests and lockfile first for layer caching
+# Copy workspace manifests and lockfile first for layer caching.
+# All workspace member package.json files must be present so bun can resolve
+# the full workspace graph against the frozen lockfile.
 COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/ui/package.json packages/ui/
 
 # Install workspace dependencies with frozen lockfile
 RUN bun install --frozen-lockfile --ignore-scripts

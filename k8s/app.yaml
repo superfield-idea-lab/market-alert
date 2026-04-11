@@ -3,6 +3,16 @@
 # Image tag is set at deploy time via deploy.sh — never hardcoded here.
 # All environment variables are sourced from the `calypso-secrets` Secret.
 #
+# Health probes:
+#   livenessProbe  → GET /health/live  (process alive; DEPLOY-C-030)
+#   readinessProbe → GET /health/ready (DB reachable; DEPLOY-C-031)
+#   Legacy /health and /healthz are aliases for /health/live (backward compat).
+#
+# k3s compatibility:
+#   These manifests apply cleanly to a single-node k3s cluster.
+#   No ingress controller is required — expose the Service via NodePort or
+#   kubectl port-forward for smoke testing against /health.
+#
 # Apply order:
 #   kubectl apply -f k8s/secrets.yaml
 #   kubectl apply -f k8s/postgres.yaml
@@ -70,7 +80,7 @@ spec:
                   optional: true
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: 31415
             initialDelaySeconds: 15
             periodSeconds: 20
@@ -78,7 +88,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: 31415
             initialDelaySeconds: 10
             periodSeconds: 10

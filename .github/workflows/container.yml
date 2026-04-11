@@ -101,6 +101,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Create codex binary stub for build validation
+        # Dockerfile.worker requires a codex binary at codex-binary/codex in the
+        # build context. For PR build checks we use a minimal stub so the layer
+        # copy succeeds without downloading the real binary.
+        run: |
+          mkdir -p codex-binary
+          echo '#!/bin/sh' > codex-binary/codex
+          chmod +x codex-binary/codex
+
       - name: Build worker image (build check only, no push)
         uses: docker/build-push-action@v6
         with:

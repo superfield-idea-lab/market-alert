@@ -1,0 +1,216 @@
+name: k8s Manifests
+
+# Validate k8s manifests and verify distroless image compliance on every PR
+# that touches k8s/ or Dockerfile* files.
+#
+# Jobs:
+#   validate-manifests — dry-run kubectl apply on all non-secrets manifests
+#   distroless-check   — build each image and assert /bin/sh is absent
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'Dockerfile.worker'
+      - 'Dockerfile.agent-worker'
+      - '.github/workflows/k8s-manifests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'k8s/**'
+      - 'Dockerfile'
+      - 'Dockerfile.release'
+      - 'Dockerfile.worker'
+      - 'Dockerfile.agent-worker'
+      - '.github/workflows/k8s-manifests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Validate k8s manifests ─────────────────────────────────────────────────
+  # Spins up a single-node k3s cluster and runs `kubectl apply --dry-run=server`
+  # on all non-secret manifests. This catches schema errors and API version
+  # mismatches before they reach a real cluster.
+  validate-manifests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Install k3s
+        run: |
+          curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik" sh -
+          # Wait for k3s to be ready.
+          # Use sudo because /etc/rancher/k3s/k3s.yaml is root-owned until Configure kubectl
+          # copies it to ~/.kube/config. Cap at 120 s to avoid an infinite loop.
+          DEADLINE=$(( $(date +%s) + 120 ))
+          until sudo kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes 2>/dev/null | grep -q Ready; do
+            if [[ $(date +%s) -gt $DEADLINE ]]; then
+              echo "Timed out waiting for k3s node to be Ready"
+              exit 1
+            fi
+            echo "Waiting for k3s node to be Ready..."
+            sleep 3
+          done
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+          sudo chown $USER ~/.kube/config
+          kubectl get nodes
+
+      - name: Validate manifests (dry-run)
+        # Skip secrets.example.yaml — it contains template placeholders, not real values.
+        # Skip dev/ — dev-only configs that intentionally diverge from production schema.
+        run: |
+          echo "=== Validating k8s manifests ==="
+          FAIL=0
+
+          for manifest in \
+            k8s/postgres.yaml \
+            k8s/db-init-job.yaml \
+            k8s/app.yaml \
+            k8s/worker-agents.yaml \
+            k8s/agent-worker.yaml; do
+
+            echo "--- dry-run: $manifest"
+            if kubectl apply --dry-run=server -f "$manifest"; then
+              echo "OK: $manifest"
+            else
+              echo "FAIL: $manifest"
+              FAIL=1
+            fi
+          done
+
+          if [[ $FAIL -ne 0 ]]; then
+            echo "One or more manifests failed validation."
+            exit 1
+          fi
+
+          echo "All manifests validated successfully."
+
+      - name: Check no plaintext secrets in manifests
+        # Detect patterns that look like real secret values (not template placeholders)
+        # committed into non-example manifest files.
+        run: |
+          echo "=== Checking for plaintext secrets ==="
+          FAIL=0
+
+          # Scan production manifests for suspicious patterns.
+          # Template placeholders like <some-value> are expected and allowed.
+          # Real-looking base64 blobs or long hex strings in data: blocks are not.
+          for manifest in k8s/app.yaml k8s/postgres.yaml k8s/worker-agents.yaml k8s/agent-worker.yaml k8s/db-init-job.yaml; do
+            # Flag any `data:` block followed by non-placeholder base64 content.
+            # A simple heuristic: look for lines with a colon followed by 20+ random chars
+            # that are not wrapped in angle brackets (i.e. not template placeholders).
+            # Exclude filesystem paths (values starting with /) and template placeholders (<...>).
+            if grep -E '^\s+[A-Za-z_]+:\s+[A-Za-z0-9+/]{20,}={0,2}\s*$' "$manifest" 2>/dev/null | grep -v '<' | grep -Ev ':\s+/'; then
+              echo "WARN: possible plaintext secret blob in $manifest"
+              FAIL=1
+            fi
+          done
+
+          if [[ $FAIL -ne 0 ]]; then
+            echo "Plaintext secrets check failed."
+            exit 1
+          fi
+
+          echo "No plaintext secrets detected."
+
+  # ── Distroless compliance check ───────────────────────────────────────────
+  # Build each container image and assert that /bin/sh is absent in the final
+  # layer (distroless compliance per WORKER-C-001).
+  distroless-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build server image (Dockerfile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: calypso-server:ci-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert /bin/sh absent in server image
+        run: |
+          echo "=== Distroless check: calypso-server ==="
+          if docker run --rm --entrypoint="" calypso-server:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in calypso-server image — not distroless"
+            exit 1
+          fi
+          echo "OK: /bin/sh absent from calypso-server image"
+
+      - name: Build worker image (Dockerfile.worker)
+        # The worker Dockerfile requires a codex binary at codex-binary/codex.
+        # For the CI compliance check we create a minimal stub so the build completes.
+        run: |
+          mkdir -p codex-binary
+          echo '#!/bin/sh' > codex-binary/codex
+          chmod +x codex-binary/codex
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: false
+          load: true
+          tags: calypso-worker:ci-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert /bin/sh absent in worker image
+        run: |
+          echo "=== Distroless check: calypso-worker ==="
+          if docker run --rm --entrypoint="" calypso-worker:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in calypso-worker image — not distroless"
+            exit 1
+          fi
+          echo "OK: /bin/sh absent from calypso-worker image"
+
+      - name: Build web+server release image (Dockerfile.release)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.release
+          push: false
+          load: true
+          tags: calypso-release:ci-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert /bin/sh absent in release image
+        run: |
+          echo "=== Distroless check: calypso-release ==="
+          if docker run --rm --entrypoint="" calypso-release:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in calypso-release image — not distroless"
+            exit 1
+          fi
+          echo "OK: /bin/sh absent from calypso-release image"
+
+      - name: Summary
+        run: |
+          echo "All three images (server, worker, release) are distroless-compliant."
+          echo "No shell binary (/bin/sh) present in any production image runtime layer."
