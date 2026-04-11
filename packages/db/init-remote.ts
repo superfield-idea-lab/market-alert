@@ -473,6 +473,29 @@ async function _verifyColumnGrant(
   return count >= 1 ? null : `${roleName} missing ${privilegeType} on ${tableName}.${columnName}`;
 }
 
+/**
+ * Verifies that a privilege is NOT present on a table for a role.
+ * Returns an error string if the privilege IS granted (unexpected).
+ *
+ * Used to assert INSERT-only semantics on business_journal.
+ */
+async function verifyNoTableGrant(
+  db: ReturnType<typeof makePool>,
+  tableName: string,
+  roleName: string,
+  privilegeType: string,
+): Promise<string | null> {
+  const [{ count }] = await db<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'public'
+      AND table_name = ${tableName}
+      AND grantee = ${roleName}
+      AND privilege_type = ${privilegeType}
+  `;
+  return count === 0 ? null : `${roleName} unexpectedly holds ${privilegeType} on ${tableName}`;
+}
+
 async function verifyView(
   db: ReturnType<typeof makePool>,
   viewName: string,
@@ -578,6 +601,11 @@ async function verifyInitRemote(
     verifyTable(dictAdmin, 'identity_tokens'),
     verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.audit, 'INSERT'),
     verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.audit, 'SELECT'),
+    verifyTable(appAdmin, 'business_journal'),
+    verifyTableGrant(appAdmin, 'business_journal', ROLE_NAMES.app, 'INSERT'),
+    verifyTableGrant(appAdmin, 'business_journal', ROLE_NAMES.app, 'SELECT'),
+    verifyNoTableGrant(appAdmin, 'business_journal', ROLE_NAMES.app, 'UPDATE'),
+    verifyNoTableGrant(appAdmin, 'business_journal', ROLE_NAMES.app, 'DELETE'),
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'INSERT'),
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'SELECT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'INSERT'),
@@ -698,6 +726,14 @@ export async function runInitRemote(env: NodeJS.ProcessEnv = process.env): Promi
     } finally {
       await appRw.end({ timeout: 5 });
     }
+
+    // Enforce INSERT-only on business_journal for app_rw.
+    // configureAppDatabase grants SELECT/INSERT/UPDATE/DELETE on all tables.
+    // We revoke UPDATE and DELETE here so that business_journal is append-only.
+    // DATA-D-004, DATA-C-026/027: the business journal must be immutable after insert.
+    await appAdmin!.unsafe(`
+REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAMES.app)};
+`);
 
     // Provision agent_worker base role and per-type agent roles
     await ensureAgentBaseRole(admin);

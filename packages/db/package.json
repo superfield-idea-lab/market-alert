@@ -17,7 +17,8 @@
     "./entity-type-registry": "./entity-type-registry.ts",
     "./feature-flags": "./feature-flags.ts",
     "./auth-lockout": "./auth-lockout.ts",
-    "./recovery": "./recovery.ts"
+    "./recovery": "./recovery.ts",
+    "./business-journal": "./business-journal.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

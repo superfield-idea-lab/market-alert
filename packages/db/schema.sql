@@ -408,6 +408,30 @@ CREATE TABLE IF NOT EXISTS auth_lockout (
   updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Business journal (DATA-D-004, DATA-C-026/027, TEST-D-006, TEST-C-014).
+-- Separate from the audit log: the audit log records access events for compliance,
+-- while the business journal records consequential business operations (WikiPageVersion
+-- published, LegalHold placed, key rotation, etc.) with enough information to
+-- deterministically reconstruct state from first principles.
+-- The table is append-only: no UPDATE or DELETE privileges are granted to app_rw
+-- (enforced by init-remote.ts which explicitly revokes those privileges after the
+-- default GRANT ALL that configureAppDatabase issues for schema ownership).
+CREATE TABLE IF NOT EXISTS business_journal (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  event_type  TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  actor_id    TEXT NOT NULL,
+  payload_ref TEXT,
+  created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_business_journal_event_type
+  ON business_journal (event_type);
+CREATE INDEX IF NOT EXISTS idx_business_journal_entity_id
+  ON business_journal (entity_id);
+CREATE INDEX IF NOT EXISTS idx_business_journal_created_at
+  ON business_journal (created_at);
+
 -- Migration version tracking table.
 -- Records each named migration that has been applied to this database.
 -- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.
