@@ -156,7 +156,7 @@ jobs:
         run: |
           docker run -d --name pg-remote -e POSTGRES_PASSWORD=adminpass -p 5432:5432 postgres:16-alpine
           for i in $(seq 1 20); do
-            docker exec pg-remote psql -U postgres -c "SELECT 1" > /dev/null 2>&1 && break
+            timeout 5s docker exec pg-remote pg_isready -U postgres -d postgres -q > /dev/null 2>&1 && break
             echo "Waiting for postgres... attempt ${i}"; sleep 2
           done
 

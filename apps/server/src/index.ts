@@ -219,10 +219,10 @@ export default {
       if (authRes) return withTrace(authRes);
     }
 
-    // Test-only session backdoor — available only when TEST_MODE=true.
+    // Test-only session backdoor and rate-limit probe — available only when TEST_MODE=true.
     // Used by integration tests to obtain a session cookie without going through
     // the passkey ceremony. Never enabled in production.
-    if (isTestMode() && url.pathname === '/api/test/session') {
+    if (isTestMode() && url.pathname.startsWith('/api/test/')) {
       const testRes = await handleTestSessionRequest(req, url, appState);
       if (testRes) return testRes;
     }

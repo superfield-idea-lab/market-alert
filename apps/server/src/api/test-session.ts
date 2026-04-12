@@ -19,10 +19,12 @@
  */
 
 import type { AppState } from '../index';
-import { getCorsHeaders } from './auth';
+import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { signJwt } from '../auth/jwt';
 import { generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { authCookieHeader } from '../auth/cookie-config';
+import { getClientIp } from '../security/rate-limiter';
+import { checkEmbeddingReadRate } from '../security/embedding-rate-gate';
 
 export function isTestMode(): boolean {
   return process.env.TEST_MODE === 'true';
@@ -37,6 +39,38 @@ export async function handleTestSessionRequest(
 
   const corsHeaders = getCorsHeaders(req);
   const { sql } = appState;
+
+  // POST /api/test/embedding-rate-check
+  // Calls checkEmbeddingReadRate for the given tenantId and actorId.
+  // Returns 200 if allowed, 429 if throttled.
+  // Only available in TEST_MODE — never enabled in production.
+  if (req.method === 'POST' && url.pathname === '/api/test/embedding-rate-check') {
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    let body: { tenantId?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      // no body — use defaults
+    }
+
+    const tenantId = body.tenantId ?? 'default';
+    const actorIp = getClientIp(req);
+
+    const { denyResponse } = await checkEmbeddingReadRate(tenantId, user.id, actorIp, corsHeaders);
+    if (denyResponse) return denyResponse;
+
+    return new Response(JSON.stringify({ allowed: true, tenantId, actorId: user.id }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   if (req.method !== 'POST' || url.pathname !== '/api/test/session') {
     return null;

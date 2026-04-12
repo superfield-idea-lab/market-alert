@@ -44,6 +44,8 @@ import {
   revokeOldPasskeys,
   notifyDevicesOfRecovery,
 } from 'db/recovery';
+import { getClientIp, tenantAuthLimiter, tooManyRequests } from '../security/rate-limiter';
+import { emitAuditEvent } from '../policies/audit-service';
 
 // The Relying Party name (display only, not security-critical).
 const RP_NAME = process.env.RP_NAME ?? 'Calypso';
@@ -345,8 +347,44 @@ export async function handlePasskeyRequest(
 
   // ------------------------------------------------------------------
   // POST /api/auth/passkey/login/begin
+  //
+  // Tenant-aware auth rate limit (issue #89):
+  //   Per-actor-IP, per-tenant-domain burst throttle. The tenant is identified
+  //   by the WebAuthn RP ID (the relying party domain), which is the natural
+  //   tenant boundary for passkey authentication.
+  //   Audit-before-deny: a throttle decision writes an audit event before the
+  //   429 response is returned.
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/login/begin') {
+    // Apply tenant-aware auth rate limit before any DB work
+    const { rpId: loginRpId } = getRpConfig(req);
+    const loginActorIp = getClientIp(req);
+    const loginRateResult = tenantAuthLimiter.check(loginRpId, loginActorIp);
+    if (!loginRateResult.allowed) {
+      // Audit-before-deny: record the throttle event before returning 429
+      await emitAuditEvent({
+        actor_id: loginActorIp,
+        action: 'auth.rate_limit.throttled',
+        entity_type: 'auth',
+        entity_id: loginRpId,
+        before: null,
+        after: {
+          endpoint: '/api/auth/passkey/login/begin',
+          tenant: loginRpId,
+          actor_ip: loginActorIp,
+          limit: loginRateResult.limit,
+          reset_at: loginRateResult.resetAt,
+        },
+        ip: loginActorIp,
+        ts: new Date().toISOString(),
+      }).catch((err) => {
+        // Audit failure must not suppress the rate-limit response
+        console.error('[rate-limit] audit emit failed:', err);
+      });
+      return tooManyRequests(loginRateResult, corsHeaders);
+    }
+    tenantAuthLimiter.consume(loginRpId, loginActorIp);
+
     try {
       const body = (await req.json().catch(() => ({}))) as { userId?: string };
       const userId = body.userId;
@@ -390,8 +428,39 @@ export async function handlePasskeyRequest(
   // Progressive lockout (AUTH-C-024, AUTH-C-032):
   //   Failed attempts increment a per-user exponential delay counter.
   //   All error responses are generic — no account-existence leakage.
+  //
+  // Tenant-aware auth rate limit (issue #89):
+  //   Same window as login/begin — each ceremony step consumes one slot.
+  //   Enforced here as well so clients that skip /begin are still bounded.
   // ------------------------------------------------------------------
   if (req.method === 'POST' && url.pathname === '/api/auth/passkey/login/complete') {
+    // Apply tenant-aware auth rate limit before any DB work
+    const { rpId: completeRpId } = getRpConfig(req);
+    const completeActorIp = getClientIp(req);
+    const completeRateResult = tenantAuthLimiter.check(completeRpId, completeActorIp);
+    if (!completeRateResult.allowed) {
+      await emitAuditEvent({
+        actor_id: completeActorIp,
+        action: 'auth.rate_limit.throttled',
+        entity_type: 'auth',
+        entity_id: completeRpId,
+        before: null,
+        after: {
+          endpoint: '/api/auth/passkey/login/complete',
+          tenant: completeRpId,
+          actor_ip: completeActorIp,
+          limit: completeRateResult.limit,
+          reset_at: completeRateResult.resetAt,
+        },
+        ip: completeActorIp,
+        ts: new Date().toISOString(),
+      }).catch((err) => {
+        console.error('[rate-limit] audit emit failed:', err);
+      });
+      return tooManyRequests(completeRateResult, corsHeaders);
+    }
+    tenantAuthLimiter.consume(completeRpId, completeActorIp);
+
     try {
       const { response } = (await req.json()) as { response: AuthenticationResponseJSON };
 

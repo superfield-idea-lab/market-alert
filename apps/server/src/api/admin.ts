@@ -10,8 +10,13 @@
  * GET    /api/admin/users       — paginated user list, optional ?role= filter
  * PATCH  /api/admin/users/:id   — change role or active status of a user
  *
+ * GET    /api/admin/tenants/:id/rate-policy — retrieve effective tenant rate policy
+ * PUT    /api/admin/tenants/:id/rate-policy — override per-tenant rate limits at runtime
+ *                                             (send null body to revert to safe defaults)
+ *
  * Superuser is determined by the SUPERUSER_ID environment variable.
- * All create, revoke, role-change, and deactivation operations are audit-logged.
+ * All create, revoke, role-change, deactivation, and rate-policy-update operations
+ * are audit-logged.
  */
 
 import type { AppState } from '../index';
@@ -20,6 +25,11 @@ import { createApiKey, listApiKeys, deleteApiKey } from 'db/api-keys';
 import { listTasksForAdmin, type TaskQueueStatus } from 'db/task-queue';
 import { emitAuditEvent } from '../policies/audit-service';
 import { isSuperuser, makeJson } from '../lib/response';
+import {
+  setTenantRatePolicy,
+  getTenantRatePolicy,
+  type TenantRatePolicy,
+} from '../security/rate-limiter';
 
 // Re-export isSuperuser so existing importers (e.g. users.ts) continue to work
 // without an immediate cascading change.  Prefer importing directly from
@@ -446,6 +456,72 @@ export async function handleAdminRequest(
     };
     void _pwHash2;
     return json({ id: targetId, properties: safeProps });
+  }
+
+  // -----------------------------------------------------------------------
+  // Tenant rate policy endpoints (issue #89)
+  // -----------------------------------------------------------------------
+
+  // GET /api/admin/tenants/:id/rate-policy — retrieve the effective rate policy
+  if (req.method === 'GET' && url.pathname.match(/^\/api\/admin\/tenants\/[^/]+\/rate-policy$/)) {
+    const tenantId = url.pathname.split('/')[4];
+    if (!tenantId) return json({ error: 'Missing tenant id' }, 400);
+    const policy = getTenantRatePolicy(tenantId);
+    return json({ tenantId, policy });
+  }
+
+  // PUT /api/admin/tenants/:id/rate-policy — set a per-tenant rate policy override
+  //
+  // Body (all fields optional):
+  //   { authMaxAttempts, authWindowMs, embeddingMaxReads, embeddingWindowMs }
+  //
+  // Send `null` as the body to clear the override and revert to safe defaults.
+  // Changes take effect immediately without restart.
+  if (req.method === 'PUT' && url.pathname.match(/^\/api\/admin\/tenants\/[^/]+\/rate-policy$/)) {
+    const tenantId = url.pathname.split('/')[4];
+    if (!tenantId) return json({ error: 'Missing tenant id' }, 400);
+
+    let body: TenantRatePolicy | null;
+    try {
+      const raw = await req.json();
+      body = raw === null ? null : (raw as TenantRatePolicy);
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    // Validate numeric fields when provided
+    if (body !== null) {
+      const numFields = [
+        'authMaxAttempts',
+        'authWindowMs',
+        'embeddingMaxReads',
+        'embeddingWindowMs',
+      ] as const;
+      for (const field of numFields) {
+        if (body[field] !== undefined) {
+          const v = body[field];
+          if (typeof v !== 'number' || v <= 0 || !Number.isFinite(v)) {
+            return json({ error: `${field} must be a positive finite number` }, 400);
+          }
+        }
+      }
+    }
+
+    setTenantRatePolicy(tenantId, body);
+
+    const effectivePolicy = getTenantRatePolicy(tenantId);
+
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'tenant.rate_policy.update',
+      entity_type: 'tenant',
+      entity_id: tenantId,
+      before: null,
+      after: { tenantId, policy: effectivePolicy },
+      ts: new Date().toISOString(),
+    }).catch((err) => console.warn('[audit] tenant.rate_policy.update audit write failed:', err));
+
+    return json({ tenantId, policy: effectivePolicy });
   }
 
   return null;
