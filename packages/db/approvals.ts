@@ -38,7 +38,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'executed';
 export type ApprovalDecision = 'approved' | 'rejected';
 
 /** The set of operation types that require M-of-N approval. */
-export const PRIVILEGED_OPERATIONS = ['root_key_rotate', 'bulk_export'] as const;
+export const PRIVILEGED_OPERATIONS = ['root_key_rotate', 'bulk_export', 'enable_worm'] as const;
 export type PrivilegedOperationType = (typeof PRIVILEGED_OPERATIONS)[number];
 
 export interface ApprovalRequest {

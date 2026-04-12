@@ -1049,3 +1049,99 @@ CREATE INDEX IF NOT EXISTS idx_trpa_tenant_assigned
 
 INSERT INTO _schema_version (migration) VALUES ('retention-policy-schema-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Phase 8 — WORM mode for ground-truth tables (issue #81)
+--
+-- Write-once-read-many (WORM) enforcement for the highest-assurance tenants.
+-- Required for MiFID II Art. 16(6) and SEC 17a-4(f) tenants.
+--
+-- Design:
+--
+-- 1. WORM flag stored in tenant_policies using key 'worm_mode'. Value 'true'
+--    enables WORM for the tenant. The flag MUST NOT be set directly — it is
+--    written only by the application-layer enableWorm() function, which
+--    requires a pre-approved M-of-N approval request.
+--
+-- 2. guard_worm_update(): BEFORE UPDATE trigger function on entities. When
+--    the entity's tenant_id maps to a WORM-enabled tenant, the trigger
+--    raises an exception unless:
+--      a. The retention floor has elapsed (entity is eligible for deletion),
+--         i.e. the row would be beyond its retention window anyway, OR
+--      b. The entity has no retention_class (not a ground-truth row).
+--    Entities with no tenant_id are not subject to WORM.
+--
+-- 3. trg_entities_worm_update: wires guard_worm_update to entities so every
+--    UPDATE passes through the check.
+--
+-- Note: DELETE is already blocked by trg_entities_retention_floor while the
+-- entity is within the retention window. Under WORM mode, UPDATE is also
+-- blocked for the same window, making ingested entities truly write-once.
+--
+-- The 'enable_worm' privileged operation type is added to the PRIVILEGED_OPERATIONS
+-- constant in approvals.ts and validated at the application layer before the
+-- flag is set.
+--
+-- Canonical docs: docs/PRD.md §7a, docs/implementation-plan-v1.md Phase 8
+-- ============================================================================
+
+-- WORM update-block trigger: rejects UPDATE on entities belonging to
+-- WORM-enabled tenants while the entity is within its retention window.
+-- Only entities with a non-null retention_class and a non-null tenant_id
+-- are checked — unclassified entities or entities without a tenant are not
+-- subject to WORM constraints.
+CREATE OR REPLACE FUNCTION guard_worm_update()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  worm_enabled  TEXT;
+  floor_days    INTEGER;
+  eligible_at   TIMESTAMP WITH TIME ZONE;
+BEGIN
+  -- No tenant_id or no retention_class — not a ground-truth row, allow update.
+  IF OLD.tenant_id IS NULL OR OLD.retention_class IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Check whether WORM is enabled for this tenant via tenant_policies.
+  SELECT value INTO worm_enabled
+    FROM tenant_policies
+   WHERE key = 'worm_mode'
+     AND tenant_id = OLD.tenant_id
+   LIMIT 1;
+
+  IF worm_enabled IS DISTINCT FROM 'true' THEN
+    -- WORM not enabled for this tenant — allow update.
+    RETURN NEW;
+  END IF;
+
+  -- WORM is enabled. Determine the retention floor for this entity's class.
+  SELECT rp.retention_floor_days INTO floor_days
+    FROM retention_policies rp
+   WHERE rp.name = OLD.retention_class;
+
+  IF floor_days IS NULL THEN
+    -- Unknown retention class — no floor configured, allow update.
+    RETURN NEW;
+  END IF;
+
+  -- Compute the eligibility timestamp.
+  eligible_at := OLD.created_at + (floor_days * INTERVAL '1 day');
+
+  IF NOW() < eligible_at THEN
+    RAISE EXCEPTION
+      'WORM: entity % (tenant=%, class=%) is immutable until % (retention floor not reached)',
+      OLD.id, OLD.tenant_id, OLD.retention_class, eligible_at;
+  END IF;
+
+  -- Retention floor elapsed — allow the update (e.g. admin correction).
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_entities_worm_update ON entities;
+CREATE TRIGGER trg_entities_worm_update
+  BEFORE UPDATE ON entities
+  FOR EACH ROW EXECUTE FUNCTION guard_worm_update();
+
+INSERT INTO _schema_version (migration) VALUES ('worm-mode-001')
+  ON CONFLICT (migration) DO NOTHING;
