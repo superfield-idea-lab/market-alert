@@ -25,7 +25,8 @@
     "./corpus-chunk-store": "./corpus-chunk-store.ts",
     "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts",
     "./backup": "./backup.ts",
-    "./worker-tokens": "./worker-tokens.ts"
+    "./worker-tokens": "./worker-tokens.ts",
+    "./tenant-policies": "./tenant-policies.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

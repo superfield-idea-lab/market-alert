@@ -512,6 +512,31 @@ CREATE TRIGGER trg_entities_retention_immutable
   BEFORE UPDATE ON entities
   FOR EACH ROW EXECUTE FUNCTION guard_retention_immutable();
 
+-- Tenant policies — per-tenant overridable configuration values.
+-- key: policy name (e.g. 'autolearn_cron_interval')
+-- value: policy value as text (callers cast to the appropriate type)
+-- tenant_id: NULL means the row is a global default; a non-NULL tenant_id
+--   overrides the global default for that tenant.
+-- Unique constraint on (tenant_id, key) allows ON CONFLICT upserts.
+-- PRUNE-A-003: frequency is tenant-overridable via this table, not a hard-coded constant.
+CREATE TABLE IF NOT EXISTS tenant_policies (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id   TEXT,
+  key         TEXT NOT NULL,
+  value       TEXT NOT NULL,
+  created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT tenant_policies_tenant_key_uniq UNIQUE NULLS NOT DISTINCT (tenant_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_policies_tenant_key
+  ON tenant_policies (tenant_id, key);
+
+-- Seed global default: autolearn cron fires every 15 minutes.
+INSERT INTO tenant_policies (tenant_id, key, value)
+VALUES (NULL, 'autolearn_cron_interval', '*/15 * * * *')
+ON CONFLICT (tenant_id, key) DO NOTHING;
+
 -- Migration version tracking table.
 -- Records each named migration that has been applied to this database.
 -- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.

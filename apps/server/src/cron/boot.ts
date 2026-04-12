@@ -13,6 +13,7 @@ import { registerRuntimeTracerJob } from './jobs/runtime-tracer';
 import { registerCodeCleanupJob } from './jobs/code-cleanup';
 import { registerDlqMonitorJob } from './jobs/dlq-monitor';
 import { registerFeatureFlagSchedulerJob } from './jobs/feature-flag-scheduler';
+import { registerAutolearnGardeningJob } from './jobs/autolearn-gardening';
 
 let scheduler: CronScheduler | null = null;
 
@@ -35,6 +36,7 @@ export function startCronScheduler(): CronScheduler {
   registerCodeCleanupJob(scheduler);
   registerDlqMonitorJob(scheduler);
   registerFeatureFlagSchedulerJob(scheduler);
+  registerAutolearnGardeningJob(scheduler);
 
   scheduler.start();
   return scheduler;
