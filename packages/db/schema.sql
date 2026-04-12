@@ -887,3 +887,97 @@ CREATE INDEX IF NOT EXISTS idx_annotation_dismissal_log_customer_dismissed
 
 INSERT INTO _schema_version (migration) VALUES ('hallucination-escalation-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Phase 8 — Retention policy engine scout (issue #78)
+--
+-- Named retention policy catalogue and a database-layer deletion block.
+--
+-- retention_policies: catalogue of named policy definitions. Each row encodes
+--   a named compliance regime (e.g. "mifid2-5yr") with a floor in whole days.
+--   The `retention_class` TEXT stored on entities and tenant_retention_policies
+--   is a foreign key (soft reference) into this table's `name` column.
+--
+-- guard_retention_floor(): BEFORE DELETE trigger function that rejects premature
+--   deletion of any entity whose retention_class maps to a named policy whose
+--   floor has not yet elapsed. The check compares NOW() against
+--   (entities.created_at + retention_floor_days * INTERVAL '1 day').
+--   Only entities with a non-null retention_class are checked — unclassified
+--   rows can be freely deleted.
+--
+-- trg_entities_retention_floor: wires guard_retention_floor to entities so
+--   every DELETE attempt is evaluated at the database layer, regardless of
+--   which role or connection issues the statement.
+--
+-- mifid2-5yr seed fixture: the canonical MiFID II Art. 16(6) 5-year regime
+--   used by Phase 8 integration tests and tenant onboarding.
+--
+-- Integration risks discovered during scout:
+--   - The retention scheduler (future issue) must connect as a privileged role
+--     that is exempt from this trigger (or the trigger must check a session var).
+--     For now the trigger blocks ALL roles, which is correct for the scout.
+--   - Legal hold (future issue) must extend the floor check: held entities
+--     cannot be deleted even after the floor has elapsed.
+--   - WORM mode (future issue) must also add an immutability layer on INSERT/UPDATE.
+--
+-- Canonical docs: docs/PRD.md §7a, docs/implementation-plan-v1.md Phase 8
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS retention_policies (
+  name                 TEXT PRIMARY KEY,
+  description          TEXT NOT NULL DEFAULT '',
+  retention_floor_days INTEGER NOT NULL CHECK (retention_floor_days >= 0),
+  created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seed the canonical MiFID II 5-year (1826 days) fixture policy.
+-- 5 years × 365 days + 1 leap day = 1826 days (conservative floor).
+INSERT INTO retention_policies (name, description, retention_floor_days)
+VALUES (
+  'mifid2-5yr',
+  'MiFID II Art. 16(6) — 5-year minimum retention for investment records',
+  1826
+)
+ON CONFLICT (name) DO NOTHING;
+
+-- Deletion-block trigger: rejects DELETE on entities whose retention floor
+-- has not yet elapsed.  Only entities with a non-null retention_class that
+-- resolves to a row in retention_policies are affected.
+CREATE OR REPLACE FUNCTION guard_retention_floor()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  floor_days INTEGER;
+BEGIN
+  IF OLD.retention_class IS NULL THEN
+    RETURN OLD;
+  END IF;
+
+  SELECT retention_floor_days INTO floor_days
+    FROM retention_policies
+   WHERE name = OLD.retention_class;
+
+  IF NOT FOUND THEN
+    -- Unknown retention_class: no floor configured, allow deletion.
+    RETURN OLD;
+  END IF;
+
+  IF NOW() < OLD.created_at + (floor_days * INTERVAL '1 day') THEN
+    RAISE EXCEPTION
+      'retention floor not reached: entity % (class=%) cannot be deleted until %',
+      OLD.id,
+      OLD.retention_class,
+      (OLD.created_at + (floor_days * INTERVAL '1 day'))::DATE
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  RETURN OLD;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_entities_retention_floor ON entities;
+CREATE TRIGGER trg_entities_retention_floor
+  BEFORE DELETE ON entities
+  FOR EACH ROW EXECUTE FUNCTION guard_retention_floor();
+
+INSERT INTO _schema_version (migration) VALUES ('retention-engine-scout-001')
+  ON CONFLICT (migration) DO NOTHING;
