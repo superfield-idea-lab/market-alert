@@ -363,9 +363,29 @@ CREATE TABLE IF NOT EXISTS audit_replica (
 CREATE INDEX IF NOT EXISTS idx_audit_replica_mirrored_at ON audit_replica (mirrored_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_replica_action ON audit_replica (action);
 
+-- Phase 7: pseudonymised session events for BDM campaign analysis.
+--
+-- session_id is an HMAC-SHA256 pseudonym (no raw user identity).
+-- tenant_id scopes rows for cross-tenant isolation (DATA-C-035).
+-- analytics_w may INSERT and SELECT only — no UPDATE, DELETE, or TRUNCATE.
+-- No foreign key or join path back to kb_app (DATA-C-031).
+CREATE TABLE IF NOT EXISTS session_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  asset_manager_id TEXT NOT NULL,
+  fund_id     TEXT NOT NULL,
+  chunk_excerpt_hash TEXT NOT NULL,
+  event_type  TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_session_events_tenant ON session_events (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_events_event_type ON session_events (event_type);
+
 GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.analytics)};
 GRANT INSERT, SELECT ON TABLE analytics_events TO ${quoteIdentifier(ROLE_NAMES.analytics)};
 GRANT INSERT, SELECT ON TABLE audit_replica TO ${quoteIdentifier(ROLE_NAMES.analytics)};
+GRANT INSERT, SELECT ON TABLE session_events TO ${quoteIdentifier(ROLE_NAMES.analytics)};
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.analytics)};
 `);
 }
@@ -865,6 +885,18 @@ async function verifyInitRemote(
     verifyTableGrant(analyticsAdmin, 'analytics_events', ROLE_NAMES.analytics, 'SELECT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'INSERT'),
     verifyTableGrant(analyticsAdmin, 'audit_replica', ROLE_NAMES.analytics, 'SELECT'),
+    // Phase 7: session_events table exists and analytics_w has INSERT+SELECT only.
+    verifyTable(analyticsAdmin, 'session_events'),
+    verifyTableGrant(analyticsAdmin, 'session_events', ROLE_NAMES.analytics, 'INSERT'),
+    verifyTableGrant(analyticsAdmin, 'session_events', ROLE_NAMES.analytics, 'SELECT'),
+    // DATA-C-031: analytics_w must not be able to CONNECT to kb_app.
+    // verifyDatabaseConnect returns null when the privilege IS granted (pass).
+    // We invert: if analytics_w CAN connect to kb_app, that is a failure.
+    verifyDatabaseConnect(admin, config.databases.app, ROLE_NAMES.analytics).then((result) =>
+      result === null
+        ? `${ROLE_NAMES.analytics} unexpectedly holds CONNECT on ${config.databases.app} (DATA-C-031)`
+        : null,
+    ),
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'INSERT'),
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'SELECT'),
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'UPDATE'),

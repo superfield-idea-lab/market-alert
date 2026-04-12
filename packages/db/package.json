@@ -33,7 +33,8 @@
     "./claim-citation-coverage": "./claim-citation-coverage.ts",
     "./rls-context": "./rls-context.ts",
     "./annotation-state-machine": "./annotation-state-machine.ts",
-    "./hallucination-escalation": "./hallucination-escalation.ts"
+    "./hallucination-escalation": "./hallucination-escalation.ts",
+    "./analytics-emitter": "./analytics-emitter.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

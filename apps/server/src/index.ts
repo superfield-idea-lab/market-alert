@@ -60,6 +60,7 @@ import { handleTranscriptionRequest } from './api/transcription';
 import { handleAnnotationsRequest } from './api/annotations';
 import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
+import { handleBdmCampaignRequest } from './api/bdm-campaign';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -404,6 +405,13 @@ export default {
     if (url.pathname.startsWith('/api/corpus-chunks')) {
       const corpusRes = await handleCorpusChunksRequest(req, url, appState);
       if (corpusRes) return withTrace(corpusRes);
+    }
+
+    // Phase 7: BDM campaign query endpoint (issue #103).
+    // GET /api/bdm/campaign — reads from kb_analytics only (DATA-C-031).
+    if (url.pathname.startsWith('/api/bdm/')) {
+      const bdmRes = await handleBdmCampaignRequest(req, url, appState);
+      if (bdmRes) return withTrace(bdmRes);
     }
 
     // Internal worker token mint + pod-terminate invalidation (issue #36).
