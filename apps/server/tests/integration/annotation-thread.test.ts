@@ -230,7 +230,12 @@ test('POST /api/annotations calls Anthropic SDK and returns 201 with agent reply
   expect(body.state).toBe('AGENT_REPLIED');
 
   // Thread must contain exactly two messages: rm then agent.
-  const thread = body.thread as { role: string; content: string; created_at: string }[];
+  const thread = body.thread as {
+    role: string;
+    author_kind: string;
+    content: string;
+    created_at: string;
+  }[];
   expect(Array.isArray(thread)).toBe(true);
   expect(thread.length).toBe(2);
   expect(thread[0].role).toBe('rm');
@@ -240,6 +245,10 @@ test('POST /api/annotations calls Anthropic SDK and returns 201 with agent reply
   expect(thread[1].role).toBe('agent');
   expect(typeof thread[1].content).toBe('string');
   expect(thread[1].content.length).toBeGreaterThan(0);
+
+  // author_kind must be present on every message (issue #68).
+  expect(thread[0].author_kind).toBe('human');
+  expect(thread[1].author_kind).toBe('agent');
 
   // Agent visibility label must be present.
   expect(body.agent_visibility).toBe('agent');
@@ -417,6 +426,76 @@ test('POST /api/annotations/:id/reject leaves no new wiki_page_version in DB', a
   expect(getRes.status).toBe(200);
   const body = (await getRes.json()) as Record<string, unknown>;
   expect(body.state).toBe('REJECTED');
+});
+
+// ---------------------------------------------------------------------------
+// author_kind field — issue #68: agent visibility labels
+// ---------------------------------------------------------------------------
+
+test('author_kind is present on all messages after POST /api/annotations', async () => {
+  const res = await fetch(`${BASE}/api/annotations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: authCookie,
+      'X-CSRF-Token': csrfToken,
+    },
+    body: JSON.stringify({
+      wiki_page_version_id: 'version-author-kind-test',
+      passage_ref: 'The fund was established in 2018.',
+      comment: 'I believe this should be 2019.',
+    }),
+  });
+  expect(res.status).toBe(201);
+  const body = (await res.json()) as Record<string, unknown>;
+
+  const thread = body.thread as Array<{ role: string; author_kind: string }>;
+  expect(Array.isArray(thread)).toBe(true);
+  expect(thread.length).toBeGreaterThan(0);
+
+  // Every message must carry author_kind.
+  for (const msg of thread) {
+    expect(msg.author_kind === 'human' || msg.author_kind === 'agent').toBe(true);
+  }
+
+  // RM message is 'human'; agent message is 'agent'.
+  const rmMessages = thread.filter((m) => m.role === 'rm');
+  const agentMessages = thread.filter((m) => m.role === 'agent');
+  expect(rmMessages.every((m) => m.author_kind === 'human')).toBe(true);
+  expect(agentMessages.every((m) => m.author_kind === 'agent')).toBe(true);
+});
+
+test('GET /api/annotations/:id returns thread with author_kind on all messages', async () => {
+  // Create the annotation.
+  const postRes = await fetch(`${BASE}/api/annotations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: authCookie,
+      'X-CSRF-Token': csrfToken,
+    },
+    body: JSON.stringify({
+      wiki_page_version_id: 'version-get-author-kind',
+      passage_ref: 'The fund was established in 2018.',
+      comment: 'I believe this should be 2019.',
+    }),
+  });
+  expect(postRes.status).toBe(201);
+  const created = (await postRes.json()) as { id: string };
+  const annotationId = created.id;
+
+  // Fetch and verify author_kind is present.
+  const getRes = await fetch(`${BASE}/api/annotations/${annotationId}`, {
+    headers: { Cookie: authCookie },
+  });
+  expect(getRes.status).toBe(200);
+  const body = (await getRes.json()) as Record<string, unknown>;
+
+  const thread = body.thread as Array<{ role: string; author_kind: string }>;
+  expect(Array.isArray(thread)).toBe(true);
+  for (const msg of thread) {
+    expect(msg.author_kind === 'human' || msg.author_kind === 'agent').toBe(true);
+  }
 });
 
 // ---------------------------------------------------------------------------
