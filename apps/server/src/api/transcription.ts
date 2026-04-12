@@ -22,14 +22,24 @@
  *   - recording_ref: string  — opaque reference to the source audio blob
  *   - transcript:    string  — the transcribed text
  *   - duration_ms:   number  — optional transcription wall-clock time
- *   - worker_path:   string  — "edge" | "cluster-worker"
+ *   - worker_path:   string  — "edge" | "cluster-worker" | "assemblyai-legacy"
  *   - status:        string  — "completed" | "failed"
+ *
+ * AssemblyAI legacy routing
+ * -------------------------
+ * The `resolveTranscriptionBackend` function checks the tenant's
+ * `assemblyai_legacy_enabled` policy before permitting the AssemblyAI path.
+ * Regulated tenants are always blocked — the gate is structural, not
+ * policy-based (issue #60). The AssemblyAI integration itself is not shipped
+ * in this issue; the routing stub is present so future work can hook in
+ * without changing the routing layer.
  */
 
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { verifyDelegatedToken } from '../auth/delegated-token';
 import { makeJson } from '../lib/response';
+import { isAssemblyAiLegacyEnabled } from 'db/tenant-config';
 
 /** Properties stored in the entity row for a transcript. */
 export interface TranscriptProperties {
@@ -37,8 +47,66 @@ export interface TranscriptProperties {
   transcript: string;
   duration_ms?: number;
   /** Which execution path produced this transcript. */
-  worker_path: 'edge' | 'cluster-worker';
+  worker_path: 'edge' | 'cluster-worker' | 'assemblyai-legacy';
   status: 'completed' | 'failed';
+}
+
+/**
+ * Transcription backend descriptor returned by `resolveTranscriptionBackend`.
+ *
+ * `backend` is one of:
+ *   - `'edge'`             — on-device PWA transcription (default for short recordings)
+ *   - `'cluster-worker'`   — cluster-internal transcription model (for long recordings)
+ *   - `'assemblyai-legacy'`— US-hosted AssemblyAI (opt-in only, non-regulated tenants)
+ *
+ * `allowed` is `false` when the requested backend cannot be used for this tenant.
+ * `reason` explains why the backend is not allowed (present only when `allowed` is false).
+ */
+export type TranscriptionBackend = 'edge' | 'cluster-worker' | 'assemblyai-legacy';
+
+export interface ResolvedTranscriptionBackend {
+  backend: TranscriptionBackend;
+  allowed: boolean;
+  reason?: string;
+}
+
+/**
+ * Resolves which transcription backend to use for a tenant and requested path.
+ *
+ * For the `assemblyai-legacy` path this function gates on the tenant's
+ * `assemblyai_legacy_enabled` policy (issue #60). The function returns
+ * `{ allowed: false }` when the path is not permitted; callers should fall
+ * back to the `cluster-worker` path or return an error.
+ *
+ * @param tenantId        Tenant identifier (null for requests without a tenant).
+ * @param requestedPath   The path the caller wants to use.
+ * @param db              Optional postgres client (for testability).
+ */
+export async function resolveTranscriptionBackend(
+  tenantId: string | null,
+  requestedPath: TranscriptionBackend,
+  db?: Parameters<typeof isAssemblyAiLegacyEnabled>[1],
+): Promise<ResolvedTranscriptionBackend> {
+  if (requestedPath === 'assemblyai-legacy') {
+    if (!tenantId) {
+      return {
+        backend: 'assemblyai-legacy',
+        allowed: false,
+        reason: 'assemblyai-legacy path requires a tenant_id',
+      };
+    }
+    const enabled = db
+      ? await isAssemblyAiLegacyEnabled(tenantId, db)
+      : await isAssemblyAiLegacyEnabled(tenantId);
+    if (!enabled) {
+      return {
+        backend: 'assemblyai-legacy',
+        allowed: false,
+        reason: 'assemblyai_legacy_enabled is not set for this tenant',
+      };
+    }
+  }
+  return { backend: requestedPath, allowed: true };
 }
 
 /**
