@@ -37,6 +37,7 @@ const TEST_PASSWORDS = {
   coding: 'coding_test_pw',
   analysis: 'analysis_test_pw',
   code_cleanup: 'code_cleanup_test_pw',
+  email_ingest: 'email_ingest_test_pw',
 };
 
 // Database names provisioned by runInitRemote
@@ -68,6 +69,7 @@ beforeAll(async () => {
     AGENT_CODING_PASSWORD: TEST_PASSWORDS.coding,
     AGENT_ANALYSIS_PASSWORD: TEST_PASSWORDS.analysis,
     AGENT_CODE_CLEANUP_PASSWORD: TEST_PASSWORDS.code_cleanup,
+    AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 
   // Bind role-specific pools to each database

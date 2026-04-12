@@ -25,9 +25,52 @@ import { generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { authCookieHeader } from '../auth/cookie-config';
 import { getClientIp } from '../security/rate-limiter';
 import { checkEmbeddingReadRate } from '../security/embedding-rate-gate';
+import { mintIngestionToken } from 'db/ingestion-token';
 
 export function isTestMode(): boolean {
   return process.env.TEST_MODE === 'true';
+}
+
+/**
+ * Test ingestion token mint — enabled only when TEST_MODE=true.
+ *
+ * POST /api/test/ingestion-token  { actorId, tenantId }
+ * → 201 with { token: "<scoped ingestion JWT>" }
+ *
+ * The token is signed with the same ephemeral key pair the test server uses,
+ * so it can be verified by POST /internal/ingestion/email in the same process.
+ *
+ * Never enabled in production.
+ */
+export async function handleTestIngestionTokenRequest(
+  req: Request,
+  url: URL,
+  _appState: AppState,
+): Promise<Response | null> {
+  if (!isTestMode()) return null;
+  if (req.method !== 'POST' || url.pathname !== '/api/test/ingestion-token') return null;
+
+  const corsHeaders = getCorsHeaders(req);
+  try {
+    const body = (await req.json().catch(() => ({}))) as { actorId?: string; tenantId?: string };
+    if (!body.actorId || !body.tenantId) {
+      return new Response(JSON.stringify({ error: 'actorId and tenantId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const token = await mintIngestionToken({ actorId: body.actorId, tenantId: body.tenantId });
+    return new Response(JSON.stringify({ token }), {
+      status: 201,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    console.error('TEST INGESTION TOKEN ERROR:', err);
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 }
 
 export async function handleTestSessionRequest(

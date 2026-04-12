@@ -20,7 +20,8 @@
     "./auth-lockout": "./auth-lockout.ts",
     "./recovery": "./recovery.ts",
     "./business-journal": "./business-journal.ts",
-    "./approvals": "./approvals.ts"
+    "./approvals": "./approvals.ts",
+    "./ingestion-token": "./ingestion-token.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

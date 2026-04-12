@@ -33,8 +33,12 @@ const AGENT_BASE_ROLE = 'agent_worker';
  * Adding a new agent type here is the only change required to provision it.
  *
  * Blueprint: WORKER-P-008 (agent-type-isolation), TQ-D-004 (per-type-filtered-views)
+ *
+ * email_ingest: Phase 2 email ingestion worker. The role has no INSERT on the
+ * entities table — writes are forced through POST /internal/ingestion/email.
+ * Blueprint: WORKER-P-001 (read-only-database-access), issue #28.
  */
-export const AGENT_TYPES = ['coding', 'analysis', 'code_cleanup'] as const;
+export const AGENT_TYPES = ['coding', 'analysis', 'code_cleanup', 'email_ingest'] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 /**

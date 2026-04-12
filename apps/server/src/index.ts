@@ -37,8 +37,13 @@ import { startDemoHealthCheck } from './cron/demo-health-check';
 import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
 import { handleHealthRequest } from './api/health';
-import { handleTestSessionRequest, isTestMode } from './api/test-session';
+import {
+  handleTestSessionRequest,
+  handleTestIngestionTokenRequest,
+  isTestMode,
+} from './api/test-session';
 import { handleReidentificationRequest } from './api/reidentification';
+import { handleIngestionRequest } from './api/ingestion';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -227,6 +232,14 @@ export default {
       if (testRes) return testRes;
     }
 
+    // Test-only ingestion token mint — available only when TEST_MODE=true.
+    // Allows integration tests to obtain a scoped ingestion token signed by the
+    // server's ephemeral key pair. Never enabled in production.
+    if (isTestMode() && url.pathname === '/api/test/ingestion-token') {
+      const testTokenRes = await handleTestIngestionTokenRequest(req, url, appState);
+      if (testTokenRes) return testTokenRes;
+    }
+
     if (url.pathname.startsWith('/api/tasks')) {
       // Delegated-token result submission route must be checked before the
       // cookie-auth tasks route so workers can submit without a user session.
@@ -265,6 +278,14 @@ export default {
     if (url.pathname.startsWith('/api/reidentification')) {
       const reidentRes = await handleReidentificationRequest(req, url, appState);
       if (reidentRes) return withTrace(reidentRes);
+    }
+
+    // API-mediated email ingestion (POST /internal/ingestion/email)
+    // Worker DB role has no INSERT on entities — writes must go through this endpoint.
+    // Blueprint: WORKER-P-001, API-W-001. Issue #28.
+    if (url.pathname.startsWith('/internal/ingestion')) {
+      const ingestionRes = await handleIngestionRequest(req, url, appState);
+      if (ingestionRes) return withTrace(ingestionRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
