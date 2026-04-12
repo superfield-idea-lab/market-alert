@@ -1,19 +1,16 @@
-name: PWA Device Helpers Tests
+name: Lighthouse CI — PWA Baseline
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'apps/web/src/components/pwa/**'
-      - 'apps/web/src/sw.ts'
-      - 'apps/web/public/manifest.json'
-      - 'apps/web/public/sw.js'
-      - 'tests/helpers/pwa.ts'
-      - 'tests/pwa/**'
+      - 'apps/web/src/**'
+      - 'apps/web/public/**'
+      - '.github/workflows/lighthouse-ci.yml'
   workflow_dispatch:
 
 jobs:
-  test:
+  lighthouse:
     runs-on: ubuntu-latest
 
     services:
@@ -36,23 +33,38 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+
       - name: Install Dependencies
         run: bun install
-      - name: Install Playwright browsers
-        run: bunx playwright install --with-deps chromium
-      - name: Run PWA tests
+
+      - name: Build web app (includes service worker)
+        run: bun run build
+        working-directory: apps/web
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
+        run: bun run db:migrate
+
+      - name: Start production preview server
         env:
           DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
           AUDIT_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
           ANALYTICS_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
-          JWT_SECRET: test-secret-for-pwa-ci
+          JWT_SECRET: test-secret-for-lighthouse-ci
           TEST_MODE: 'true'
-        run: bunx playwright test --config tests/pwa/playwright.config.mts
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pwa-playwright-report
-          path: playwright-report
+          PORT: '5174'
+        run: |
+          bun run scripts/dev-start.ts &
+          bunx wait-on http://127.0.0.1:5174 --timeout 60000
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse CI
+        env:
+          LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: lhci autorun

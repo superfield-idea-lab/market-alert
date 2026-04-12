@@ -1,0 +1,35 @@
+{
+  "ci": {
+    "collect": {
+      "url": ["http://127.0.0.1:5174/"],
+      "numberOfRuns": 1,
+      "settings": {
+        "chromeFlags": "--no-sandbox --disable-gpu --headless",
+        "onlyCategories": ["performance", "best-practices"],
+        "formFactor": "mobile",
+        "screenEmulation": {
+          "mobile": true,
+          "width": 390,
+          "height": 844,
+          "deviceScaleFactor": 3,
+          "disabled": false
+        },
+        "throttling": {
+          "rttMs": 40,
+          "throughputKbps": 10240,
+          "cpuSlowdownMultiplier": 1
+        }
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:pwa": "off",
+        "themed-omnibox": "off",
+        "splash-screen": "off"
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}
