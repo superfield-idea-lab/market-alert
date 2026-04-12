@@ -41,6 +41,18 @@ export interface RlsSessionContext {
   userId: string;
   /** The tenant the user belongs to. Null for superusers or system operations. */
   tenantId: string | null;
+  /**
+   * Pipe-delimited list of customer IDs the RM is allowed to access.
+   *
+   * Set this when querying `wiki_page_versions` to enforce my-customers-only
+   * visibility at the database layer via the `wiki_page_versions_rm_isolation`
+   * RLS policy.
+   *
+   * Pass an empty array (or omit) to grant zero wiki access for this session.
+   *
+   * Issue #50 — RLS-enforced my-customers-only wiki visibility.
+   */
+  rmCustomerIds?: string[];
 }
 
 /**
@@ -72,13 +84,20 @@ export function withRlsContext<T>(
   context: RlsSessionContext,
   callback: (tx: TxSql) => Promise<T>,
 ): Promise<T> {
-  const { userId, tenantId } = context;
+  const { userId, tenantId, rmCustomerIds } = context;
   return sqlPool.begin((tx) => {
     const userIdEsc = escapeConfigValue(userId);
     const tenantIdEsc = tenantId !== null ? escapeConfigValue(tenantId) : '';
+    // Pipe-delimited customer IDs for wiki_page_versions_rm_isolation policy.
+    // Each ID is escaped individually to guard against injection via customer names.
+    const customerIdsEsc =
+      rmCustomerIds && rmCustomerIds.length > 0
+        ? rmCustomerIds.map(escapeConfigValue).join('|')
+        : '';
     return tx
       .unsafe(`SET LOCAL app.current_user_id = '${userIdEsc}'`)
       .then(() => tx.unsafe(`SET LOCAL app.current_tenant_id = '${tenantIdEsc}'`))
+      .then(() => tx.unsafe(`SET LOCAL app.current_rm_customer_ids = '${customerIdsEsc}'`))
       .then(() => callback(tx as unknown as Sql));
   }) as unknown as Promise<T>;
 }

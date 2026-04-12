@@ -28,7 +28,8 @@
     "./worker-tokens": "./worker-tokens.ts",
     "./tenant-policies": "./tenant-policies.ts",
     "./autolearn-state-machine": "./autolearn-state-machine.ts",
-    "./claim-citation-coverage": "./claim-citation-coverage.ts"
+    "./claim-citation-coverage": "./claim-citation-coverage.ts",
+    "./rls-context": "./rls-context.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

@@ -474,6 +474,63 @@ CREATE POLICY relations_tenant_isolation
     )
   )
 `);
+
+  // ── wiki_page_versions: my-customers-only RLS (issue #50) ──────────────────
+  //
+  // An RM may only read wiki versions for customers they are assigned to.
+  // The allowed customer IDs are passed in the session variable
+  // `app.current_rm_customer_ids` as a pipe-delimited list set by
+  // withRlsContext before every query.
+  //
+  // Policy type: PERMISSIVE FOR SELECT. INSERT/UPDATE remain unrestricted for
+  // app_rw so the worker-facing write path is unaffected.
+  //
+  // Blueprint: PRD §7 — restrictive RLS enforced at the database layer, not
+  // application code. Issue #50.
+  await appAdmin.unsafe(`ALTER TABLE wiki_page_versions ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE wiki_page_versions FORCE ROW LEVEL SECURITY`);
+
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_rm_isolation ON wiki_page_versions`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_rm_isolation
+  ON wiki_page_versions
+  FOR SELECT
+  USING (
+    customer = ANY(
+      string_to_array(
+        current_setting('app.current_rm_customer_ids', true),
+        '|'
+      )
+    )
+  )
+`);
+
+  // INSERT bypass policy: app_rw must be able to write new draft versions
+  // (worker write path goes through this role). FORCE ROW LEVEL SECURITY
+  // means the owner also obeys RLS, so we must explicitly permit INSERT.
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_insert_bypass ON wiki_page_versions`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_insert_bypass
+  ON wiki_page_versions
+  FOR INSERT
+  WITH CHECK (true)
+`);
+
+  // UPDATE bypass policy: embedding updates and state changes must not be
+  // blocked by the SELECT-scoped RM isolation policy.
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_update_bypass ON wiki_page_versions`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_update_bypass
+  ON wiki_page_versions
+  FOR UPDATE
+  USING (true)
+`);
 }
 
 async function verifyRole(
@@ -709,6 +766,16 @@ async function verifyInitRemote(
     const policyCheck = await verifyRlsPolicy(appAdmin, table, `${table}_tenant_isolation`);
     if (policyCheck !== null) failures.push(policyCheck);
   }
+
+  // Verify wiki_page_versions my-customers-only RLS (issue #50)
+  const wikiRlsCheck = await verifyRlsEnabled(appAdmin, 'wiki_page_versions');
+  if (wikiRlsCheck !== null) failures.push(wikiRlsCheck);
+  const wikiPolicyCheck = await verifyRlsPolicy(
+    appAdmin,
+    'wiki_page_versions',
+    'wiki_page_versions_rm_isolation',
+  );
+  if (wikiPolicyCheck !== null) failures.push(wikiPolicyCheck);
 
   if (failures.length > 0) {
     throw new Error(`Genesis verification failed:\n- ${failures.join('\n- ')}`);

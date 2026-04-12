@@ -41,6 +41,7 @@ import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { makeJson, isSuperuser } from '../lib/response';
 import { decryptProperties } from 'core';
 import { resolveToken } from '../policies/reidentification-service';
+import { withRlsContext } from 'db/rls-context';
 
 /**
  * Shape of a WikiPageVersion entry in the version picker list.
@@ -80,13 +81,39 @@ export interface CitationResolution {
 }
 
 /**
+ * Resolve the list of customer IDs accessible to a given RM.
+ *
+ * Customer access is determined by `manages` relations in the property graph:
+ * a user entity with source_id = rmId has type='manages' relations whose
+ * target_id values are the customer entity IDs the RM is authorised to see.
+ *
+ * This query uses the admin pool (appState.sql) without RLS context so it can
+ * enumerate the RM's portfolio before the RLS session is opened.  The result
+ * is then fed into withRlsContext as rmCustomerIds to enforce the DB-layer block.
+ *
+ * Issue #50 — my-customers-only wiki visibility.
+ */
+async function getRmCustomerIds(sql: AppState['sql'], rmId: string): Promise<string[]> {
+  const rows = await sql<{ target_id: string }[]>`
+    SELECT r.target_id
+    FROM relations r
+    WHERE r.source_id = ${rmId}
+      AND r.type = 'manages'
+  `;
+  return rows.map((r) => r.target_id);
+}
+
+/**
  * Handle GET /api/wiki/pages/* routes.
  *
  * All routes enforce authentication. Accessible versions are filtered by the
  * customer ID in the URL path; archived rows are excluded. The citation
- * resolution route is fully implemented: it fetches the CorpusChunk entity,
- * decrypts its body, and (for superusers) resolves the sender token via the
- * re-identification service with audit event emission.
+ * resolution route fetches the CorpusChunk entity, decrypts its body, and
+ * (for superusers) resolves the sender token via the re-identification service.
+ *
+ * RLS: wiki_page_versions reads are wrapped in withRlsContext, which sets
+ * app.current_rm_customer_ids so the wiki_page_versions_rm_isolation policy
+ * enforces my-customers-only visibility at the database layer (issue #50).
  */
 export async function handleWikiPageViewRequest(
   req: Request,
@@ -104,6 +131,12 @@ export async function handleWikiPageViewRequest(
   const user = await getAuthenticatedUser(req);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
+  // Resolve the authenticated user's accessible customer IDs.
+  // These are fed into the RLS session context so the DB-layer policy
+  // enforces my-customers-only visibility without any application-layer
+  // filtering (PRD §7, issue #50).
+  const rmCustomerIds = await getRmCustomerIds(sql, user.id);
+
   // ── GET /api/wiki/pages/:customerId ───────────────────────────────────────
   // List all accessible versions for a customer, ordered newest-first.
 
@@ -111,22 +144,27 @@ export async function handleWikiPageViewRequest(
   if (listMatch) {
     const customerId = listMatch[1];
 
-    const rows = await sql<
-      {
-        id: string;
-        content: string;
-        created_by: string;
-        source_task: string | null;
-        created_at: Date;
-        state: string;
-      }[]
-    >`
-      SELECT id, content, created_by, source_task, created_at, state
-      FROM wiki_page_versions
-      WHERE customer = ${customerId}
-        AND state != 'archived'
-      ORDER BY created_at DESC
-    `;
+    const rows = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId: null, rmCustomerIds },
+      (tx) =>
+        tx<
+          {
+            id: string;
+            content: string;
+            created_by: string;
+            source_task: string | null;
+            created_at: Date;
+            state: string;
+          }[]
+        >`
+          SELECT id, content, created_by, source_task, created_at, state
+          FROM wiki_page_versions
+          WHERE customer = ${customerId}
+            AND state != 'archived'
+          ORDER BY created_at DESC
+        `,
+    );
 
     const versions: WikiPageVersionSummary[] = rows.map((row) => ({
       id: row.id,
@@ -149,22 +187,27 @@ export async function handleWikiPageViewRequest(
     const customerId = versionMatch[1];
     const versionId = versionMatch[2];
 
-    const rows = await sql<
-      {
-        id: string;
-        content: string;
-        created_by: string;
-        source_task: string | null;
-        created_at: Date;
-        state: string;
-      }[]
-    >`
-      SELECT id, content, created_by, source_task, created_at, state
-      FROM wiki_page_versions
-      WHERE id       = ${versionId}
-        AND customer = ${customerId}
-        AND state   != 'archived'
-    `;
+    const rows = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId: null, rmCustomerIds },
+      (tx) =>
+        tx<
+          {
+            id: string;
+            content: string;
+            created_by: string;
+            source_task: string | null;
+            created_at: Date;
+            state: string;
+          }[]
+        >`
+          SELECT id, content, created_by, source_task, created_at, state
+          FROM wiki_page_versions
+          WHERE id       = ${versionId}
+            AND customer = ${customerId}
+            AND state   != 'archived'
+        `,
+    );
 
     if (rows.length === 0) return json({ error: 'Not found' }, 404);
 
