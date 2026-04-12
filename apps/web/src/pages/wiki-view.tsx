@@ -28,6 +28,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { PendingDraftsBadge } from '../components/PendingDraftsBadge';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -325,9 +326,12 @@ export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElem
         className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50 flex flex-col overflow-hidden"
       >
         <div className="px-3 py-3 border-b border-zinc-200 shrink-0">
-          <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
-            Version History
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
+              Version History
+            </h2>
+            <PendingDraftsBadge customerId={customerId} />
+          </div>
           <p className="mt-0.5 text-[11px] text-zinc-400 font-mono truncate">{customerId}</p>
         </div>
         <div className="flex-1 overflow-y-auto p-2">

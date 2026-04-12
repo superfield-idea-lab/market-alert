@@ -50,6 +50,7 @@ import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions'
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
+import { handleWikiPendingDraftsRequest } from './api/wiki-pending-drafts';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -292,6 +293,14 @@ export default {
     if (url.pathname.startsWith('/api/deepclean')) {
       const deepcleanRes = await handleDeepcleanRequest(req, url, appState);
       if (deepcleanRes) return withTrace(deepcleanRes);
+    }
+
+    // Pending-drafts badge count for approvers (issue #48).
+    // GET /api/wiki/pending-drafts?customer_id=<id>
+    // Must be checked before the generic /api/wiki handler to avoid prefix collision.
+    if (url.pathname === '/api/wiki/pending-drafts') {
+      const pendingRes = await handleWikiPendingDraftsRequest(req, url, appState);
+      if (pendingRes) return withTrace(pendingRes);
     }
 
     // Wiki draft management + claim-citation coverage check (issue #43).
