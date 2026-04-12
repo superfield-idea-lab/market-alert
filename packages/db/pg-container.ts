@@ -16,6 +16,7 @@ const PG_USER = 'calypso';
 const PG_PASSWORD = 'calypso';
 const PG_DB = 'calypso';
 const PG_IMAGE = 'postgres:16';
+const PG_VECTOR_IMAGE = 'pgvector/pgvector:pg16';
 const READY_TIMEOUT_MS = 30_000;
 const PORT_POLL_INTERVAL_MS = 250;
 
@@ -26,6 +27,18 @@ export interface PgContainer {
 }
 
 export async function startPostgres(): Promise<PgContainer> {
+  return startPostgresWithImage(PG_IMAGE, 'postgres');
+}
+
+/**
+ * Start an ephemeral pgvector/pgvector:pg16 container.
+ * Use this when the test requires the vector extension and HNSW index.
+ */
+export async function startPgvectorPostgres(): Promise<PgContainer> {
+  return startPostgresWithImage(PG_VECTOR_IMAGE, 'pgvector');
+}
+
+async function startPostgresWithImage(image: string, label: string): Promise<PgContainer> {
   cleanupStaleContainers();
   const runResult = Bun.spawnSync([
     'docker',
@@ -40,7 +53,7 @@ export async function startPostgres(): Promise<PgContainer> {
     `POSTGRES_DB=${PG_DB}`,
     '-p',
     '0:5432',
-    PG_IMAGE,
+    image,
   ]);
 
   if (runResult.exitCode !== 0) {
@@ -50,7 +63,7 @@ export async function startPostgres(): Promise<PgContainer> {
   }
 
   const containerId = new TextDecoder().decode(runResult.stdout).trim();
-  addProcess(containerId, 'postgres');
+  addProcess(containerId, label);
 
   let port: number;
   try {

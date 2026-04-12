@@ -498,3 +498,75 @@ CREATE INDEX IF NOT EXISTS idx_approval_votes_request_id
   ON approval_votes (request_id);
 CREATE INDEX IF NOT EXISTS idx_approval_votes_approver_id
   ON approval_votes (approver_id);
+
+-- ============================================================================
+-- pgvector HNSW index -- CorpusChunk embedding column (issue #31, PRD §7)
+-- ============================================================================
+-- The entire corpus_chunks DDL block is guarded by a pgvector availability
+-- check so that databases without the vector extension (e.g. plain postgres:16
+-- in unit-test environments) do not fail during schema migration.
+--
+-- When the vector extension IS available (installed by init-remote.ts as
+-- superuser before migrateAppSchema runs) this block creates:
+--   - corpus_chunks table with a vector(768) embedding column
+--   - b-tree tenant_id index
+--   - HNSW index (m=16, ef_construction=64) on the embedding column
+--   - RLS + per-tenant isolation policy
+--
+-- PRD §7 compensating controls:
+--   1. Audit:         every similarity query emits an audit event before data flows.
+--   2. Rate limit:    per-tenant query rate enforced in the application layer.
+--   3. No public API: the embedding column is never serialised into any API response.
+--   4. RLS:           per-tenant scoping via corpus_chunks_tenant_isolation policy.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    EXECUTE $exec$
+      CREATE TABLE IF NOT EXISTS corpus_chunks (
+          id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+          tenant_id   TEXT NOT NULL,
+          source_id   TEXT,
+          content     TEXT NOT NULL,
+          embedding   vector(768),
+          chunk_index INTEGER NOT NULL DEFAULT 0,
+          created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    $exec$;
+
+    EXECUTE $exec$
+      CREATE INDEX IF NOT EXISTS idx_corpus_chunks_tenant_id
+          ON corpus_chunks (tenant_id)
+    $exec$;
+
+    EXECUTE $exec$
+      CREATE INDEX IF NOT EXISTS idx_corpus_chunks_embedding_hnsw
+          ON corpus_chunks
+          USING hnsw (embedding vector_cosine_ops)
+          WITH (m = 16, ef_construction = 64)
+    $exec$;
+
+    EXECUTE $exec$
+      ALTER TABLE corpus_chunks ENABLE ROW LEVEL SECURITY
+    $exec$;
+    EXECUTE $exec$
+      ALTER TABLE corpus_chunks FORCE ROW LEVEL SECURITY
+    $exec$;
+
+    EXECUTE $exec$
+      DROP POLICY IF EXISTS corpus_chunks_tenant_isolation ON corpus_chunks
+    $exec$;
+    EXECUTE $exec$
+      CREATE POLICY corpus_chunks_tenant_isolation
+          ON corpus_chunks
+          FOR ALL
+          USING (
+              tenant_id = current_setting('app.current_tenant_id', true)
+          )
+    $exec$;
+
+    INSERT INTO _schema_version (migration) VALUES ('pgvector-hnsw-001')
+      ON CONFLICT (migration) DO NOTHING;
+  END IF;
+END;
+$$;

@@ -196,6 +196,23 @@ async function grantConnect(
 }
 
 async function configureAppDatabase(appAdmin: ReturnType<typeof makePool>): Promise<void> {
+  // Enable the pgvector extension when it is available on this Postgres instance
+  // (requires superuser; idempotent).  Must run before migrateAppSchema so that
+  // the corpus_chunks DDL block in schema.sql can find the extension already loaded.
+  //
+  // The availability check guards against plain postgres:16 images used in unit
+  // test environments which do not ship the vector shared library.
+  //
+  // Issue #31, PRD §7 compensating controls.
+  await appAdmin.unsafe(`
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
+    CREATE EXTENSION IF NOT EXISTS vector;
+  END IF;
+END;
+$$`);
+
   await appAdmin.unsafe(`
 GRANT ALL ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.app)};
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.app)};

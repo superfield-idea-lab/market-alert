@@ -21,7 +21,8 @@
     "./recovery": "./recovery.ts",
     "./business-journal": "./business-journal.ts",
     "./approvals": "./approvals.ts",
-    "./ingestion-token": "./ingestion-token.ts"
+    "./ingestion-token": "./ingestion-token.ts",
+    "./corpus-chunk-store": "./corpus-chunk-store.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
