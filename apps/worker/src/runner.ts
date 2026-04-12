@@ -82,6 +82,12 @@ import {
   validateCodeCleanupResult,
 } from './code-cleanup-job';
 import { EMAIL_INGEST_JOB_TYPE, executeEmailIngestTask } from './email-ingest-job';
+import {
+  AUTOLEARN_JOB_TYPE,
+  AUTOLEARN_TIMEOUT_MS,
+  buildAutolearnCliPayload,
+  validateAutolearnResult,
+} from './autolearn-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -276,6 +282,17 @@ async function tryClaimAndExecute(
       // without retrying. Transient failures are thrown so stale-claim recovery
       // applies exponential backoff automatically (TQ-D-003).
       result = await executeEmailIngestTask(task.payload as Record<string, unknown>);
+    } else if (task.job_type === AUTOLEARN_JOB_TYPE) {
+      // Phase 3 scout: ephemeral pod reads ground truth and writes a draft
+      // WikiPageVersion through the API (WORKER-T-001, WORKER-T-005).
+      const cliPayload = buildAutolearnCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs: AUTOLEARN_TIMEOUT_MS,
+        sigtermGraceMs,
+      });
+      result = validateAutolearnResult(rawResult);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

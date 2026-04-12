@@ -45,6 +45,7 @@ import {
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
+import { handleWikiVersionsRequest } from './api/wiki-versions';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -297,6 +298,13 @@ export default {
     if (url.pathname.startsWith('/api/corpus-chunks')) {
       const corpusRes = await handleCorpusChunksRequest(req, url, appState);
       if (corpusRes) return withTrace(corpusRes);
+    }
+
+    // Internal worker write endpoints — require scoped Bearer token auth.
+    // These routes are reachable only from within the cluster (NetworkPolicy).
+    if (url.pathname.startsWith('/internal/wiki/')) {
+      const wikiRes = await handleWikiVersionsRequest(req, url, appState);
+      if (wikiRes) return withTrace(wikiRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
