@@ -34,7 +34,7 @@ import {
 import type { RegistrationResponseJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser, parseCookies } from './auth';
-import { verifyCsrf, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
+import { verifyCsrfAndAudit, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { signJwt } from '../auth/jwt';
 import { authCookieHeader } from '../auth/cookie-config';
 import { checkLockout, recordFailedAttempt, resetLockout } from 'db/auth-lockout';
@@ -248,7 +248,10 @@ export async function handlePasskeyRequest(
     const cookies = parseCookies(req.headers.get('Cookie'));
     const hasSession = await getAuthenticatedUser(req);
     if (hasSession) {
-      const csrfError = verifyCsrf(req, cookies);
+      const csrfError = await verifyCsrfAndAudit(req, cookies, {
+        actorId: hasSession.id,
+        path: url.pathname,
+      });
       if (csrfError)
         return new Response(csrfError.body, {
           status: 403,
@@ -526,7 +529,10 @@ export async function handlePasskeyRequest(
 
     // CSRF guard — user is authenticated so double-submit applies
     const cookies = parseCookies(req.headers.get('Cookie'));
-    const csrfError = verifyCsrf(req, cookies);
+    const csrfError = await verifyCsrfAndAudit(req, cookies, {
+      actorId: user.id,
+      path: url.pathname,
+    });
     if (csrfError) return csrfError;
 
     try {

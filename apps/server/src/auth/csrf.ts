@@ -13,6 +13,8 @@
  * for API-key-authenticated routes.
  */
 
+import { emitAuditEvent } from '../policies/audit-service';
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const CSRF_COOKIE_NAME = '__Host-csrf-token';
 
@@ -57,4 +59,60 @@ export function verifyCsrf(req: Request, cookies: Record<string, string>): Respo
   }
 
   return null;
+}
+
+/**
+ * Context for an authenticated actor, used to enrich CSRF failure audit events.
+ */
+export interface CsrfAuditContext {
+  /** The authenticated actor's user ID, or 'anonymous' when unauthenticated. */
+  actorId: string;
+  /** The URL path of the request, used as the entity_id in the audit event. */
+  path: string;
+  /** Optional client IP address. */
+  ip?: string;
+  /** Optional User-Agent string. */
+  userAgent?: string;
+}
+
+/**
+ * Verify CSRF protection for a request and emit an audit event on failure.
+ *
+ * Behaves identically to `verifyCsrf` but additionally writes a
+ * `security.csrf_mismatch` audit event whenever the check fails. The audit
+ * write is best-effort — a failure to write does not suppress the 403.
+ *
+ * Returns a 403 Response when the check fails, or null when the request is
+ * allowed to proceed.
+ */
+export async function verifyCsrfAndAudit(
+  req: Request,
+  cookies: Record<string, string>,
+  ctx: CsrfAuditContext,
+): Promise<Response | null> {
+  const result = verifyCsrf(req, cookies);
+  if (result === null) return null;
+
+  // Emit a best-effort audit event so the failure is traceable in the audit log.
+  await emitAuditEvent({
+    actor_id: ctx.actorId,
+    action: 'security.csrf_mismatch',
+    entity_type: 'request',
+    entity_id: ctx.path,
+    before: null,
+    after: {
+      method: req.method,
+      path: ctx.path,
+      reason: !cookies[CSRF_COOKIE_NAME]
+        ? 'missing_cookie'
+        : !req.headers.get('X-CSRF-Token')
+          ? 'missing_header'
+          : 'token_mismatch',
+    },
+    ip: ctx.ip,
+    user_agent: ctx.userAgent ?? req.headers.get('User-Agent') ?? undefined,
+    ts: new Date().toISOString(),
+  }).catch((err) => console.warn('[csrf] audit write failed:', err));
+
+  return result;
 }

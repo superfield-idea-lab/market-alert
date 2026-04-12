@@ -1,7 +1,7 @@
 import type { AppState } from '../index';
 import { verifyJwt, signJwt } from '../auth/jwt';
 import { revokeToken } from 'db/revocation';
-import { verifyCsrf, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
+import { verifyCsrfAndAudit, generateCsrfToken, csrfCookieHeader } from '../auth/csrf';
 import { authCookieClearHeader, authCookieHeader, getAuthToken } from '../auth/cookie-config';
 import { getClientIp, globalLimiter, tooManyRequests } from '../security/rate-limiter';
 import { authenticateApiKey } from 'db/api-keys';
@@ -105,7 +105,13 @@ export async function handleAuthRequest(
       req.method !== 'HEAD' &&
       url.pathname.startsWith('/api/auth'))
   ) {
-    const csrfError = verifyCsrf(req, cookies);
+    // Resolve the actor for audit context — use the session user id when
+    // available, otherwise fall back to 'anonymous'.
+    const sessionUser = await getAuthenticatedUser(req);
+    const csrfError = await verifyCsrfAndAudit(req, cookies, {
+      actorId: sessionUser?.id ?? 'anonymous',
+      path: url.pathname,
+    });
     if (csrfError) return csrfError;
   }
 

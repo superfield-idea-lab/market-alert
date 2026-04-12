@@ -3,7 +3,7 @@ import type { Task, TaskProperties } from 'core';
 import { createTaskSchema, patchTaskSchema } from 'core';
 import { getCorsHeaders, getAuthenticatedUser, parseCookies } from './auth';
 import { applyTaskPatchThroughBoundary } from '../policies/task-write-service';
-import { verifyCsrf } from '../auth/csrf';
+import { verifyCsrfAndAudit } from '../auth/csrf';
 import { validate } from './validation';
 import { broadcast } from '../websocket';
 import { makeJson } from '../lib/response';
@@ -46,9 +46,12 @@ export async function handleTasksRequest(
   const user = await getAuthenticatedUser(req);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
-  // CSRF check for state-mutating methods
+  // CSRF check for state-mutating methods — emits an audit event on failure
   const cookies = parseCookies(req.headers.get('Cookie'));
-  const csrfError = verifyCsrf(req, cookies);
+  const csrfError = await verifyCsrfAndAudit(req, cookies, {
+    actorId: user.id,
+    path: url.pathname,
+  });
   if (csrfError) return csrfError;
 
   // GET /api/tasks
