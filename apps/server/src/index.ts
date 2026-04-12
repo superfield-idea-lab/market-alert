@@ -48,6 +48,7 @@ import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/
 import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import { handleDeepcleanRequest } from './api/deepclean';
+import { handleWikiRequest } from './api/wiki';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -290,6 +291,15 @@ export default {
     if (url.pathname.startsWith('/api/deepclean')) {
       const deepcleanRes = await handleDeepcleanRequest(req, url, appState);
       if (deepcleanRes) return withTrace(deepcleanRes);
+    }
+
+    // Wiki draft management + claim-citation coverage check (issue #43).
+    // POST   /api/wiki/versions           — create draft, run coverage check
+    // GET    /api/wiki/versions/:id       — fetch draft by ID
+    // POST   /api/wiki/versions/:id/publish — publish (blocked for P1 drafts)
+    if (url.pathname.startsWith('/api/wiki')) {
+      const wikiRes = await handleWikiRequest(req, url, appState);
+      if (wikiRes) return withTrace(wikiRes);
     }
 
     if (url.pathname.startsWith('/api/reidentification')) {
