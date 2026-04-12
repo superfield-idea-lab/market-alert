@@ -1,46 +1,47 @@
 /**
  * @file meeting-recording-demo.tsx
  *
- * Meeting recording PWA demo card — Phase 5 edge-path scout (issue #53).
+ * Meeting recording PWA demo card — Phase 5 edge-path (issue #56).
  *
  * Edge-path invariant
  * --------------------
  * Raw audio NEVER leaves the device.  Recording stays in the browser's
- * MediaRecorder buffer only.  Transcription happens on-device using the
- * Web Speech API (SpeechRecognition).  Only the transcript text is
- * transmitted to the server via POST /internal/ingestion/transcript.
+ * MediaRecorder buffer only.  Transcription happens on-device via the
+ * `transcribeAudio()` API (whisper.cpp WASM primary, Web Speech API
+ * fallback).  Only the transcript text is transmitted to the server via
+ * POST /internal/ingestion/transcript.
  *
  * On-device transcription
  * ------------------------
- * This scout uses the Web Speech API as the on-device transcription
- * stub.  The production path will replace this with a Whisper.cpp WASM
- * model (buy-vs-build decision per ARCH blueprint, Phase 5 follow-on).
- * The API boundary — `transcribeAudio(blob): Promise<string>` — is
- * unchanged regardless of which engine backs it, so the upload path is
- * already final.
+ * Transcription is delegated to `lib/transcription.ts` which selects
+ * whisper.cpp WASM (when SharedArrayBuffer and AudioContext are available)
+ * or falls back to the browser's Web Speech API.  See
+ * `docs/technical/transcription-buy-vs-build.md` for the buy-vs-build
+ * rationale.
  *
  * Recording flow
  * ---------------
  * 1. RM selects a customer (required for tagging)
- * 2. RM starts recording — MediaRecorder captures audio locally +
- *    SpeechRecognition begins accumulating transcript text
- * 3. RM stops recording — MediaRecorder stops (audio stays in-memory),
- *    SpeechRecognition finalises
- * 4. Transcript text is shown for review
- * 5. RM confirms upload — only the text is POSTed to
+ * 2. RM starts recording — MediaRecorder captures audio locally
+ * 3. RM stops recording — MediaRecorder stops (audio stays in-memory)
+ * 4. `transcribeAudio(blob)` runs on-device → transcript text
+ * 5. Transcript text is shown for review
+ * 6. RM confirms upload — only the text is POSTed to
  *    POST /internal/ingestion/transcript (no audio bytes transmitted)
- * 6. Server writes a Transcript entity and enqueues an AUTOLEARN task
- * 7. Success state shows the returned transcript entity id
+ * 7. Server writes a Transcript entity and enqueues an AUTOLEARN task
+ * 8. Success state shows the returned transcript entity id
  *
  * What is NOT transmitted
  * ------------------------
- * The MediaRecorder Blob is used only for local playback (optional
- * review).  It is explicitly NOT included in the upload body.  The
- * network fetch call only sends { text, customer_id, recorded_at }.
+ * The MediaRecorder Blob is used only for local transcription (processed
+ * fully in-browser) and optional playback.  It is explicitly NOT included
+ * in the upload body.  The network fetch call only sends
+ * { text, customer_id, duration_s, recorded_at }.
  *
  * Canonical docs
  * ---------------
- * - SpeechRecognition: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition
+ * - transcribeAudio API: apps/web/src/lib/transcription.ts
+ * - Buy-vs-build decision: docs/technical/transcription-buy-vs-build.md
  * - MediaRecorder: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
  * - Phase 5 blueprint: docs/implementation-plan-v1.md §Phase 5
  */
@@ -49,53 +50,17 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Mic2 } from 'lucide-react';
 import { DemoCard } from '../demo-card';
 import { usePlatform } from '../../../hooks/use-platform';
-
-// ---------------------------------------------------------------------------
-// Web Speech API type stubs (not in lib.dom by default in all TS configs)
-// ---------------------------------------------------------------------------
-
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionInstance;
-    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-  }
-}
-
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  onend: (() => void) | null;
-}
-
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionResultList {
-  length: number;
-  [index: number]: SpeechRecognitionResult;
-}
-
-interface SpeechRecognitionResult {
-  isFinal: boolean;
-  0: { transcript: string };
-}
+import {
+  transcribeAudio,
+  isWhisperAvailable,
+  isSpeechRecognitionAvailable,
+} from '../../../lib/transcription';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const MAX_RECORDING_SECONDS = 180; // 3 minutes for edge path
-
-function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
-  if (typeof window === 'undefined') return null;
-  return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null;
-}
 
 function negotiateMimeType(): string {
   if (typeof window === 'undefined' || typeof window.MediaRecorder === 'undefined') return '';
@@ -113,7 +78,8 @@ function negotiateMimeType(): string {
 type RecordingPhase =
   | 'idle'
   | 'recording'
-  | 'transcribed' // recording stopped, transcript ready
+  | 'transcribing' // recording stopped, transcribeAudio() running
+  | 'transcribed' // transcript ready for review
   | 'uploading'
   | 'success'
   | 'error';
@@ -130,14 +96,14 @@ interface UploadResult {
  * Meeting recording demo card — demonstrates the Phase 5 edge-path invariant.
  *
  * Renders in the PWA demo page alongside the existing mic / camera / etc. cards.
- * The card is only fully functional when both MediaRecorder and SpeechRecognition
- * are available; it degrades gracefully when one or both are absent.
+ * Transcription is delegated to `transcribeAudio()` (whisper.cpp WASM primary,
+ * Web Speech API fallback).  Degrades gracefully when neither engine is
+ * available.
  */
 export function MeetingRecordingDemoCard() {
   const { supports } = usePlatform();
 
-  const SpeechRecognitionCtor = getSpeechRecognition();
-  const hasSpeechRecognition = SpeechRecognitionCtor !== null;
+  const hasTranscription = isWhisperAvailable() || isSpeechRecognitionAvailable();
   const featureAvailable = supports.mediaRecorder && supports.getUserMedia;
 
   // ------------------------------------------------------------------
@@ -159,13 +125,11 @@ export function MeetingRecordingDemoCard() {
   const mimeType = useRef<string>(negotiateMimeType());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const interimRef = useRef<string>('');
-  const finalRef = useRef<string>('');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordedAtRef = useRef<string>('');
+  const transcribeAbortRef = useRef<AbortController | null>(null);
 
   // ------------------------------------------------------------------
   // Cleanup on unmount
@@ -174,7 +138,7 @@ export function MeetingRecordingDemoCard() {
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      recognitionRef.current?.stop();
+      transcribeAbortRef.current?.abort();
       if (timerRef.current) clearInterval(timerRef.current);
       if (autoStopRef.current) clearTimeout(autoStopRef.current);
     };
@@ -202,8 +166,6 @@ export function MeetingRecordingDemoCard() {
       return;
     }
     setErrorMessage(null);
-    finalRef.current = '';
-    interimRef.current = '';
     chunksRef.current = [];
 
     try {
@@ -229,40 +191,6 @@ export function MeetingRecordingDemoCard() {
       };
       recorder.start();
 
-      // SpeechRecognition — on-device transcription (stub for production WASM)
-      if (SpeechRecognitionCtor) {
-        const recognition = new SpeechRecognitionCtor();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
-          let interim = '';
-          for (let i = 0; i < event.results.length; i++) {
-            const result = event.results[i];
-            if (result.isFinal) {
-              finalRef.current += result[0].transcript + ' ';
-            } else {
-              interim += result[0].transcript;
-            }
-          }
-          interimRef.current = interim;
-          setTranscript(finalRef.current + interim);
-        };
-
-        recognition.onerror = () => {
-          // Non-fatal — continue recording without live transcript
-        };
-
-        recognition.onend = () => {
-          // Finalise transcript when recognition stops
-          setTranscript((finalRef.current + interimRef.current).trim());
-        };
-
-        recognition.start();
-        recognitionRef.current = recognition;
-      }
-
       setPhase('recording');
       setElapsed(0);
 
@@ -281,23 +209,51 @@ export function MeetingRecordingDemoCard() {
         setErrorMessage('Failed to access microphone.');
       }
     }
-  }, [customerId, SpeechRecognitionCtor]);
+  }, [customerId]);
 
   // ------------------------------------------------------------------
-  // Stop recording
+  // Stop recording → run on-device transcription
   // ------------------------------------------------------------------
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-    // Final transcript is set by recognition.onend or uses current accumulated text
-    setTranscript((finalRef.current + interimRef.current).trim());
-    setPhase('transcribed');
+    if (mediaRecorderRef.current?.state !== 'recording') return;
+
+    setPhase('transcribing');
+
+    // Collect the final data chunk before stopping
+    mediaRecorderRef.current.requestData();
+    mediaRecorderRef.current.stop();
+
+    // Wait for onstop (synchronous after stop()), then run transcribeAudio.
+    // We use a one-shot ondataavailable + onstop sequence; the chunks are
+    // already accumulated in chunksRef.current.
+    const runTranscription = async () => {
+      const blob = new Blob(chunksRef.current, {
+        type: mimeType.current || 'audio/webm',
+      });
+
+      const ac = new AbortController();
+      transcribeAbortRef.current = ac;
+
+      try {
+        const text = await transcribeAudio(blob, { signal: ac.signal });
+        setTranscript(text);
+        setPhase('transcribed');
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return; // unmounted
+        setTranscript('');
+        setPhase('transcribed'); // allow manual entry even if transcription failed
+      } finally {
+        transcribeAbortRef.current = null;
+        // Audio chunks are no longer needed after transcription
+        chunksRef.current = [];
+      }
+    };
+
+    // Defer to next tick so onstop fires and stream tracks are released first
+    setTimeout(() => {
+      void runTranscription();
+    }, 0);
   }, []);
 
   // ------------------------------------------------------------------
@@ -305,8 +261,7 @@ export function MeetingRecordingDemoCard() {
   // ------------------------------------------------------------------
 
   const uploadTranscript = useCallback(async () => {
-    const text = (finalRef.current + interimRef.current).trim();
-    if (!text) {
+    if (!transcript.trim()) {
       setErrorMessage('No transcript to upload. Try speaking during the recording.');
       return;
     }
@@ -315,13 +270,13 @@ export function MeetingRecordingDemoCard() {
 
     try {
       // EDGE-PATH INVARIANT: Only JSON text is sent.
-      // The MediaRecorder Blob (chunksRef.current) is intentionally omitted.
+      // The MediaRecorder Blob is intentionally omitted.
       const res = await fetch('/internal/ingestion/transcript', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          text,
+          text: transcript.trim(),
           customer_id: customerId.trim(),
           duration_s: elapsed,
           recorded_at: recordedAtRef.current,
@@ -338,22 +293,18 @@ export function MeetingRecordingDemoCard() {
       const result = (await res.json()) as UploadResult;
       setUploadedId(result.id);
       setPhase('success');
-
-      // Audio chunks are no longer needed — discard them
-      chunksRef.current = [];
     } catch (err) {
       setPhase('error');
       setErrorMessage(err instanceof Error ? err.message : 'Upload failed.');
     }
-  }, [customerId, elapsed]);
+  }, [customerId, elapsed, transcript]);
 
   // ------------------------------------------------------------------
   // Reset
   // ------------------------------------------------------------------
 
   const handleReset = useCallback(() => {
-    finalRef.current = '';
-    interimRef.current = '';
+    transcribeAbortRef.current?.abort();
     chunksRef.current = [];
     setTranscript('');
     setUploadedId(null);
@@ -381,14 +332,14 @@ export function MeetingRecordingDemoCard() {
       platformNotes={
         !featureAvailable
           ? 'MediaRecorder or getUserMedia not available on this platform.'
-          : !hasSpeechRecognition
-            ? 'SpeechRecognition not available — transcript will be empty until Whisper.cpp WASM lands.'
+          : !hasTranscription
+            ? 'No on-device transcription available (whisper.cpp WASM and Web Speech API both absent).'
             : undefined
       }
       permissionState={permissionState}
       onRequestPermission={startRecording}
     >
-      {/* Customer ID input — always visible */}
+      {/* Customer ID input — always visible in idle / error */}
       {(phase === 'idle' || phase === 'error') && (
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
@@ -426,12 +377,6 @@ export function MeetingRecordingDemoCard() {
             <span className="text-xs text-zinc-400">/ {MAX_RECORDING_SECONDS}s max</span>
           </div>
 
-          {transcript && (
-            <p className="text-xs text-zinc-500 italic line-clamp-3 bg-zinc-50 rounded p-2">
-              {transcript}
-            </p>
-          )}
-
           <button
             onClick={stopRecording}
             className="self-start px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors"
@@ -440,8 +385,16 @@ export function MeetingRecordingDemoCard() {
           </button>
 
           <p className="text-xs text-zinc-400">
-            Audio stays on device — only the transcript will be uploaded.
+            Audio stays on device — transcript runs on-device after stop.
           </p>
+        </div>
+      )}
+
+      {/* On-device transcription running */}
+      {phase === 'transcribing' && (
+        <div className="flex items-center gap-2 text-sm text-zinc-600">
+          <span className="animate-spin h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full" />
+          Transcribing on-device…
         </div>
       )}
 
