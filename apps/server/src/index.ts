@@ -27,6 +27,7 @@ import { extractTraceId, traceLog, log } from 'core';
 import { startCronScheduler } from './cron/boot';
 import { websocketHandler, type WsClientData } from './websocket';
 import { handleAdminRequest } from './api/admin';
+import { handleApprovalsRequest } from './api/approvals';
 import { isSuperuser } from './lib/response';
 import { handleUsersRequest } from './api/users';
 import { seedSuperuser } from './seed/superuser';
@@ -249,6 +250,11 @@ export default {
     if (url.pathname.startsWith('/api/admin')) {
       const adminRes = await handleAdminRequest(req, url, appState);
       if (adminRes) return adminRes;
+    }
+
+    if (url.pathname.startsWith('/api/approvals')) {
+      const approvalsRes = await handleApprovalsRequest(req, url, appState);
+      if (approvalsRes) return withTrace(approvalsRes);
     }
 
     if (url.pathname.startsWith('/api/users')) {

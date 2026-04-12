@@ -446,3 +446,55 @@ CREATE TABLE IF NOT EXISTS _schema_version (
 -- INSERT … ON CONFLICT DO NOTHING makes this idempotent.
 INSERT INTO _schema_version (migration) VALUES ('baseline-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- M-of-N approval for privileged operations (issue #24)
+--
+-- Root-key and bulk-export operations route through a pending-approval record.
+-- The action does not execute until at least M of N designated approvers have
+-- signed off. Approvals and rejections are audited.
+--
+-- operation_type: identifies the protected operation (e.g. 'root_key_rotate',
+--                 'bulk_export').
+-- payload:        operation-specific parameters needed at execution time.
+-- requested_by:   user ID of the initiating actor.
+-- required_approvals: M — the quorum threshold.
+-- status: 'pending' → 'approved' (quorum reached) → 'executed' | 'rejected'
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS approval_requests (
+  id                  TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  operation_type      TEXT NOT NULL,
+  payload             JSONB NOT NULL DEFAULT '{}',
+  requested_by        TEXT NOT NULL,
+  required_approvals  INTEGER NOT NULL DEFAULT 2 CHECK (required_approvals >= 1),
+  status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'approved', 'rejected', 'executed')),
+  created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_requests_status
+  ON approval_requests (status);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_requested_by
+  ON approval_requests (requested_by);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_operation_type
+  ON approval_requests (operation_type);
+
+-- Individual approval or rejection votes on a pending approval request.
+-- approver_id: user ID of the designated approver.
+-- decision: 'approved' or 'rejected'.
+-- One vote per (request, approver) pair — enforced by unique constraint.
+CREATE TABLE IF NOT EXISTS approval_votes (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  request_id    TEXT NOT NULL REFERENCES approval_requests(id) ON DELETE CASCADE,
+  approver_id   TEXT NOT NULL,
+  decision      TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+  comment       TEXT,
+  created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (request_id, approver_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_approval_votes_request_id
+  ON approval_votes (request_id);
+CREATE INDEX IF NOT EXISTS idx_approval_votes_approver_id
+  ON approval_votes (approver_id);

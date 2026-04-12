@@ -19,7 +19,8 @@
     "./feature-flags": "./feature-flags.ts",
     "./auth-lockout": "./auth-lockout.ts",
     "./recovery": "./recovery.ts",
-    "./business-journal": "./business-journal.ts"
+    "./business-journal": "./business-journal.ts",
+    "./approvals": "./approvals.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
