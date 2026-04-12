@@ -56,6 +56,7 @@ import {
   registerTranscriptEntityType,
 } from './api/transcript-ingestion';
 import { handleTranscriptionRequest } from './api/transcription';
+import { handleAnnotationsRequest } from './api/annotations';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -332,6 +333,17 @@ export default {
     if (url.pathname.startsWith('/api/wiki/pages')) {
       const wikiPageRes = await handleWikiPageViewRequest(req, url, appState);
       if (wikiPageRes) return withTrace(wikiPageRes);
+    }
+
+    // Annotation thread API — Phase 6 scout stub (issue #62).
+    // POST   /api/annotations                   — open a new annotation thread
+    // GET    /api/annotations/:id               — fetch an annotation thread
+    // POST   /api/annotations/:id/accept        — accept agent reply, publish new WikiPageVersion
+    // POST   /api/annotations/:id/reject        — reject agent reply, no version change
+    // Scout stub: all routes return 501 Not Implemented (Phase 6 follow-on).
+    if (url.pathname.startsWith('/api/annotations')) {
+      const annotationsRes = await handleAnnotationsRequest(req, url, appState);
+      if (annotationsRes) return withTrace(annotationsRes);
     }
 
     if (url.pathname.startsWith('/api/reidentification')) {

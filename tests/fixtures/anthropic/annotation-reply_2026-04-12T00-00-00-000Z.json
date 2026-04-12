@@ -1,0 +1,48 @@
+{
+  "recorded_at": "2026-04-12T00:00:00.000Z",
+  "service": "anthropic",
+  "request": {
+    "method": "POST",
+    "url": "https://api.anthropic.com/v1/messages",
+    "headers": {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": "[REDACTED]"
+    },
+    "body": {
+      "model": "claude-3-haiku-20240307",
+      "max_tokens": 512,
+      "messages": [
+        {
+          "role": "user",
+          "content": "You are a knowledge base correction assistant. An RM has flagged the following passage as potentially incorrect:\n\nPassage: \"The fund was established in 2018.\"\nRM comment: \"I believe this should be 2019 based on the incorporation documents.\"\n\nProvide a concise corrected version of the passage."
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "statusText": "OK",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "id": "msg_annotation_01XFDUDYJgAACzvnptvVoYEL",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-3-haiku-20240307",
+      "content": [
+        {
+          "type": "text",
+          "text": "The fund was established in 2019."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 72,
+        "output_tokens": 10
+      }
+    }
+  }
+}
