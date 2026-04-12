@@ -65,6 +65,7 @@
 
 import { fetchNewMessages } from 'core/imap-etl-worker';
 import type { ImapConnectionConfig, LandedMessage } from 'core/imap-etl-worker';
+import { getIngestionInstruments, recordHopMetrics } from 'core/telemetry';
 
 /** The job_type string for the EMAIL_INGEST task type. */
 export const EMAIL_INGEST_JOB_TYPE = 'email_ingest' as const;
@@ -238,6 +239,8 @@ export async function executeEmailIngestTask(
   const batchSize = typeof payload['batch_size'] === 'number' ? payload['batch_size'] : 50;
 
   const config = resolveImapConfig(env);
+  const instruments = getIngestionInstruments();
+  const taskStart = Date.now();
 
   try {
     const result = await fetchNewMessages(config, {
@@ -245,6 +248,13 @@ export async function executeEmailIngestTask(
       batchSize,
       mailbox: 'INBOX',
     });
+
+    // Record the number of fetched messages (using mailbox_ref as a tenant-safe label).
+    instruments.fetchedCounter.add(result.messages.length, {
+      mailbox_ref: mailboxRef,
+    });
+
+    recordHopMetrics('ingestion.task', Date.now() - taskStart, { mailbox_ref: mailboxRef }, false);
 
     return {
       status: 'completed',
@@ -258,6 +268,9 @@ export async function executeEmailIngestTask(
       err instanceof Error && (err as Error & { permanent?: boolean }).permanent === true;
 
     if (isPermanent) {
+      // Record error metric for permanent failures.
+      recordHopMetrics('ingestion.task', Date.now() - taskStart, { mailbox_ref: mailboxRef }, true);
+
       // Return a permanent-failure result so the caller can mark task dead.
       return {
         status: 'failed',
@@ -269,6 +282,9 @@ export async function executeEmailIngestTask(
         error: err instanceof Error ? err.message : String(err),
       };
     }
+
+    // Record error metric for transient failures too.
+    recordHopMetrics('ingestion.task', Date.now() - taskStart, { mailbox_ref: mailboxRef }, true);
 
     // Transient error — rethrow so stale-claim recovery applies backoff.
     throw err;
