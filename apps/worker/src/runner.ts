@@ -81,6 +81,7 @@ import {
   buildCodeCleanupCliPayload,
   validateCodeCleanupResult,
 } from './code-cleanup-job';
+import { EMAIL_INGEST_JOB_TYPE, executeEmailIngestTask } from './email-ingest-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -267,6 +268,14 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateCodeCleanupResult(rawResult);
+    } else if (task.job_type === EMAIL_INGEST_JOB_TYPE) {
+      // IMAP ingestion — executed directly by the worker, not via a CLI subprocess.
+      // Credentials are resolved from environment variables injected by the
+      // Kubernetes secret mount. Permanent failures (auth, missing mailbox) are
+      // returned as a result with permanent:true so the caller marks the task dead
+      // without retrying. Transient failures are thrown so stale-claim recovery
+      // applies exponential backoff automatically (TQ-D-003).
+      result = await executeEmailIngestTask(task.payload as Record<string, unknown>);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

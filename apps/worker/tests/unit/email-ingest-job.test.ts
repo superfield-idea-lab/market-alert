@@ -1,167 +1,223 @@
 /**
- * Unit tests for email-ingest-job.ts stubs.
+ * Unit tests for the email_ingest job handler.
  *
- * Phase 2 dev-scout (issue #25). These tests verify that:
- *   - The job-type constant is correct.
- *   - The payload builder produces the expected shape.
- *   - The result validator accepts valid results and rejects invalid ones.
- *
- * No mocks. No vi.fn / vi.mock / vi.spyOn. All assertions are against
- * pure synchronous functions — no I/O or subprocess calls are made.
+ * Tests pure helper functions without spawning real IMAP connections.
+ * Integration tests (real Greenmail) live in tests/integration/imap-ingest.test.ts.
  */
 
 import { describe, test, expect } from 'vitest';
 import {
   EMAIL_INGEST_JOB_TYPE,
-  EMAIL_INGEST_TIMEOUT_MS,
+  resolveImapConfig,
   buildEmailIngestPayload,
   validateEmailIngestResult,
 } from '../../src/email-ingest-job';
 
-// ---------------------------------------------------------------------------
-// Job-type constant
-// ---------------------------------------------------------------------------
-
 describe('EMAIL_INGEST_JOB_TYPE', () => {
-  test('is the string "email_ingest"', () => {
+  test('equals email_ingest', () => {
     expect(EMAIL_INGEST_JOB_TYPE).toBe('email_ingest');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Timeout constant
-// ---------------------------------------------------------------------------
+describe('resolveImapConfig', () => {
+  test('resolves all fields from environment', () => {
+    const cfg = resolveImapConfig({
+      IMAP_HOST: 'imap.example.com',
+      IMAP_PORT: '993',
+      IMAP_SECURE: 'true',
+      IMAP_USER: 'user@example.com',
+      IMAP_PASSWORD: 'secret',
+    });
+    expect(cfg).toEqual({
+      host: 'imap.example.com',
+      port: 993,
+      secure: true,
+      user: 'user@example.com',
+      password: 'secret',
+      tlsRejectUnauthorized: true,
+    });
+  });
 
-describe('EMAIL_INGEST_TIMEOUT_MS', () => {
-  test('is a positive number (5 minutes)', () => {
-    expect(typeof EMAIL_INGEST_TIMEOUT_MS).toBe('number');
-    expect(EMAIL_INGEST_TIMEOUT_MS).toBeGreaterThan(0);
-    expect(EMAIL_INGEST_TIMEOUT_MS).toBe(5 * 60 * 1_000);
+  test('defaults secure to true when IMAP_SECURE is not set', () => {
+    const cfg = resolveImapConfig({
+      IMAP_HOST: 'imap.example.com',
+      IMAP_PORT: '993',
+      IMAP_USER: 'user@example.com',
+      IMAP_PASSWORD: 'secret',
+    });
+    expect(cfg.secure).toBe(true);
+  });
+
+  test('sets secure=false when IMAP_SECURE=false', () => {
+    const cfg = resolveImapConfig({
+      IMAP_HOST: 'localhost',
+      IMAP_PORT: '3143',
+      IMAP_SECURE: 'false',
+      IMAP_USER: 'u',
+      IMAP_PASSWORD: 'p',
+    });
+    expect(cfg.secure).toBe(false);
+  });
+
+  test('sets tlsRejectUnauthorized=false when env var is false', () => {
+    const cfg = resolveImapConfig({
+      IMAP_HOST: 'localhost',
+      IMAP_PORT: '3143',
+      IMAP_USER: 'u',
+      IMAP_PASSWORD: 'p',
+      IMAP_TLS_REJECT_UNAUTHORIZED: 'false',
+    });
+    expect(cfg.tlsRejectUnauthorized).toBe(false);
+  });
+
+  test('throws when IMAP_HOST is missing', () => {
+    expect(() =>
+      resolveImapConfig({ IMAP_PORT: '993', IMAP_USER: 'u', IMAP_PASSWORD: 'p' }),
+    ).toThrow('IMAP_HOST');
+  });
+
+  test('throws when IMAP_PORT is missing', () => {
+    expect(() => resolveImapConfig({ IMAP_HOST: 'h', IMAP_USER: 'u', IMAP_PASSWORD: 'p' })).toThrow(
+      'IMAP_PORT',
+    );
+  });
+
+  test('throws when IMAP_USER is missing', () => {
+    expect(() =>
+      resolveImapConfig({ IMAP_HOST: 'h', IMAP_PORT: '993', IMAP_PASSWORD: 'p' }),
+    ).toThrow('IMAP_USER');
+  });
+
+  test('throws when IMAP_PASSWORD is missing', () => {
+    expect(() => resolveImapConfig({ IMAP_HOST: 'h', IMAP_PORT: '993', IMAP_USER: 'u' })).toThrow(
+      'IMAP_PASSWORD',
+    );
+  });
+
+  test('throws when IMAP_PORT is not a valid number', () => {
+    expect(() =>
+      resolveImapConfig({
+        IMAP_HOST: 'h',
+        IMAP_PORT: 'abc',
+        IMAP_USER: 'u',
+        IMAP_PASSWORD: 'p',
+      }),
+    ).toThrow('IMAP_PORT');
+  });
+
+  test('throws when IMAP_PORT is out of range', () => {
+    expect(() =>
+      resolveImapConfig({
+        IMAP_HOST: 'h',
+        IMAP_PORT: '99999',
+        IMAP_USER: 'u',
+        IMAP_PASSWORD: 'p',
+      }),
+    ).toThrow('IMAP_PORT');
   });
 });
-
-// ---------------------------------------------------------------------------
-// buildEmailIngestPayload
-// ---------------------------------------------------------------------------
 
 describe('buildEmailIngestPayload', () => {
-  test('includes task id, job_type, and agent_type', () => {
-    const payload = buildEmailIngestPayload('task-001', 'email_ingest', {
-      mailbox_ref: 'mbox-abc',
-      uid: '42',
-      tenant_ref: 'tenant-xyz',
-      ingest_ref: 'mbox-abc-42',
+  test('builds payload with default since_uid and batch_size', () => {
+    const p = buildEmailIngestPayload('my-mailbox');
+    expect(p).toEqual({
+      mailbox_ref: 'my-mailbox',
+      since_uid: 0,
+      batch_size: 50,
     });
-
-    expect(payload.id).toBe('task-001');
-    expect(payload.job_type).toBe(EMAIL_INGEST_JOB_TYPE);
-    expect(payload.agent_type).toBe('email_ingest');
   });
 
-  test('merges all payload fields into the returned object', () => {
-    const raw = {
-      mailbox_ref: 'mbox-001',
-      uid: '99',
-      tenant_ref: 'tenant-001',
-      ingest_ref: 'mbox-001-99',
-    };
-    const result = buildEmailIngestPayload('task-002', 'email_ingest', raw);
-
-    expect(result.mailbox_ref).toBe('mbox-001');
-    expect(result.uid).toBe('99');
-    expect(result.tenant_ref).toBe('tenant-001');
-    expect(result.ingest_ref).toBe('mbox-001-99');
-  });
-
-  test('does not mutate the input payload object', () => {
-    const raw = { mailbox_ref: 'mbox-x', uid: '1', tenant_ref: 't', ingest_ref: 'mbox-x-1' };
-    const before = { ...raw };
-    buildEmailIngestPayload('task-003', 'email_ingest', raw);
-    expect(raw).toEqual(before);
+  test('accepts custom since_uid and batch_size', () => {
+    const p = buildEmailIngestPayload('ref', 42, 10);
+    expect(p).toEqual({
+      mailbox_ref: 'ref',
+      since_uid: 42,
+      batch_size: 10,
+    });
   });
 });
 
-// ---------------------------------------------------------------------------
-// validateEmailIngestResult
-// ---------------------------------------------------------------------------
-
 describe('validateEmailIngestResult', () => {
-  const validResult = {
-    email_id: 'email-ent-001',
-    chunk_ids: ['chunk-001', 'chunk-002'],
-    chunk_count: 2,
-    ingest_ref: 'mbox-abc-42',
-    status: 'completed' as const,
-  };
-
-  test('accepts a valid result object', () => {
-    const out = validateEmailIngestResult(validResult);
-    expect(out.email_id).toBe('email-ent-001');
-    expect(out.chunk_ids).toEqual(['chunk-001', 'chunk-002']);
-    expect(out.chunk_count).toBe(2);
-    expect(out.ingest_ref).toBe('mbox-abc-42');
-    expect(out.status).toBe('completed');
+  test('validates a well-formed completed result', () => {
+    const raw = {
+      status: 'completed',
+      fetched_count: 5,
+      failed_uids: [101],
+      highest_uid: 200,
+      mailbox_ref: 'primary',
+    };
+    const r = validateEmailIngestResult(raw);
+    expect(r.fetched_count).toBe(5);
+    expect(r.failed_uids).toEqual([101]);
+    expect(r.highest_uid).toBe(200);
+    expect(r.mailbox_ref).toBe('primary');
   });
 
-  test('throws when email_id is missing', () => {
-    const bad = { ...validResult, email_id: undefined };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /email_id/,
-    );
+  test('validates a permanent-failure result', () => {
+    const raw = {
+      status: 'failed',
+      fetched_count: 0,
+      failed_uids: [],
+      highest_uid: 0,
+      mailbox_ref: 'primary',
+      permanent: true,
+      error: 'Permanent IMAP error: Authentication failed',
+    };
+    const r = validateEmailIngestResult(raw);
+    expect(r.permanent).toBe(true);
+    expect(r.status).toBe('failed');
   });
 
-  test('throws when email_id is not a string', () => {
-    const bad = { ...validResult, email_id: 42 };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /email_id/,
-    );
+  test('throws when fetched_count is missing', () => {
+    expect(() =>
+      validateEmailIngestResult({ failed_uids: [], highest_uid: 0, mailbox_ref: 'x' }),
+    ).toThrow('fetched_count');
   });
 
-  test('throws when chunk_ids is missing', () => {
-    const bad = { ...validResult, chunk_ids: undefined };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /chunk_ids/,
-    );
+  test('throws when fetched_count is not a number', () => {
+    expect(() =>
+      validateEmailIngestResult({
+        fetched_count: 'five',
+        failed_uids: [],
+        highest_uid: 0,
+        mailbox_ref: 'x',
+      }),
+    ).toThrow('fetched_count');
   });
 
-  test('throws when chunk_ids is not an array', () => {
-    const bad = { ...validResult, chunk_ids: 'not-an-array' };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /chunk_ids/,
-    );
+  test('throws when failed_uids is missing', () => {
+    expect(() =>
+      validateEmailIngestResult({ fetched_count: 0, highest_uid: 0, mailbox_ref: 'x' }),
+    ).toThrow('failed_uids');
   });
 
-  test('throws when chunk_count is missing', () => {
-    const bad = { ...validResult, chunk_count: undefined };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /chunk_count/,
-    );
+  test('throws when failed_uids is not an array', () => {
+    expect(() =>
+      validateEmailIngestResult({
+        fetched_count: 0,
+        failed_uids: 'none',
+        highest_uid: 0,
+        mailbox_ref: 'x',
+      }),
+    ).toThrow('failed_uids');
   });
 
-  test('throws when chunk_count is not a number', () => {
-    const bad = { ...validResult, chunk_count: '5' };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /chunk_count/,
-    );
+  test('throws when highest_uid is missing', () => {
+    expect(() =>
+      validateEmailIngestResult({ fetched_count: 0, failed_uids: [], mailbox_ref: 'x' }),
+    ).toThrow('highest_uid');
   });
 
-  test('throws when ingest_ref is missing', () => {
-    const bad = { ...validResult, ingest_ref: undefined };
-    expect(() => validateEmailIngestResult(bad as unknown as Record<string, unknown>)).toThrow(
-      /ingest_ref/,
-    );
+  test('throws when mailbox_ref is missing', () => {
+    expect(() =>
+      validateEmailIngestResult({ fetched_count: 0, failed_uids: [], highest_uid: 0 }),
+    ).toThrow('mailbox_ref');
   });
+});
 
-  test('accepts empty chunk_ids array (zero-chunk email body)', () => {
-    const empty = { ...validResult, chunk_ids: [], chunk_count: 0 };
-    const out = validateEmailIngestResult(empty);
-    expect(out.chunk_ids).toHaveLength(0);
-    expect(out.chunk_count).toBe(0);
-  });
-
-  test('passes through extra fields without stripping them', () => {
-    const withExtra = { ...validResult, extra_field: 'preserved' };
-    const out = validateEmailIngestResult(withExtra);
-    expect((out as Record<string, unknown>)['extra_field']).toBe('preserved');
+describe('classifyImapError (via import)', () => {
+  test('can import classifyImapError from core/imap-etl-worker', async () => {
+    const { classifyImapError } = await import('core/imap-etl-worker');
+    expect(typeof classifyImapError).toBe('function');
   });
 });
