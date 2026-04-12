@@ -579,6 +579,43 @@ CREATE INDEX IF NOT EXISTS idx_approval_votes_request_id
 CREATE INDEX IF NOT EXISTS idx_approval_votes_approver_id
   ON approval_votes (approver_id);
 
+-- ---------------------------------------------------------------------------
+-- Wiki page versions (issue #39) — autolearn draft output
+--
+-- Stores versioned drafts of wiki pages written by the autolearn worker.
+-- All worker-written rows land in 'draft' state.  Publication (moving to
+-- 'published') is handled by the Phase 6 publication gate UI and is out of
+-- scope here.
+--
+-- page_id:     Opaque identifier for the wiki page (dept + customer slug or
+--              any client-supplied stable key).
+-- dept:        Department scope — must match the token's dept claim.
+-- customer:    Customer scope — must match the token's customer claim.
+-- content:     Markdown body of the draft.
+-- state:       Lifecycle state — 'draft' | 'published' | 'archived'.
+-- created_by:  actor_id of the worker token (sub claim).
+-- source_task: task_queue.id that triggered this write, for auditability.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS wiki_page_versions (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  page_id       TEXT NOT NULL,
+  dept          TEXT NOT NULL,
+  customer      TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  state         TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (state IN ('draft', 'published', 'archived')),
+  created_by    TEXT NOT NULL,
+  source_task   TEXT,
+  created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_page_id
+  ON wiki_page_versions (page_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_dept_customer
+  ON wiki_page_versions (dept, customer);
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_state
+  ON wiki_page_versions (state);
+
 -- ============================================================================
 -- pgvector HNSW index -- CorpusChunk embedding column (issue #31, PRD §7)
 -- ============================================================================

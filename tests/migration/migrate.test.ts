@@ -10,6 +10,8 @@ import { startPostgres, type PgContainer } from '../../packages/db/pg-container'
 const EXPECTED_TABLES = [
   '_schema_version',
   'api_keys',
+  'approval_requests',
+  'approval_votes',
   'auth_lockout',
   'business_journal',
   'entities',
@@ -31,7 +33,9 @@ const EXPECTED_TABLES = [
   'task_queue_view_email_ingest',
   'task_queue_view_transcription',
   'tenant_retention_policies',
+  'wiki_page_versions',
   'worker_credentials',
+  'worker_tokens',
 ] as const;
 
 let pg: PgContainer;

@@ -1,22 +1,26 @@
 /**
- * Scoped single-use worker token auth (issue #36).
+ * Scoped single-use worker token auth (issues #36 and #39).
  *
- * issueWorkerToken produces a short-lived JWT that authorises exactly one
- * wiki-write operation for a specific pod + task scope.  The token is consumed
- * on first use by stamping consumed_at in worker_tokens and inserting the jti
- * into revoked_tokens; a second use is rejected at the DB layer.
+ * Two token families are managed here:
  *
- * Token payload shape:
- *   { sub: pod_id, agent_type, task_scope, jti, scope: 'worker_task', exp }
+ * 1. Pod-scoped task tokens (scope: 'worker_task') — issue #36
+ *    issueWorkerToken produces a short-lived JWT that authorises exactly one
+ *    task operation for a specific pod + task scope. The token is consumed on
+ *    first use by stamping consumed_at in worker_tokens and inserting the jti
+ *    into revoked_tokens; a second use is rejected at the DB layer.
  *
- * Verification checks (in order):
- *   1. Signature valid (ES256)
- *   2. scope === 'worker_task'
- *   3. JTI present in worker_tokens and not consumed/invalidated/expired
- *   4. token.agent_type matches expected (optional caller check)
- *   5. token.task_scope matches expected (optional caller check)
+ *    Token payload shape:
+ *      { sub: pod_id, agent_type, task_scope, jti, scope: 'worker_task', exp }
  *
- * Pod-terminate invalidation:
+ * 2. Wiki-write tokens (scope: 'wiki_write') — issue #39
+ *    issueWikiWorkerToken produces a short-lived JWT authorising one draft
+ *    WikiPageVersion write for a specific (dept, customer) pair. Single-use
+ *    enforcement is done via revoked_tokens alone (no worker_tokens row).
+ *
+ *    Token payload shape:
+ *      { sub: issuedTo, dept, customer, task_id?, jti, scope: 'wiki_write', exp }
+ *
+ * Pod-terminate invalidation (issue #36):
  *   The caller invokes invalidateWorkerTokensForPod(podId) which stamps
  *   invalidated_at on all still-unused rows for the pod and mirrors each JTI
  *   into revoked_tokens.
@@ -30,11 +34,20 @@ import {
   WORKER_TOKEN_TTL_SECONDS,
   type WorkerTokenRow,
 } from 'db/worker-tokens';
+import { sql as defaultSql } from 'db';
+import type postgres from 'postgres';
 
 export { invalidateWorkerTokensForPod };
 
-/** TTL in hours derived from the canonical seconds constant. */
+/** TTL in hours derived from the canonical seconds constant (issue #36). */
 const WORKER_TOKEN_TTL_HOURS = WORKER_TOKEN_TTL_SECONDS / 3600;
+
+/** TTL for wiki-write tokens in hours (1 hour — pod-lifetime). */
+const WIKI_WORKER_TOKEN_TTL_HOURS = 1;
+
+// ============================================================================
+// Issue #36 — pod-scoped task tokens
+// ============================================================================
 
 export interface WorkerTokenPayload {
   /** pod_id — identifies the worker pod that minted the token. */
@@ -54,9 +67,9 @@ export interface IssueWorkerTokenInput {
 }
 
 /**
- * Mint a scoped single-use worker JWT and persist the backing row.
+ * Mint a scoped single-use worker JWT and persist the backing row (issue #36).
  *
- * The JWT is signed with the server's ES256 key.  The row is written before
+ * The JWT is signed with the server's ES256 key. The row is written before
  * the token string is returned so there is no window where a token exists but
  * has no backing row.
  */
@@ -100,9 +113,9 @@ export interface VerifyWorkerTokenOptions {
 }
 
 /**
- * Verify a worker token and consume it (single-use enforcement).
+ * Verify a worker token and consume it (single-use enforcement) — issue #36.
  *
- * Returns the token payload on success.  Throws on any failure:
+ * Returns the token payload on success. Throws on any failure:
  *  - Invalid/expired/revoked JWT
  *  - Wrong scope
  *  - Token already consumed or invalidated
@@ -135,6 +148,114 @@ export async function verifyAndConsumeWorkerToken(
   if (options.expectedTaskScope !== undefined && payload.task_scope !== options.expectedTaskScope) {
     throw new Error('Token task_scope mismatch');
   }
+
+  return payload;
+}
+
+// ============================================================================
+// Issue #39 — wiki-write tokens (dept/customer-scoped)
+// ============================================================================
+
+export interface WikiWorkerTokenPayload {
+  sub: string;
+  dept: string;
+  customer: string;
+  task_id?: string;
+  jti: string;
+  scope: 'wiki_write';
+  exp: number;
+}
+
+export interface IssueWikiWorkerTokenInput {
+  /** Actor issuing the token (user or service identity). */
+  issuedTo: string;
+  dept: string;
+  customer: string;
+  taskId?: string;
+  /** Optional SQL pool — defaults to the global app pool. */
+  sql?: postgres.Sql;
+}
+
+/**
+ * Issue a single-use scoped wiki-write JWT for the given (dept, customer) pair.
+ *
+ * The token is signed with the shared EC key used by the rest of the
+ * application. Its TTL is 1 hour from issuance. The jti is a random UUID to
+ * support JTI-based single-use enforcement via revoked_tokens.
+ *
+ * Note: this token family does NOT write to worker_tokens (which is scoped to
+ * pod-based task tokens from issue #36). Single-use is enforced purely via
+ * revoked_tokens — no separate issuance log row is created.
+ */
+export async function issueWikiWorkerToken(input: IssueWikiWorkerTokenInput): Promise<string> {
+  const jti = crypto.randomUUID();
+  const payload: Omit<WikiWorkerTokenPayload, 'exp'> = {
+    sub: input.issuedTo,
+    dept: input.dept,
+    customer: input.customer,
+    jti,
+    scope: 'wiki_write',
+    ...(input.taskId ? { task_id: input.taskId } : {}),
+  };
+
+  return signJwt(payload, WIKI_WORKER_TOKEN_TTL_HOURS);
+}
+
+export interface VerifyWikiWorkerTokenOptions {
+  /** Expected dept — must match token.dept (check 4). */
+  expectedDept: string;
+  /** Expected customer — must match token.customer (check 5). */
+  expectedCustomer: string;
+  /** Optional SQL pool — defaults to the global app pool. */
+  sql?: postgres.Sql;
+}
+
+/**
+ * Verifies a scoped wiki-write worker token against all checks described in
+ * issue #39.
+ *
+ * On success the jti is inserted into revoked_tokens so the token cannot be
+ * reused. Throws a descriptive Error on any failed check.
+ */
+export async function verifyWorkerToken(
+  token: string,
+  options: VerifyWikiWorkerTokenOptions,
+): Promise<WikiWorkerTokenPayload> {
+  const db = options.sql ?? defaultSql;
+
+  // Check 1: signature valid (verifyJwt also checks exp)
+  const payload = await verifyJwt<WikiWorkerTokenPayload>(token);
+
+  // Check 2: scope must be 'wiki_write'
+  if (payload.scope !== 'wiki_write') {
+    throw new Error('Token scope is not wiki_write');
+  }
+
+  // Check 3: JTI not already revoked (consumed)
+  const revoked = await db<{ jti: string }[]>`
+    SELECT jti FROM revoked_tokens WHERE jti = ${payload.jti}
+  `;
+  if (revoked.length > 0) {
+    throw new Error('Token already used');
+  }
+
+  // Check 4: dept matches
+  if (payload.dept !== options.expectedDept) {
+    throw new Error('Token dept mismatch');
+  }
+
+  // Check 5: customer matches
+  if (payload.customer !== options.expectedCustomer) {
+    throw new Error('Token customer mismatch');
+  }
+
+  // Consume: insert jti into revoked_tokens so this token cannot be reused.
+  const expiresAt = new Date(payload.exp * 1000).toISOString();
+  await db`
+    INSERT INTO revoked_tokens (jti, expires_at)
+    VALUES (${payload.jti}, ${expiresAt})
+    ON CONFLICT (jti) DO NOTHING
+  `;
 
   return payload;
 }

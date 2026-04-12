@@ -26,6 +26,7 @@ import { authCookieHeader } from '../auth/cookie-config';
 import { getClientIp } from '../security/rate-limiter';
 import { checkEmbeddingReadRate } from '../security/embedding-rate-gate';
 import { mintIngestionToken } from 'db/ingestion-token';
+import { issueWikiWorkerToken } from '../auth/worker-token';
 
 export function isTestMode(): boolean {
   return process.env.TEST_MODE === 'true';
@@ -113,6 +114,43 @@ export async function handleTestSessionRequest(
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  // Test-only worker token mint endpoint — used by integration tests for
+  // POST /internal/wiki/versions to issue scoped wiki-write tokens signed by
+  // the server's own JWT key pair (avoiding cross-process key-pair mismatch).
+  // Also handles POST /api/test/worker-token (issue #39 integration tests).
+  if (req.method === 'POST' && url.pathname === '/api/test/worker-token') {
+    try {
+      const body = (await req.json().catch(() => ({}))) as {
+        dept?: string;
+        customer?: string;
+        task_id?: string;
+      };
+      if (!body.dept || !body.customer) {
+        return new Response(JSON.stringify({ error: 'dept and customer are required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const token = await issueWikiWorkerToken({
+        issuedTo: 'test-worker',
+        dept: body.dept,
+        customer: body.customer,
+        taskId: body.task_id,
+        sql,
+      });
+      return new Response(JSON.stringify({ token }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      console.error('TEST WORKER TOKEN ERROR:', err);
+      return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   if (req.method !== 'POST' || url.pathname !== '/api/test/session') {

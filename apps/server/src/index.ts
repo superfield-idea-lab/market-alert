@@ -45,8 +45,8 @@ import {
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
-import { handleWikiVersionsRequest } from './api/wiki-versions';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
+import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -234,7 +234,8 @@ export default {
 
     // Test-only session backdoor and rate-limit probe — available only when TEST_MODE=true.
     // Used by integration tests to obtain a session cookie without going through
-    // the passkey ceremony. Never enabled in production.
+    // the passkey ceremony. Also handles POST /api/test/worker-token (issue #39
+    // integration tests). Never enabled in production.
     if (isTestMode() && url.pathname.startsWith('/api/test/')) {
       const testRes = await handleTestSessionRequest(req, url, appState);
       if (testRes) return testRes;
@@ -301,19 +302,19 @@ export default {
       if (corpusRes) return withTrace(corpusRes);
     }
 
-    // Internal worker write endpoints — require scoped Bearer token auth.
-    // These routes are reachable only from within the cluster (NetworkPolicy).
-    if (url.pathname.startsWith('/internal/wiki/')) {
-      const wikiRes = await handleWikiVersionsRequest(req, url, appState);
-      if (wikiRes) return withTrace(wikiRes);
-    }
-
     // Internal worker token mint + pod-terminate invalidation (issue #36).
     // POST /internal/worker/tokens — mint a scoped single-use token.
     // DELETE /internal/worker/tokens/:podId — invalidate on pod terminate.
     if (url.pathname.startsWith('/internal/worker/tokens')) {
       const workerTokenRes = await handleWorkerTokensRequest(req, url, appState);
       if (workerTokenRes) return withTrace(workerTokenRes);
+    }
+
+    // Internal worker wiki write endpoint — Bearer wiki-write token auth (issue #39).
+    // POST /internal/wiki/versions — autolearn worker writes draft WikiPageVersion.
+    if (url.pathname.startsWith('/internal/wiki/')) {
+      const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
+      if (internalWikiRes) return withTrace(internalWikiRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
