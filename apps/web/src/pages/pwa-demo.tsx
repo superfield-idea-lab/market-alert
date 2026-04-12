@@ -25,6 +25,9 @@ import { StorageDemoCard } from '../components/pwa/demos/storage-demo';
 import { CameraDemoCard } from '../components/pwa/demos/camera-demo';
 import { MicDemoCard } from '../components/pwa/demos/mic-demo';
 import { MeetingRecordingDemoCard } from '../components/pwa/demos/meeting-recording-demo';
+import { AudioRecorder } from '../components/pwa/audio-recorder';
+import { DemoCard } from '../components/pwa/demo-card';
+import { Mic2 } from 'lucide-react';
 
 /**
  * Top-level PWA demo page.  Renders a platform info summary header and a
@@ -121,8 +124,39 @@ export function PwaDemoPage() {
           <CameraDemoCard />
           <MicDemoCard />
           <MeetingRecordingDemoCard />
+          <AudioRecorderCard />
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AudioRecorderCard — wraps AudioRecorder in a DemoCard shell
+// ---------------------------------------------------------------------------
+
+/**
+ * PWA demo card that hosts the background-preserving AudioRecorder component.
+ * Displays feature-availability and permission state via DemoCard before
+ * delegating to the AudioRecorder when the microphone is accessible.
+ */
+function AudioRecorderCard() {
+  const { supports } = usePlatform();
+  const featureAvailable = supports.mediaRecorder && supports.getUserMedia;
+
+  return (
+    <DemoCard
+      title="Audio Recorder (background-preserve)"
+      description="Record audio with state preserved across app backgrounding and screen lock"
+      icon={<Mic2 size={18} />}
+      featureAvailable={featureAvailable}
+      platformNotes={
+        !featureAvailable
+          ? 'MediaRecorder or getUserMedia not available on this platform.'
+          : undefined
+      }
+    >
+      <AudioRecorder />
+    </DemoCard>
   );
 }
