@@ -715,11 +715,16 @@ CREATE TABLE IF NOT EXISTS autolearn_jobs (
                        'COMPLETE',
                        'FAILED'
                      )),
-  task_queue_id    TEXT,
-  error_message    TEXT,
-  wiki_version_id  TEXT,
-  created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+  task_queue_id              TEXT,
+  error_message              TEXT,
+  wiki_version_id            TEXT,
+  -- Set to TRUE when the customer has reached the hallucination-escalation
+  -- threshold (three DISMISSED annotations in 30 days, PRD §9 / issue #67).
+  -- When true the publication gate must route the draft to explicit human
+  -- approval regardless of its materiality score.
+  requires_explicit_approval BOOLEAN NOT NULL DEFAULT false,
+  created_at                 TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                 TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_autolearn_jobs_tenant_customer
@@ -857,4 +862,28 @@ CREATE INDEX IF NOT EXISTS idx_annotation_replies_thread_id
   ON annotation_replies (thread_id);
 
 INSERT INTO _schema_version (migration) VALUES ('annotation-threads-001')
+  ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Hallucination escalation dismissal log (issue #67, PRD §9)
+--
+-- Records each DISMISSED annotation event per customer so the publication
+-- gate can count dismissals in a rolling 30-day window without requiring
+-- cross-table joins through annotation_threads → wiki_page_versions.
+--
+-- customer_id:   The customer whose annotation was dismissed.
+-- annotation_id: The annotation thread ID that was dismissed.
+-- dismissed_at:  Timestamp of the DISMISSED transition.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS annotation_dismissal_log (
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  customer_id   TEXT NOT NULL,
+  annotation_id TEXT NOT NULL,
+  dismissed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotation_dismissal_log_customer_dismissed
+  ON annotation_dismissal_log (customer_id, dismissed_at DESC);
+
+INSERT INTO _schema_version (migration) VALUES ('hallucination-escalation-001')
   ON CONFLICT (migration) DO NOTHING;

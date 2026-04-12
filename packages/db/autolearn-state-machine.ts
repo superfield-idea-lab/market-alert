@@ -166,6 +166,14 @@ export interface AutolearnJobRow {
   task_queue_id: string | null;
   error_message: string | null;
   wiki_version_id: string | null;
+  /**
+   * When `true` the publication gate must route this draft to explicit human
+   * approval regardless of its materiality score.
+   *
+   * Set at job creation time by checking the hallucination-escalation counter
+   * (three DISMISSED annotations in 30 days for this customer, PRD §9 / issue #67).
+   */
+  requires_explicit_approval: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -180,6 +188,15 @@ export interface CreateAutolearnJobOptions {
   dept_id: string;
   source_type?: AutolearnSourceType;
   task_queue_id?: string;
+  /**
+   * When `true` the publication gate must route this draft to explicit human
+   * approval regardless of its materiality score.
+   *
+   * Callers should consult `customerRequiresEscalation()` from
+   * `hallucination-escalation.ts` before creating the job and pass the result
+   * here (PRD §9 / issue #67).
+   */
+  requires_explicit_approval?: boolean;
 }
 
 /**
@@ -194,15 +211,17 @@ export async function createAutolearnJob(
     dept_id,
     source_type = AutolearnSourceType.GARDENING,
     task_queue_id = null,
+    requires_explicit_approval = false,
   } = options;
 
   const sql = getSql();
   const [row] = await sql<AutolearnJobRow[]>`
     INSERT INTO autolearn_jobs
-      (tenant_id, customer_id, dept_id, source_type, state, task_queue_id)
+      (tenant_id, customer_id, dept_id, source_type, state, task_queue_id,
+       requires_explicit_approval)
     VALUES
       (${tenant_id}, ${customer_id}, ${dept_id}, ${source_type},
-       'WORKER_STARTED', ${task_queue_id})
+       'WORKER_STARTED', ${task_queue_id}, ${requires_explicit_approval})
     RETURNING *
   `;
   return row;
