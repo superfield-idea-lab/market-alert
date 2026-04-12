@@ -31,6 +31,10 @@ import {
   GROUND_TRUTH_FILENAME,
   WIKI_FILENAME,
   STAGING_DIR_PREFIX,
+  segmentToDialogueLine,
+  segmentsToDialogue,
+  formatGroundTruthForStaging,
+  type GroundTruthContent,
 } from '../../src/autolearn-stager.js';
 
 // ---------------------------------------------------------------------------
@@ -497,6 +501,140 @@ describe('stageAutolearnInput — success', () => {
 });
 
 // ---------------------------------------------------------------------------
+// stageAutolearnInput — speaker diarisation in staged content (issue #59)
+// ---------------------------------------------------------------------------
+
+describe('stageAutolearnInput — speaker labels appear in staged ground-truth', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  const WIKI_BODY = '# Test Wiki\n\nContent.\n';
+
+  const GROUND_TRUTH_WITH_SEGMENTS = JSON.stringify({
+    scope_ref: 'dept=sales&customer=acme',
+    records: [
+      {
+        id: 'rec-t1',
+        type: 'transcript',
+        segments: [
+          { speaker: 'SPEAKER_A', text: 'Hello, how can I help?', start_s: 0, end_s: 2 },
+          { speaker: 'SPEAKER_B', text: 'I need to renew my policy.', start_s: 2, end_s: 4 },
+          { speaker: 'SPEAKER_A', text: 'Sure, let me look that up.', start_s: 4, end_s: 6 },
+        ],
+      },
+      {
+        id: 'rec-e1',
+        type: 'email',
+        body: 'No segments here',
+      },
+    ],
+    fetched_at: '2026-04-11T00:00:00.000Z',
+  });
+
+  beforeAll(async () => {
+    const result = await startTestServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+
+      if (url.pathname === '/api/autolearn/ground-truth') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(GROUND_TRUTH_WITH_SEGMENTS);
+        return;
+      }
+
+      if (url.pathname === '/api/autolearn/wiki') {
+        res.writeHead(200, { 'Content-Type': 'text/markdown' });
+        res.end(WIKI_BODY);
+        return;
+      }
+
+      res.writeHead(404);
+      res.end('Not found');
+    });
+    server = result.server;
+    baseUrl = result.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  test('staged ground-truth.json contains a dialogue field for records with segments', async () => {
+    const result = await stageAutolearnInput({
+      apiBaseUrl: baseUrl,
+      scope: { dept: 'sales', customer: 'acme' },
+      delegatedToken: 'test-token',
+    });
+
+    try {
+      const raw = await readFile(result.groundTruthPath, 'utf-8');
+      const parsed = JSON.parse(raw) as {
+        records: Array<{ id: string; dialogue?: string; segments?: unknown[] }>;
+      };
+
+      const transcriptRecord = parsed.records.find((r) => r.id === 'rec-t1');
+      expect(transcriptRecord).toBeDefined();
+      // The dialogue field should be present and contain speaker labels.
+      expect(typeof transcriptRecord!.dialogue).toBe('string');
+      expect(transcriptRecord!.dialogue).toContain('[SPEAKER_A]');
+      expect(transcriptRecord!.dialogue).toContain('[SPEAKER_B]');
+      expect(transcriptRecord!.dialogue).toContain('Hello, how can I help?');
+      expect(transcriptRecord!.dialogue).toContain('I need to renew my policy.');
+
+      // The raw segments are preserved alongside the dialogue field.
+      expect(Array.isArray(transcriptRecord!.segments)).toBe(true);
+    } finally {
+      await cleanupStagingDir(result.stagingDir);
+    }
+  });
+
+  test('email records without segments have no dialogue field in staged content', async () => {
+    const result = await stageAutolearnInput({
+      apiBaseUrl: baseUrl,
+      scope: { dept: 'sales', customer: 'acme' },
+      delegatedToken: 'test-token',
+    });
+
+    try {
+      const raw = await readFile(result.groundTruthPath, 'utf-8');
+      const parsed = JSON.parse(raw) as {
+        records: Array<{ id: string; dialogue?: string }>;
+      };
+
+      const emailRecord = parsed.records.find((r) => r.id === 'rec-e1');
+      expect(emailRecord).toBeDefined();
+      expect(emailRecord!.dialogue).toBeUndefined();
+    } finally {
+      await cleanupStagingDir(result.stagingDir);
+    }
+  });
+
+  test('dialogue lines preserve speaker attribution order (issue #59 — stable labels)', async () => {
+    const result = await stageAutolearnInput({
+      apiBaseUrl: baseUrl,
+      scope: { dept: 'sales', customer: 'acme' },
+      delegatedToken: 'test-token',
+    });
+
+    try {
+      const raw = await readFile(result.groundTruthPath, 'utf-8');
+      const parsed = JSON.parse(raw) as {
+        records: Array<{ id: string; dialogue?: string }>;
+      };
+
+      const transcriptRecord = parsed.records.find((r) => r.id === 'rec-t1');
+      const lines = transcriptRecord!.dialogue!.split('\n');
+      // Three segments → three dialogue lines.
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toBe('[SPEAKER_A] Hello, how can I help?');
+      expect(lines[1]).toBe('[SPEAKER_B] I need to renew my policy.');
+      expect(lines[2]).toBe('[SPEAKER_A] Sure, let me look that up.');
+    } finally {
+      await cleanupStagingDir(result.stagingDir);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // stageAutolearnInput — fetch failures
 // ---------------------------------------------------------------------------
 
@@ -705,5 +843,138 @@ describe('autolearn-stager module exports', () => {
     const mod = await import('../../src/autolearn-stager.js');
     expect(typeof mod.GROUND_TRUTH_FILENAME).toBe('string');
     expect(typeof mod.WIKI_FILENAME).toBe('string');
+  });
+
+  test('segmentToDialogueLine is exported as a function', async () => {
+    const mod = await import('../../src/autolearn-stager.js');
+    expect(typeof mod.segmentToDialogueLine).toBe('function');
+  });
+
+  test('segmentsToDialogue is exported as a function', async () => {
+    const mod = await import('../../src/autolearn-stager.js');
+    expect(typeof mod.segmentsToDialogue).toBe('function');
+  });
+
+  test('formatGroundTruthForStaging is exported as a function', async () => {
+    const mod = await import('../../src/autolearn-stager.js');
+    expect(typeof mod.formatGroundTruthForStaging).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Speaker-label serialisation helpers (issue #59)
+// ---------------------------------------------------------------------------
+
+describe('segmentToDialogueLine', () => {
+  test('formats a segment as [SPEAKER_X] text', () => {
+    const line = segmentToDialogueLine({
+      speaker: 'SPEAKER_A',
+      text: 'Hello',
+      start_s: 0,
+      end_s: 1,
+    });
+    expect(line).toBe('[SPEAKER_A] Hello');
+  });
+
+  test('uses the opaque label from the segment', () => {
+    const line = segmentToDialogueLine({
+      speaker: 'SPEAKER_B',
+      text: 'Goodbye',
+      start_s: 2,
+      end_s: 3,
+    });
+    expect(line).toBe('[SPEAKER_B] Goodbye');
+  });
+});
+
+describe('segmentsToDialogue', () => {
+  test('joins multiple segments as newline-separated dialogue lines', () => {
+    const segments = [
+      { speaker: 'SPEAKER_A' as const, text: 'Good morning', start_s: 0, end_s: 2 },
+      { speaker: 'SPEAKER_B' as const, text: 'How can I help?', start_s: 2, end_s: 4 },
+    ];
+    const dialogue = segmentsToDialogue(segments);
+    expect(dialogue).toBe('[SPEAKER_A] Good morning\n[SPEAKER_B] How can I help?');
+  });
+
+  test('returns empty string for empty array', () => {
+    expect(segmentsToDialogue([])).toBe('');
+  });
+
+  test('returns empty string for undefined', () => {
+    expect(segmentsToDialogue(undefined)).toBe('');
+  });
+
+  test('single segment produces a single line without trailing newline', () => {
+    const dialogue = segmentsToDialogue([
+      { speaker: 'SPEAKER_A' as const, text: 'Only me', start_s: 0, end_s: 5 },
+    ]);
+    expect(dialogue).toBe('[SPEAKER_A] Only me');
+    expect(dialogue).not.toContain('\n');
+  });
+});
+
+describe('formatGroundTruthForStaging', () => {
+  test('passes through records that have no segments', () => {
+    const content: GroundTruthContent = {
+      scope_ref: 'scope-1',
+      fetched_at: '2026-01-01T00:00:00Z',
+      records: [{ id: 'r1', type: 'email', body: 'plain text' }],
+    };
+    const result = formatGroundTruthForStaging(content);
+    expect(result.records[0]).not.toHaveProperty('dialogue');
+    expect(result.records[0].body).toBe('plain text');
+  });
+
+  test('adds a dialogue field to records that have segments', () => {
+    const content: GroundTruthContent = {
+      scope_ref: 'scope-2',
+      fetched_at: '2026-01-01T00:00:00Z',
+      records: [
+        {
+          id: 'r2',
+          type: 'transcript',
+          segments: [
+            { speaker: 'SPEAKER_A' as const, text: 'Hi', start_s: 0, end_s: 1 },
+            { speaker: 'SPEAKER_B' as const, text: 'Hello', start_s: 1, end_s: 2 },
+          ],
+        },
+      ],
+    };
+    const result = formatGroundTruthForStaging(content);
+    expect(result.records[0].dialogue).toBe('[SPEAKER_A] Hi\n[SPEAKER_B] Hello');
+  });
+
+  test('preserves the original segments array alongside the dialogue field', () => {
+    const segments = [{ speaker: 'SPEAKER_A' as const, text: 'Segment one', start_s: 0, end_s: 1 }];
+    const content: GroundTruthContent = {
+      scope_ref: 's',
+      fetched_at: '2026-01-01T00:00:00Z',
+      records: [{ id: 'r3', segments }],
+    };
+    const result = formatGroundTruthForStaging(content);
+    expect(result.records[0].segments).toEqual(segments);
+    expect(result.records[0].dialogue).toBe('[SPEAKER_A] Segment one');
+  });
+
+  test('does not add dialogue for records with empty segments array', () => {
+    const content: GroundTruthContent = {
+      scope_ref: 's',
+      fetched_at: '2026-01-01T00:00:00Z',
+      records: [{ id: 'r4', segments: [] }],
+    };
+    const result = formatGroundTruthForStaging(content);
+    expect(result.records[0]).not.toHaveProperty('dialogue');
+  });
+
+  test('preserves top-level scope_ref and fetched_at', () => {
+    const content: GroundTruthContent = {
+      scope_ref: 'my-scope',
+      fetched_at: '2026-06-01T12:00:00Z',
+      records: [],
+    };
+    const result = formatGroundTruthForStaging(content);
+    expect(result.scope_ref).toBe('my-scope');
+    expect(result.fetched_at).toBe('2026-06-01T12:00:00Z');
   });
 });

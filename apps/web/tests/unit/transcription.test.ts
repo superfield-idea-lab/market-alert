@@ -39,8 +39,11 @@ import {
   isSpeechRecognitionAvailable,
   isWhisperAvailable,
   transcribeAudio,
+  assignSpeakerLabel,
+  wrapTextAsResult,
   type WhisperModule,
   type TranscribeOptions,
+  type TranscriptResult,
 } from '../../src/lib/transcription.js';
 
 // ---------------------------------------------------------------------------
@@ -93,16 +96,18 @@ describe('availability probes', () => {
 // ---------------------------------------------------------------------------
 
 describe('transcribeAudio engine selection', () => {
-  test('returns empty string when no engine is available', async () => {
+  test('returns empty TranscriptResult when no engine is available', async () => {
     // Both whisper and SpeechRecognition unavailable in clean Node env.
-    // transcribeAudio should not throw — it returns ''.
+    // transcribeAudio should not throw — it returns { text: '', segments: [] }.
     const blob = new Blob([new Uint8Array(16)], { type: 'audio/webm' });
     // Use explicit engine: neither — this exercises the auto path in an
     // env where isWhisperAvailable() and isSpeechRecognitionAvailable() are
     // both false (default Node/jsdom).
-    const transcript = await transcribeAudio(blob);
-    expect(typeof transcript).toBe('string');
-    // We can't assert '' without knowing the exact env, but we assert no throw.
+    const result = await transcribeAudio(blob);
+    // Result is a TranscriptResult object.
+    expect(typeof result).toBe('object');
+    expect(typeof result.text).toBe('string');
+    expect(Array.isArray(result.segments)).toBe(true);
   });
 
   test('engine: "whisper" rejects when whisper is not available', async () => {
@@ -359,11 +364,16 @@ describe('speech api fallback — fixture audio (fake SpeechRecognition)', () =>
     expect(isSpeechRecognitionAvailable()).toBe(true);
   });
 
-  test('transcribeAudio with engine: speech-api returns the fixture transcript', async () => {
+  test('transcribeAudio with engine: speech-api returns TranscriptResult with fixture text', async () => {
     FakeSpeechRecognition.fixtureTranscript = 'on-device speech api result';
     const blob = new Blob([new Uint8Array(16)], { type: 'audio/webm' });
     const result = await transcribeAudio(blob, { engine: 'speech-api' });
-    expect(result).toBe('on-device speech api result');
+    // Result is a TranscriptResult — not a plain string.
+    expect(result.text).toBe('on-device speech api result');
+    // The speech-api fallback wraps the text in a single SPEAKER_A segment.
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0].speaker).toBe('SPEAKER_A');
+    expect(result.segments[0].text).toBe('on-device speech api result');
   });
 
   test('auto engine selection falls through to speech api when whisper is unavailable', async () => {
@@ -372,22 +382,29 @@ describe('speech api fallback — fixture audio (fake SpeechRecognition)', () =>
     FakeSpeechRecognition.fixtureTranscript = 'fallback transcript';
     const blob = new Blob([new Uint8Array(16)], { type: 'audio/webm' });
     const result = await transcribeAudio(blob);
-    // The auto path may return '' if the WASM load fails silently, or the
-    // fixture transcript from the Speech API fallback.  Either way: no throw.
-    expect(typeof result).toBe('string');
+    // The auto path returns a TranscriptResult; either text may be '' (if
+    // WASM load fails silently before Speech API activates) or the fixture.
+    expect(typeof result).toBe('object');
+    expect(typeof result.text).toBe('string');
+    expect(Array.isArray(result.segments)).toBe(true);
   });
 
-  test('AbortSignal that is already aborted causes immediate rejection', async () => {
+  test('AbortSignal that is already aborted causes immediate rejection or partial result', async () => {
     const ac = new AbortController();
     ac.abort(new DOMException('cancelled', 'AbortError'));
     const blob = new Blob([new Uint8Array(16)], { type: 'audio/webm' });
     const options: TranscribeOptions = { engine: 'speech-api', signal: ac.signal };
     const result = await transcribeAudio(blob, options).catch((e: unknown) => {
-      if (e instanceof Error && e.name === 'AbortError') return '__aborted__';
+      if (e instanceof Error && e.name === 'AbortError') return '__aborted__' as const;
       throw e;
     });
-    // Either settled with '__aborted__' or returned a partial transcript.
-    expect(typeof result).toBe('string');
+    // Either settled with '__aborted__' or returned a partial TranscriptResult.
+    if (typeof result === 'string') {
+      expect(result).toBe('__aborted__');
+    } else {
+      const r = result as TranscriptResult;
+      expect(typeof r.text).toBe('string');
+    }
   });
 });
 
@@ -414,5 +431,78 @@ describe('transcription module exports', () => {
 
   test('isSharedArrayBufferAvailable is exported as a function', () => {
     expect(typeof isSharedArrayBufferAvailable).toBe('function');
+  });
+
+  test('assignSpeakerLabel is exported as a function', () => {
+    expect(typeof assignSpeakerLabel).toBe('function');
+  });
+
+  test('wrapTextAsResult is exported as a function', () => {
+    expect(typeof wrapTextAsResult).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Speaker diarisation helpers (issue #59)
+// ---------------------------------------------------------------------------
+
+describe('assignSpeakerLabel', () => {
+  test('assigns SPEAKER_A to the first speaker encountered', () => {
+    const map = new Map<string, string>();
+    const label = assignSpeakerLabel('raw-speaker-0', map);
+    expect(label).toBe('SPEAKER_A');
+    expect(map.size).toBe(1);
+  });
+
+  test('assigns SPEAKER_B to the second distinct speaker', () => {
+    const map = new Map<string, string>();
+    assignSpeakerLabel('raw-0', map);
+    const label = assignSpeakerLabel('raw-1', map);
+    expect(label).toBe('SPEAKER_B');
+  });
+
+  test('returns the same label for the same speaker id', () => {
+    const map = new Map<string, string>();
+    const first = assignSpeakerLabel('spk', map);
+    const second = assignSpeakerLabel('spk', map);
+    expect(first).toBe(second);
+    expect(map.size).toBe(1);
+  });
+
+  test('assigns labels in first-appearance order independent of raw id', () => {
+    const map = new Map<string, string>();
+    assignSpeakerLabel('zz', map); // SPEAKER_A
+    assignSpeakerLabel('aa', map); // SPEAKER_B
+    expect(map.get('zz')).toBe('SPEAKER_A');
+    expect(map.get('aa')).toBe('SPEAKER_B');
+  });
+});
+
+describe('wrapTextAsResult', () => {
+  test('wraps non-empty text in a single SPEAKER_A segment', () => {
+    const result = wrapTextAsResult('hello world');
+    expect(result.text).toBe('hello world');
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0].speaker).toBe('SPEAKER_A');
+    expect(result.segments[0].text).toBe('hello world');
+    expect(result.segments[0].start_s).toBe(0);
+    expect(result.segments[0].end_s).toBe(0);
+  });
+
+  test('returns empty text and empty segments for empty string', () => {
+    const result = wrapTextAsResult('');
+    expect(result.text).toBe('');
+    expect(result.segments).toHaveLength(0);
+  });
+
+  test('trims whitespace from the text', () => {
+    const result = wrapTextAsResult('  trimmed  ');
+    expect(result.text).toBe('trimmed');
+    expect(result.segments[0].text).toBe('trimmed');
+  });
+
+  test('uses provided durationS for the segment end_s', () => {
+    const result = wrapTextAsResult('hello', 42.5);
+    expect(result.segments[0].end_s).toBe(42.5);
   });
 });

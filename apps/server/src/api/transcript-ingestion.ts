@@ -33,6 +33,7 @@ import { makeJson } from '../lib/response';
 import { encryptProperties } from 'core';
 import { emitAuditEvent } from '../policies/audit-service';
 import { extractTraceId } from 'core';
+import type { TranscriptSegment } from 'core';
 import { enqueueTask, TASK_TYPE_AGENT_MAP, TaskType } from 'db/task-queue';
 import { registerPhase5EntityTypesWithDb } from 'db/phase5-entity-types';
 import { sql as globalSql } from 'db';
@@ -46,7 +47,8 @@ import { sql as globalSql } from 'db';
  * the database at server startup (Phase 5 — PWA & meeting transcription, issue #58).
  *
  * Delegates to `registerPhase5EntityTypesWithDb` which is the single
- * source of truth for Phase 5 entity type definitions.
+ * source of truth for Phase 5 entity type definitions (including the
+ * `segments` speaker-diarisation field added in issue #59).
  *
  * Called idempotently — safe to call multiple times.
  */
@@ -67,6 +69,14 @@ export interface IngestTranscriptBody {
   duration_s?: number;
   /** ISO-8601 timestamp when the recording started. */
   recorded_at: string;
+  /**
+   * Per-segment speaker diarisation (issue #59).
+   *
+   * Each segment carries an opaque SPEAKER_X label that is stable within this
+   * transcript but does not resolve to a real identity.  If segments are
+   * omitted the transcript is stored without diarisation.
+   */
+  segments?: TranscriptSegment[];
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +189,7 @@ export async function handleTranscriptIngestionRequest(
     duration_s: body.duration_s ?? null,
     source: 'edge_device',
     recorded_at: body.recorded_at,
+    segments: body.segments ?? [],
   };
 
   await sql`

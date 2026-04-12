@@ -46,6 +46,7 @@
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import type { TranscriptSegment } from 'core';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -107,10 +108,19 @@ export interface GroundTruthContent {
  * A single anonymised ground-truth record.
  *
  * All identifying fields contain opaque tokens, not raw PII.
+ * Transcript records may carry `segments` with per-segment speaker labels
+ * (issue #59).
  */
 export interface GroundTruthRecord {
   /** Opaque identifier for this record. */
   id: string;
+  /**
+   * Per-segment speaker diarisation, present when the record comes from a
+   * transcript entity that was ingested with diarisation data.
+   *
+   * Labels are opaque (SPEAKER_A, SPEAKER_B, …) — never real names.
+   */
+  segments?: TranscriptSegment[];
   /** Anonymised / tokenised content fields. */
   [key: string]: unknown;
 }
@@ -335,6 +345,63 @@ export async function cleanupStagingDir(stagingDir: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Speaker-label serialisation helpers (issue #59)
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize a single `TranscriptSegment` as a plain-text dialogue line.
+ *
+ * Format: `[SPEAKER_X] <text>`
+ *
+ * This compact format is both human-readable and LLM-friendly.  The label is
+ * always an opaque identifier — no real names are produced.
+ */
+export function segmentToDialogueLine(segment: TranscriptSegment): string {
+  return `[${segment.speaker}] ${segment.text}`;
+}
+
+/**
+ * Convert an array of transcript segments into a dialogue-formatted string.
+ *
+ * Segments are emitted in order, one line per segment.  Speaker label changes
+ * are preserved so the LLM can attribute each claim to an opaque speaker.
+ *
+ * Returns an empty string when `segments` is empty or undefined.
+ */
+export function segmentsToDialogue(segments: TranscriptSegment[] | undefined): string {
+  if (!segments || segments.length === 0) return '';
+  return segments.map(segmentToDialogueLine).join('\n');
+}
+
+/**
+ * Enrich a `GroundTruthContent` payload for staging by adding a
+ * `dialogue` field to every record that carries transcript segments.
+ *
+ * The `dialogue` field is a pre-rendered string of the form:
+ * ```
+ * [SPEAKER_A] Hello, how can I help?
+ * [SPEAKER_B] I need to renew my policy.
+ * ```
+ *
+ * This lets the Claude CLI consume speaker-attributed content without having
+ * to reconstruct dialogue from raw segment arrays.
+ *
+ * Records without a `segments` array are passed through unchanged.
+ *
+ * Issue #59: autolearn staged content must include speaker labels.
+ */
+export function formatGroundTruthForStaging(content: GroundTruthContent): GroundTruthContent {
+  const enrichedRecords = content.records.map((record) => {
+    if (!record.segments || record.segments.length === 0) return record;
+    return {
+      ...record,
+      dialogue: segmentsToDialogue(record.segments),
+    };
+  });
+  return { ...content, records: enrichedRecords };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -395,7 +462,9 @@ export async function stageAutolearnInput(
   const groundTruthPath = join(stagingDir, GROUND_TRUTH_FILENAME);
   const wikiPath = join(stagingDir, WIKI_FILENAME);
 
-  await writeStagingFile(groundTruthPath, JSON.stringify(groundTruth, null, 2));
+  // Enrich ground truth with dialogue-formatted speaker labels (issue #59).
+  const enrichedGroundTruth = formatGroundTruthForStaging(groundTruth);
+  await writeStagingFile(groundTruthPath, JSON.stringify(enrichedGroundTruth, null, 2));
   await writeStagingFile(wikiPath, wikiMarkdown);
 
   console.log(

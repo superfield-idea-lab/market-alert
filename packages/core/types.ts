@@ -46,6 +46,37 @@ export interface Relation {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Transcript speaker diarisation types (issue #59)
+// ---------------------------------------------------------------------------
+
+/**
+ * Opaque speaker label pattern: SPEAKER_A, SPEAKER_B, …
+ *
+ * Labels are assigned sequentially based on first-appearance order in the
+ * recording.  They are stable for a given transcript (same label always
+ * refers to the same speaker within one recording) but do NOT carry
+ * identity across recordings.  No name resolution is attempted.
+ */
+export type SpeakerLabel = `SPEAKER_${string}`;
+
+/**
+ * A single time-bounded segment of a transcript paired with its speaker label.
+ *
+ * `speaker` is always an opaque SPEAKER_X label — never a real name.
+ * `start_s` and `end_s` are in seconds relative to the start of the recording.
+ */
+export interface TranscriptSegment {
+  /** Opaque speaker identifier for this segment. */
+  speaker: SpeakerLabel;
+  /** Segment text content. */
+  text: string;
+  /** Start time in seconds (relative to recording start). */
+  start_s: number;
+  /** End time in seconds (relative to recording start). */
+  end_s: number;
+}
+
 // Calypso Specific semantic properties mapped from the Entity JSONB
 // Policy note: this starter app stores password hashes inside the generic user
 // entity payload. The target blueprint posture replaces this with passkey-first

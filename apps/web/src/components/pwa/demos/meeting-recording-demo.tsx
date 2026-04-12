@@ -236,8 +236,8 @@ export function MeetingRecordingDemoCard() {
       transcribeAbortRef.current = ac;
 
       try {
-        const text = await transcribeAudio(blob, { signal: ac.signal });
-        setTranscript(text);
+        const result = await transcribeAudio(blob, { signal: ac.signal });
+        setTranscript(result.text);
         setPhase('transcribed');
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return; // unmounted

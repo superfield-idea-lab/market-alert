@@ -99,11 +99,12 @@ export const PHASE_5_ENTITY_TYPES: EntityTypeDefinition[] = [
    * sensitive information.
    *
    * Properties shape:
-   *   - `text`         {string}  — transcript body (sensitive, encrypted at rest)
-   *   - `customer_id`  {string}  — owning customer entity id
-   *   - `duration_s`   {number}  — recording duration in seconds (optional)
-   *   - `source`       {string}  — always "edge_device" for the API path
-   *   - `recorded_at`  {string}  — ISO-8601 timestamp when recording started
+   *   - `text`         {string}              — transcript body (sensitive, encrypted at rest)
+   *   - `customer_id`  {string}              — owning customer entity id
+   *   - `duration_s`   {number}              — recording duration in seconds (optional)
+   *   - `source`       {string}              — always "edge_device" for the API path
+   *   - `recorded_at`  {string}              — ISO-8601 timestamp when recording started
+   *   - `segments`     {TranscriptSegment[]} — per-segment speaker diarisation (issue #59)
    */
   {
     type: 'transcript',
@@ -116,6 +117,19 @@ export const PHASE_5_ENTITY_TYPES: EntityTypeDefinition[] = [
         duration_s: { type: 'number', minimum: 0 },
         source: { type: 'string', enum: ['edge_device', 'worker_path'] },
         recorded_at: { type: 'string' },
+        segments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['speaker', 'text', 'start_s', 'end_s'],
+            properties: {
+              speaker: { type: 'string', pattern: '^SPEAKER_[A-Z]+$' },
+              text: { type: 'string' },
+              start_s: { type: 'number', minimum: 0 },
+              end_s: { type: 'number', minimum: 0 },
+            },
+          },
+        },
       },
     },
     sensitive: ['text'],

@@ -45,6 +45,11 @@
  * - Buy-vs-build decision: docs/technical/transcription-buy-vs-build.md
  */
 
+import type { TranscriptSegment } from 'core';
+
+// Re-export for callers that need the type without importing core directly.
+export type { TranscriptSegment };
+
 // ---------------------------------------------------------------------------
 // Web Speech API type stubs (not in lib.dom in all TS configs)
 // ---------------------------------------------------------------------------
@@ -56,7 +61,7 @@ declare global {
   }
 }
 
-interface SpeechRecognitionLike extends EventTarget {
+export interface SpeechRecognitionLike extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
@@ -355,6 +360,84 @@ export interface TranscribeOptions {
 }
 
 /**
+ * Result returned by {@link transcribeAudio}.
+ *
+ * `text` is the full concatenated transcript. `segments` carries per-segment
+ * speaker diarisation (issue #59).  When the engine does not support
+ * diarisation (e.g. Web Speech API), `segments` contains a single segment
+ * attributed to SPEAKER_A covering the full transcript.
+ */
+export interface TranscriptResult {
+  /** Full transcript text, trimmed. May be empty string. */
+  text: string;
+  /**
+   * Per-segment speaker diarisation.
+   *
+   * Labels are opaque (SPEAKER_A, SPEAKER_B, …), stable within a recording,
+   * and never resolved to real names.
+   */
+  segments: TranscriptSegment[];
+}
+
+// ---------------------------------------------------------------------------
+// Speaker label assignment
+// ---------------------------------------------------------------------------
+
+/**
+ * Assign opaque SPEAKER_X labels to an ordered list of speaker identifiers.
+ *
+ * Labels are assigned in first-appearance order: the first speaker encountered
+ * receives SPEAKER_A, the second SPEAKER_B, etc.  The mapping is deterministic
+ * for a given input sequence.
+ *
+ * This function is pure and does not perform any name resolution.
+ *
+ * @param speakerId - The raw speaker identifier from the underlying engine
+ *                   (may be a numeric index, UUID, etc.)
+ * @param map       - Mutable map accumulating assignments across segments.
+ * @returns The assigned opaque label for this speaker.
+ */
+export function assignSpeakerLabel(speakerId: string, map: Map<string, string>): string {
+  if (map.has(speakerId)) {
+    return map.get(speakerId)!;
+  }
+  // Build label from A, B, C … Z, AA, AB … (bijective base-26).
+  const idx = map.size;
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let label = '';
+  let n = idx;
+  do {
+    label = letters[n % 26] + label;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  const opaque = `SPEAKER_${label}`;
+  map.set(speakerId, opaque);
+  return opaque;
+}
+
+/**
+ * Wrap a plain-text transcript (no segment information) in a single-segment
+ * TranscriptResult attributed to SPEAKER_A.
+ *
+ * Used by the Web Speech API fallback and any path that returns only a string.
+ */
+export function wrapTextAsResult(text: string, durationS?: number): TranscriptResult {
+  const trimmed = text.trim();
+  if (trimmed === '') return { text: '', segments: [] };
+  return {
+    text: trimmed,
+    segments: [
+      {
+        speaker: 'SPEAKER_A',
+        text: trimmed,
+        start_s: 0,
+        end_s: durationS ?? 0,
+      },
+    ],
+  };
+}
+
+/**
  * Transcribe an audio Blob entirely on-device.
  *
  * Engine selection (unless overridden by `options.engine`):
@@ -363,27 +446,31 @@ export interface TranscribeOptions {
  *
  * @param blob    Audio blob from MediaRecorder (any codec).
  * @param options Optional abort signal and engine override.
- * @returns       Transcript text, trimmed.  May be empty string if no speech
- *                was detected or neither engine is available.
+ * @returns       TranscriptResult with full text and per-segment speaker labels.
+ *                `text` and `segments` are both empty when no speech was
+ *                detected or neither engine is available.
  */
 export async function transcribeAudio(
   blob: Blob,
   options: TranscribeOptions = {},
-): Promise<string> {
+): Promise<TranscriptResult> {
   const { signal, engine } = options;
 
   if (engine === 'whisper') {
-    return transcribeWithWhisper(blob, signal);
+    const text = await transcribeWithWhisper(blob, signal);
+    return wrapTextAsResult(text);
   }
 
   if (engine === 'speech-api') {
-    return transcribeWithSpeechApi(blob, signal);
+    const text = await transcribeWithSpeechApi(blob, signal);
+    return wrapTextAsResult(text);
   }
 
   // Automatic selection: try whisper first, fall back to Speech API.
   if (isWhisperAvailable()) {
     try {
-      return await transcribeWithWhisper(blob, signal);
+      const text = await transcribeWithWhisper(blob, signal);
+      return wrapTextAsResult(text);
     } catch {
       // Whisper failed (WASM load error, audio decode error, etc.) — fall through.
     }
@@ -391,12 +478,13 @@ export async function transcribeAudio(
 
   if (isSpeechRecognitionAvailable()) {
     try {
-      return await transcribeWithSpeechApi(blob, signal);
+      const text = await transcribeWithSpeechApi(blob, signal);
+      return wrapTextAsResult(text);
     } catch {
-      // Speech API also failed — return empty string rather than throwing.
+      // Speech API also failed — return empty result rather than throwing.
     }
   }
 
   // Neither engine is available (SSR, headless environment, very old browser).
-  return '';
+  return { text: '', segments: [] };
 }
