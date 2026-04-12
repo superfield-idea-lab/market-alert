@@ -47,6 +47,7 @@ import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
+import { handleDeepcleanRequest } from './api/deepclean';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -282,6 +283,13 @@ export default {
     if (url.pathname.startsWith('/api/users')) {
       const usersRes = await handleUsersRequest(req, url, appState);
       if (usersRes) return withTrace(usersRes);
+    }
+
+    // Deepclean on-demand autolearn endpoint (issue #41).
+    // POST /api/deepclean — operator-only trigger for a full-ground-truth wiki rebuild.
+    if (url.pathname.startsWith('/api/deepclean')) {
+      const deepcleanRes = await handleDeepcleanRequest(req, url, appState);
+      if (deepcleanRes) return withTrace(deepcleanRes);
     }
 
     if (url.pathname.startsWith('/api/reidentification')) {

@@ -158,13 +158,17 @@ export async function handleTestSessionRequest(
   }
 
   try {
-    const body = (await req.json().catch(() => ({}))) as { username?: string };
+    const body = (await req.json().catch(() => ({}))) as { username?: string; role?: string };
     const username = body.username ?? `test_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const role = body.role ?? null;
     const userId = crypto.randomUUID();
+
+    const properties: Record<string, unknown> = { username };
+    if (role !== null) properties.role = role;
 
     await sql`
       INSERT INTO entities (id, type, properties, tenant_id)
-      VALUES (${userId}, 'user', ${sql.json({ username })}, null)
+      VALUES (${userId}, 'user', ${sql.json(properties as never)}, null)
       ON CONFLICT DO NOTHING
     `;
 

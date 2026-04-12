@@ -42,12 +42,12 @@ export interface TestSession {
  */
 export async function createTestSession(
   baseUrl: string,
-  opts: { username?: string } = {},
+  opts: { username?: string; role?: string } = {},
 ): Promise<TestSession> {
   const res = await fetch(`${baseUrl}/api/test/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: opts.username }),
+    body: JSON.stringify({ username: opts.username, role: opts.role }),
   });
 
   if (!res.status.toString().startsWith('2')) {

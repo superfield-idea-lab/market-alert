@@ -58,6 +58,18 @@ describe('buildGroundTruthUrl', () => {
     expect(parsed.searchParams.get('dept')).toBe('a b');
     expect(parsed.searchParams.get('customer')).toBe('c&d');
   });
+
+  test('omits full=true when fullGroundTruth is false (default)', () => {
+    const url = buildGroundTruthUrl('http://localhost', { dept: 'd1', customer: 'c1' });
+    const parsed = new URL(url);
+    expect(parsed.searchParams.has('full')).toBe(false);
+  });
+
+  test('includes full=true when fullGroundTruth is true (deepclean mode)', () => {
+    const url = buildGroundTruthUrl('http://localhost', { dept: 'd1', customer: 'c1' }, true);
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('full')).toBe('true');
+  });
 });
 
 describe('buildWikiUrl', () => {
@@ -410,6 +422,74 @@ describe('stageAutolearnInput — success', () => {
       const gtUrl = receivedUrls.find((u) => u.includes('/api/autolearn/ground-truth')) ?? '';
       expect(gtUrl).toContain('dept=finance');
       expect(gtUrl).toContain('customer=beta-corp');
+    } finally {
+      captureServer.close();
+    }
+  });
+
+  test('passes full=true to the ground-truth endpoint when fullGroundTruth is set (deepclean mode)', async () => {
+    const receivedUrls: string[] = [];
+
+    const { server: captureServer, baseUrl: captureBaseUrl } = await startTestServer((req, res) => {
+      receivedUrls.push(req.url ?? '');
+      if ((req.url ?? '').includes('/api/autolearn/ground-truth')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(GROUND_TRUTH_BODY);
+        return;
+      }
+      if ((req.url ?? '').includes('/api/autolearn/wiki')) {
+        res.writeHead(200, { 'Content-Type': 'text/markdown' });
+        res.end(WIKI_BODY);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    try {
+      const result = await stageAutolearnInput({
+        apiBaseUrl: captureBaseUrl,
+        scope: { dept: 'deepclean-dept', customer: 'deepclean-cust' },
+        delegatedToken: 'tok',
+        fullGroundTruth: true,
+      });
+      await cleanupStagingDir(result.stagingDir);
+      const gtUrl = receivedUrls.find((u) => u.includes('/api/autolearn/ground-truth')) ?? '';
+      expect(gtUrl).toContain('full=true');
+    } finally {
+      captureServer.close();
+    }
+  });
+
+  test('does NOT pass full=true to the ground-truth endpoint when fullGroundTruth is false (gardening mode)', async () => {
+    const receivedUrls: string[] = [];
+
+    const { server: captureServer, baseUrl: captureBaseUrl } = await startTestServer((req, res) => {
+      receivedUrls.push(req.url ?? '');
+      if ((req.url ?? '').includes('/api/autolearn/ground-truth')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(GROUND_TRUTH_BODY);
+        return;
+      }
+      if ((req.url ?? '').includes('/api/autolearn/wiki')) {
+        res.writeHead(200, { 'Content-Type': 'text/markdown' });
+        res.end(WIKI_BODY);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    try {
+      const result = await stageAutolearnInput({
+        apiBaseUrl: captureBaseUrl,
+        scope: { dept: 'garden-dept', customer: 'garden-cust' },
+        delegatedToken: 'tok',
+        fullGroundTruth: false,
+      });
+      await cleanupStagingDir(result.stagingDir);
+      const gtUrl = receivedUrls.find((u) => u.includes('/api/autolearn/ground-truth')) ?? '';
+      expect(gtUrl).not.toContain('full=true');
     } finally {
       captureServer.close();
     }

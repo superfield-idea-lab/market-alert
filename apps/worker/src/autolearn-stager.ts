@@ -168,13 +168,26 @@ export class StagingWriteError extends Error {
 /**
  * Build the URL for the anonymised ground-truth endpoint.
  *
- * @param apiBaseUrl - Base URL of the Calypso API server (no trailing slash).
- * @param scope      - The (dept, customer) scope to fetch.
+ * When `fullGroundTruth` is true the `full=true` query parameter is appended,
+ * signalling the API to return the entire corpus for the scope rather than an
+ * incremental diff.  Deepclean runs always pass `fullGroundTruth: true`
+ * (PRD §4.5, issue #41).
+ *
+ * @param apiBaseUrl     - Base URL of the Calypso API server (no trailing slash).
+ * @param scope          - The (dept, customer) scope to fetch.
+ * @param fullGroundTruth - When true, include `full=true` in the query string.
  */
-export function buildGroundTruthUrl(apiBaseUrl: string, scope: AutolearnScope): string {
+export function buildGroundTruthUrl(
+  apiBaseUrl: string,
+  scope: AutolearnScope,
+  fullGroundTruth = false,
+): string {
   const url = new URL(`${apiBaseUrl}/api/autolearn/ground-truth`);
   url.searchParams.set('dept', scope.dept);
   url.searchParams.set('customer', scope.customer);
+  if (fullGroundTruth) {
+    url.searchParams.set('full', 'true');
+  }
   return url.toString();
 }
 
@@ -194,9 +207,10 @@ export function buildWikiUrl(apiBaseUrl: string, scope: AutolearnScope): string 
 /**
  * Fetch the anonymised ground truth for the given scope.
  *
- * @param apiBaseUrl     - Base URL of the Calypso API server.
- * @param scope          - The (dept, customer) scope to fetch.
- * @param delegatedToken - Short-lived token authorising the fetch.
+ * @param apiBaseUrl      - Base URL of the Calypso API server.
+ * @param scope           - The (dept, customer) scope to fetch.
+ * @param delegatedToken  - Short-lived token authorising the fetch.
+ * @param fullGroundTruth - When true, fetches the full corpus (deepclean mode).
  * @returns Parsed JSON body as a plain object.
  * @throws {AutolearnFetchError}  On non-2xx HTTP status or network error.
  * @throws {AutolearnParseError}  On invalid JSON response body.
@@ -205,8 +219,9 @@ export async function fetchGroundTruth(
   apiBaseUrl: string,
   scope: AutolearnScope,
   delegatedToken: string,
+  fullGroundTruth = false,
 ): Promise<GroundTruthContent> {
-  const endpoint = buildGroundTruthUrl(apiBaseUrl, scope);
+  const endpoint = buildGroundTruthUrl(apiBaseUrl, scope, fullGroundTruth);
 
   let response: Response;
   try {
@@ -330,6 +345,12 @@ export interface StageAutolearnInputOptions {
   scope: AutolearnScope;
   /** Short-lived delegated token for API authorisation. */
   delegatedToken: string;
+  /**
+   * When true the stager fetches the full ground-truth corpus for the scope
+   * rather than an incremental snapshot.  Always set to true for deepclean
+   * runs (PRD §4.5, issue #41).  Defaults to false (incremental, gardening).
+   */
+  fullGroundTruth?: boolean;
 }
 
 /**
@@ -351,7 +372,13 @@ export interface StageAutolearnInputOptions {
 export async function stageAutolearnInput(
   options: StageAutolearnInputOptions,
 ): Promise<StagingResult> {
-  const { apiBaseUrl, scope, delegatedToken } = options;
+  const { apiBaseUrl, scope, delegatedToken, fullGroundTruth = false } = options;
+
+  if (fullGroundTruth) {
+    console.log(
+      `[autolearn-stager] deepclean mode: fetching FULL ground truth for dept="${scope.dept}" customer="${scope.customer}"`,
+    );
+  }
 
   // 1. Create staging directory.
   const stagingDir = await createStagingDir();
@@ -360,7 +387,7 @@ export async function stageAutolearnInput(
   //    Any failure is propagated to the caller; no retry is attempted here so
   //    the pod fails loudly and restarts fresh.
   const [groundTruth, wikiMarkdown] = await Promise.all([
-    fetchGroundTruth(apiBaseUrl, scope, delegatedToken),
+    fetchGroundTruth(apiBaseUrl, scope, delegatedToken, fullGroundTruth),
     fetchWikiMarkdown(apiBaseUrl, scope, delegatedToken),
   ]);
 
