@@ -51,6 +51,10 @@ import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
 import { handleWikiPendingDraftsRequest } from './api/wiki-pending-drafts';
+import {
+  handleTranscriptIngestionRequest,
+  registerTranscriptEntityType,
+} from './api/transcript-ingestion';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -77,6 +81,11 @@ await registerPhase1EntityTypesWithDb(sql);
 // Register the CorpusChunk entity type for Phase 2 chunking.
 await registerCorpusChunkEntityType().catch((err) =>
   console.error('[corpus-chunk] Entity type registration failed:', err),
+);
+
+// Register the Transcript entity type for Phase 5 edge-path recording (issue #53).
+await registerTranscriptEntityType().catch((err) =>
+  console.error('[transcript] Entity type registration failed:', err),
 );
 
 // Purge any already-expired revocation rows left from a previous run, then
@@ -325,6 +334,15 @@ export default {
     if (url.pathname.startsWith('/api/reidentification')) {
       const reidentRes = await handleReidentificationRequest(req, url, appState);
       if (reidentRes) return withTrace(reidentRes);
+    }
+
+    // Phase 5 edge-path transcript ingestion (POST /internal/ingestion/transcript).
+    // Edge-path invariant: only transcript JSON is accepted — raw audio never
+    // crosses the trust boundary. Checked before the generic /internal/ingestion
+    // prefix to avoid the email handler swallowing the path. Issue #53.
+    if (url.pathname === '/internal/ingestion/transcript') {
+      const transcriptRes = await handleTranscriptIngestionRequest(req, url, appState);
+      if (transcriptRes) return withTrace(transcriptRes);
     }
 
     // API-mediated email ingestion (POST /internal/ingestion/email)

@@ -26,6 +26,11 @@ export async function startE2EServer(): Promise<E2EEnvironment> {
   const pg = await startPostgres();
   await applyAuditSchema(pg.url);
 
+  // Migrate the audit schema into the same ephemeral pg container so that
+  // audit-before-write endpoints (transcript ingestion, wiki writes, etc.)
+  // can succeed in the test environment.
+  await migrateAuditSchema(pg.url);
+
   const server = Bun.spawn([BUN_BIN, 'run', SERVER_ENTRY_ABS], {
     cwd: REPO_ROOT,
     env: {
@@ -125,4 +130,35 @@ async function waitForServer(port = SERVER_PORT): Promise<void> {
     }
   }
   throw new Error(`Server at ${base} did not become ready within ${SERVER_READY_TIMEOUT_MS}ms`);
+}
+
+/**
+ * Runs the audit schema SQL against the given database URL.
+ *
+ * In the E2E test environment the audit DB is co-located with the app DB
+ * in the same ephemeral pg-container, which means we need to create the
+ * audit_events table before the server starts so emitAuditEvent does not
+ * throw. In production the four pools are fully isolated; this is
+ * test-only co-location.
+ */
+async function migrateAuditSchema(databaseUrl: string): Promise<void> {
+  const auditSchemaPath = join(REPO_ROOT, 'packages/db/audit-schema.sql');
+  const schemaSql = readFileSync(auditSchemaPath, 'utf-8');
+  const db = postgres(databaseUrl, {
+    max: 1,
+    idle_timeout: 10,
+    connect_timeout: 10,
+  });
+  try {
+    // Split on semicolons (the audit schema has no dollar-quoted blocks)
+    const statements = schemaSql
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await db.unsafe(stmt);
+    }
+  } finally {
+    await db.end({ timeout: 5 });
+  }
 }

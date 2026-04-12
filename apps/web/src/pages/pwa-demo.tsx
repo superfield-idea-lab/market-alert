@@ -24,6 +24,7 @@ import { NotificationDemoCard } from '../components/pwa/demos/notification-demo'
 import { StorageDemoCard } from '../components/pwa/demos/storage-demo';
 import { CameraDemoCard } from '../components/pwa/demos/camera-demo';
 import { MicDemoCard } from '../components/pwa/demos/mic-demo';
+import { MeetingRecordingDemoCard } from '../components/pwa/demos/meeting-recording-demo';
 
 /**
  * Top-level PWA demo page.  Renders a platform info summary header and a
@@ -119,6 +120,7 @@ export function PwaDemoPage() {
           <StorageDemoCard />
           <CameraDemoCard />
           <MicDemoCard />
+          <MeetingRecordingDemoCard />
         </div>
       </div>
     </div>
