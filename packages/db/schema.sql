@@ -432,6 +432,54 @@ CREATE INDEX IF NOT EXISTS idx_business_journal_entity_id
 CREATE INDEX IF NOT EXISTS idx_business_journal_created_at
   ON business_journal (created_at);
 
+-- Tenant retention policies (issue #33, Phase 2).
+-- Stores the default retention_class and legal_hold values for each tenant.
+-- Ingestion workers MUST look up this row before writing an Email or CorpusChunk.
+-- A missing row blocks ingestion — there is no fall-through default at the DB layer.
+--
+-- retention_class: an opaque policy pointer (e.g. "standard", "mifid2-7yr").
+--   Phase 8 builds the policy engine that interprets this value.
+--   Phase 2 only writes and reads it.
+-- legal_hold_default: whether all newly ingested entities for this tenant start
+--   under a legal hold. Typically false; set true when a hold is raised.
+CREATE TABLE IF NOT EXISTS tenant_retention_policies (
+  tenant_id            TEXT PRIMARY KEY,
+  retention_class      TEXT NOT NULL,
+  legal_hold_default   BOOLEAN NOT NULL DEFAULT false,
+  created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Retention metadata columns on entities (issue #33).
+-- Only Email and CorpusChunk rows are required to have non-null values; other
+-- entity types leave them null. The application layer (retention-store.ts)
+-- enforces non-null population for ground-truth entity types at write time.
+ALTER TABLE entities
+  ADD COLUMN IF NOT EXISTS retention_class TEXT,
+  ADD COLUMN IF NOT EXISTS legal_hold      BOOLEAN;
+
+-- Immutability trigger for retention_class and legal_hold on entities (issue #33).
+-- Once set on INSERT (non-null), neither field may be changed via UPDATE.
+-- The Phase 8 retention engine is the sole actor that may legitimately change
+-- these values; it will connect as a privileged admin role, not as app_rw.
+CREATE OR REPLACE FUNCTION guard_retention_immutable()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.retention_class IS NOT NULL AND NEW.retention_class IS DISTINCT FROM OLD.retention_class THEN
+    RAISE EXCEPTION 'retention_class is immutable after initial write (entity id=%)', OLD.id;
+  END IF;
+  IF OLD.legal_hold IS NOT NULL AND NEW.legal_hold IS DISTINCT FROM OLD.legal_hold THEN
+    RAISE EXCEPTION 'legal_hold is immutable after initial write (entity id=%)', OLD.id;
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_entities_retention_immutable ON entities;
+CREATE TRIGGER trg_entities_retention_immutable
+  BEFORE UPDATE ON entities
+  FOR EACH ROW EXECUTE FUNCTION guard_retention_immutable();
+
 -- Migration version tracking table.
 -- Records each named migration that has been applied to this database.
 -- ENV-D-002: the same migration runner is used identically in dev, CI, and prod.

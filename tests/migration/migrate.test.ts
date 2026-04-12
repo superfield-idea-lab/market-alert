@@ -10,10 +10,14 @@ import { startPostgres, type PgContainer } from '../../packages/db/pg-container'
 const EXPECTED_TABLES = [
   '_schema_version',
   'api_keys',
+  'auth_lockout',
+  'business_journal',
   'entities',
   'entity_types',
+  'feature_flags',
   'passkey_challenges',
   'passkey_credentials',
+  'recovery_passphrases',
   'relations',
   'revoked_tokens',
   'task_queue',
@@ -26,6 +30,7 @@ const EXPECTED_TABLES = [
   'task_queue_view_deepclean',
   'task_queue_view_email_ingest',
   'task_queue_view_transcription',
+  'tenant_retention_policies',
   'worker_credentials',
 ] as const;
 
