@@ -31,6 +31,7 @@ import { createApiKey, listApiKeys, deleteApiKey } from 'db/api-keys';
 import { listTasksForAdmin, type TaskQueueStatus } from 'db/task-queue';
 import { emitAuditEvent } from '../policies/audit-service';
 import { isSuperuser, makeJson } from '../lib/response';
+import { canManageCrmEntities } from '../lib/access';
 import {
   setTenantRatePolicy,
   getTenantRatePolicy,
@@ -57,9 +58,219 @@ export async function handleAdminRequest(
 
   const corsHeaders = getCorsHeaders(req);
   const json = makeJson(corsHeaders);
+  const { sql } = appState;
 
   const user = await getAuthenticatedUser(req);
   if (!user) return json({ error: 'Unauthorized' }, 401);
+  const hasCrmAccess = await canManageCrmEntities(user.id, sql).catch(() => false);
+
+  // -----------------------------------------------------------------------
+  // CRM entity management endpoints
+  // -----------------------------------------------------------------------
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/crm/entities') {
+    if (!hasCrmAccess) return json({ error: 'Forbidden' }, 403);
+
+    const type = url.searchParams.get('type');
+    const allowedTypes = ['asset_manager', 'fund'] as const;
+    if (!type || !allowedTypes.includes(type as (typeof allowedTypes)[number])) {
+      return json({ error: 'type is required and must be asset_manager or fund' }, 400);
+    }
+
+    interface CrmEntityRow {
+      id: string;
+      type: string;
+      properties: Record<string, unknown>;
+      created_at: string;
+      updated_at: string;
+    }
+
+    const rows = await sql<CrmEntityRow[]>`
+      SELECT id, type, properties, created_at, updated_at
+      FROM entities
+      WHERE type = ${type}
+      ORDER BY created_at DESC
+    `;
+    const totalRows = await sql<{ count: string }[]>`
+      SELECT COUNT(*) AS count
+      FROM entities
+      WHERE type = ${type}
+    `;
+    return json({
+      type,
+      total: Number(totalRows[0]?.count ?? 0),
+      entities: rows,
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/crm/entities') {
+    if (!hasCrmAccess) return json({ error: 'Forbidden' }, 403);
+
+    let body: { type?: string; properties?: Record<string, unknown> };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const allowedTypes = ['asset_manager', 'fund'] as const;
+    if (!body.type || !allowedTypes.includes(body.type as (typeof allowedTypes)[number])) {
+      return json({ error: 'type must be asset_manager or fund' }, 400);
+    }
+
+    const properties = body.properties ?? {};
+    if (typeof properties.name !== 'string' || !properties.name.trim()) {
+      return json({ error: 'properties.name is required' }, 400);
+    }
+
+    const id = `${body.type}-${crypto.randomUUID()}`;
+    const storedProperties = {
+      ...properties,
+      name: properties.name.trim(),
+    };
+
+    await sql`
+      INSERT INTO entities (id, type, properties, tenant_id)
+      VALUES (${id}, ${body.type}, ${sql.json(storedProperties as never)}, null)
+    `;
+
+    const [entity] = await sql<
+      {
+        id: string;
+        type: string;
+        properties: Record<string, unknown>;
+        created_at: string;
+        updated_at: string;
+      }[]
+    >`
+      SELECT id, type, properties, created_at, updated_at
+      FROM entities
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'crm_entity.create',
+      entity_type: body.type,
+      entity_id: id,
+      before: null,
+      after: { type: body.type, properties: storedProperties },
+      ts: new Date().toISOString(),
+    }).catch((err) => console.warn('[audit] crm_entity.create audit write failed:', err));
+
+    return json({ entity }, 201);
+  }
+
+  if (req.method === 'PATCH' && url.pathname.match(/^\/api\/admin\/crm\/entities\/[^/]+$/)) {
+    if (!hasCrmAccess) return json({ error: 'Forbidden' }, 403);
+
+    const entityId = url.pathname.split('/')[5];
+    if (!entityId) return json({ error: 'Missing entity id' }, 400);
+
+    let body: { properties?: Record<string, unknown> };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const [existing] = await sql<
+      {
+        id: string;
+        type: string;
+        properties: Record<string, unknown>;
+        created_at: string;
+        updated_at: string;
+      }[]
+    >`
+      SELECT id, type, properties, created_at, updated_at
+      FROM entities
+      WHERE id = ${entityId}
+        AND type IN ('asset_manager', 'fund')
+      LIMIT 1
+    `;
+
+    if (!existing) return json({ error: 'Not found' }, 404);
+
+    const updatedProperties = {
+      ...existing.properties,
+      ...(body.properties ?? {}),
+    };
+    if (typeof updatedProperties.name === 'string') {
+      updatedProperties.name = updatedProperties.name.trim();
+    }
+    if (typeof updatedProperties.name !== 'string' || !updatedProperties.name.trim()) {
+      return json({ error: 'properties.name is required' }, 400);
+    }
+
+    await sql`
+      UPDATE entities
+      SET properties = ${sql.json(updatedProperties as never)},
+          updated_at = NOW()
+      WHERE id = ${entityId}
+    `;
+
+    const [entity] = await sql<
+      {
+        id: string;
+        type: string;
+        properties: Record<string, unknown>;
+        created_at: string;
+        updated_at: string;
+      }[]
+    >`
+      SELECT id, type, properties, created_at, updated_at
+      FROM entities
+      WHERE id = ${entityId}
+      LIMIT 1
+    `;
+
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'crm_entity.update',
+      entity_type: existing.type,
+      entity_id: entityId,
+      before: { properties: existing.properties },
+      after: { properties: updatedProperties },
+      ts: new Date().toISOString(),
+    }).catch((err) => console.warn('[audit] crm_entity.update audit write failed:', err));
+
+    return json({ entity });
+  }
+
+  if (req.method === 'DELETE' && url.pathname.match(/^\/api\/admin\/crm\/entities\/[^/]+$/)) {
+    if (!hasCrmAccess) return json({ error: 'Forbidden' }, 403);
+
+    const entityId = url.pathname.split('/')[5];
+    if (!entityId) return json({ error: 'Missing entity id' }, 400);
+
+    const [existing] = await sql<
+      { id: string; type: string; properties: Record<string, unknown> }[]
+    >`
+      SELECT id, type, properties
+      FROM entities
+      WHERE id = ${entityId}
+        AND type IN ('asset_manager', 'fund')
+      LIMIT 1
+    `;
+    if (!existing) return json({ error: 'Not found' }, 404);
+
+    await sql`DELETE FROM entities WHERE id = ${entityId}`;
+
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'crm_entity.delete',
+      entity_type: existing.type,
+      entity_id: entityId,
+      before: { properties: existing.properties },
+      after: null,
+      ts: new Date().toISOString(),
+    }).catch((err) => console.warn('[audit] crm_entity.delete audit write failed:', err));
+
+    return json({ success: true });
+  }
+
   if (!isSuperuser(user.id)) return json({ error: 'Forbidden' }, 403);
 
   // POST /api/admin/keys — create a new API key
@@ -266,8 +477,6 @@ export async function handleAdminRequest(
   // -----------------------------------------------------------------------
   // User management endpoints
   // -----------------------------------------------------------------------
-
-  const { sql } = appState;
 
   // GET /api/admin/users — paginated user list with optional role filter and ?q= search
   //

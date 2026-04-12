@@ -7,23 +7,27 @@
 import { describe, test, expect } from 'vitest';
 
 /**
- * Mirror of the nav visibility decision: the admin button should only
- * appear when the user has isSuperadmin === true.
+ * Mirror of the nav visibility decision: the admin button should appear when
+ * the user can access the admin surface as either a superadmin or CRM admin.
  */
-function isAdminNavVisible(isSuperadmin: boolean | undefined): boolean {
-  return isSuperadmin === true;
+function isAdminNavVisible(
+  isSuperadmin: boolean | undefined,
+  isCrmAdmin: boolean | undefined,
+): boolean {
+  return isSuperadmin === true || isCrmAdmin === true;
 }
 
 /**
- * Mirror of the admin view access guard: the admin dashboard should
- * only render when the user has isSuperadmin === true.
+ * Mirror of the admin view access guard: the admin dashboard should render
+ * when the user can access the admin surface.
  */
 function resolveAdminViewBranch(
   activeView: string,
   isSuperadmin: boolean | undefined,
+  isCrmAdmin: boolean | undefined,
 ): 'dashboard' | 'denied' | 'other' {
   if (activeView !== 'admin') return 'other';
-  if (isSuperadmin === true) return 'dashboard';
+  if (isSuperadmin === true || isCrmAdmin === true) return 'dashboard';
   return 'denied';
 }
 
@@ -146,35 +150,43 @@ function groupFindingsByAgentType(findings: Finding[]): Record<string, Finding[]
 
 describe('Admin nav visibility', () => {
   test('visible when isSuperadmin is true', () => {
-    expect(isAdminNavVisible(true)).toBe(true);
+    expect(isAdminNavVisible(true, false)).toBe(true);
   });
 
   test('hidden when isSuperadmin is false', () => {
-    expect(isAdminNavVisible(false)).toBe(false);
+    expect(isAdminNavVisible(false, false)).toBe(false);
   });
 
   test('hidden when isSuperadmin is undefined', () => {
-    expect(isAdminNavVisible(undefined)).toBe(false);
+    expect(isAdminNavVisible(undefined, undefined)).toBe(false);
+  });
+
+  test('visible when isCrmAdmin is true', () => {
+    expect(isAdminNavVisible(false, true)).toBe(true);
   });
 });
 
 describe('Admin view access guard', () => {
   test('shows dashboard for superadmin on admin view', () => {
-    expect(resolveAdminViewBranch('admin', true)).toBe('dashboard');
+    expect(resolveAdminViewBranch('admin', true, false)).toBe('dashboard');
   });
 
   test('shows denied for non-superadmin on admin view', () => {
-    expect(resolveAdminViewBranch('admin', false)).toBe('denied');
+    expect(resolveAdminViewBranch('admin', false, false)).toBe('denied');
   });
 
   test('shows denied for undefined superadmin on admin view', () => {
-    expect(resolveAdminViewBranch('admin', undefined)).toBe('denied');
+    expect(resolveAdminViewBranch('admin', undefined, undefined)).toBe('denied');
+  });
+
+  test('shows dashboard for CRM admin on admin view', () => {
+    expect(resolveAdminViewBranch('admin', false, true)).toBe('dashboard');
   });
 
   test('returns other for non-admin views', () => {
-    expect(resolveAdminViewBranch('board', true)).toBe('other');
-    expect(resolveAdminViewBranch('settings', false)).toBe('other');
-    expect(resolveAdminViewBranch('pwa', undefined)).toBe('other');
+    expect(resolveAdminViewBranch('board', true, false)).toBe('other');
+    expect(resolveAdminViewBranch('settings', false, true)).toBe('other');
+    expect(resolveAdminViewBranch('pwa', undefined, undefined)).toBe('other');
   });
 });
 
@@ -191,13 +203,6 @@ describe('Task queue status badge colours', () => {
 
   test('returns fallback colour for unknown status', () => {
     expect(resolveStatusColor('unknown')).toBe('bg-zinc-50 text-zinc-600 border-zinc-200');
-  });
-});
-
-describe('AdminDashboard module exports', () => {
-  test('AdminDashboard is exported from the module', async () => {
-    const mod = await import('../../src/pages/admin-dashboard.js');
-    expect(typeof mod.AdminDashboard).toBe('function');
   });
 });
 

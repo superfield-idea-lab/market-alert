@@ -4,6 +4,7 @@ export interface User {
   id: string;
   username: string;
   isSuperadmin?: boolean;
+  isCrmAdmin?: boolean;
 }
 
 interface AuthContextType {

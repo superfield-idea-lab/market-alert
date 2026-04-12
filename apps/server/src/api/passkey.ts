@@ -46,6 +46,7 @@ import {
 } from 'db/recovery';
 import { getClientIp, tenantAuthLimiter, tooManyRequests } from '../security/rate-limiter';
 import { emitAuditEvent } from '../policies/audit-service';
+import { getUserAccessFlags } from '../lib/access';
 
 // The Relying Party name (display only, not security-critical).
 const RP_NAME = process.env.RP_NAME ?? 'Calypso';
@@ -332,8 +333,21 @@ export async function handlePasskeyRequest(
       const sessionToken = await signJwt({ id: userId, username });
       const csrfToken = generateCsrfToken();
 
+      const access = await getUserAccessFlags(userId, sql).catch(() => ({
+        isSuperadmin: false,
+        isCrmAdmin: false,
+      }));
       const regRes = new Response(
-        JSON.stringify({ verified: true, credentialId, user: { id: userId, username } }),
+        JSON.stringify({
+          verified: true,
+          credentialId,
+          user: {
+            id: userId,
+            username,
+            isSuperadmin: access.isSuperadmin,
+            isCrmAdmin: access.isCrmAdmin,
+          },
+        }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
       regRes.headers.append('Set-Cookie', authCookieHeader(sessionToken));
@@ -570,8 +584,19 @@ export async function handlePasskeyRequest(
       const token = await signJwt({ id: cred.user_id, username: cred.username });
       const csrfToken = generateCsrfToken();
 
+      const access = await getUserAccessFlags(cred.user_id, sql).catch(() => ({
+        isSuperadmin: false,
+        isCrmAdmin: false,
+      }));
       const loginRes = new Response(
-        JSON.stringify({ user: { id: cred.user_id, username: cred.username } }),
+        JSON.stringify({
+          user: {
+            id: cred.user_id,
+            username: cred.username,
+            isSuperadmin: access.isSuperadmin,
+            isCrmAdmin: access.isCrmAdmin,
+          },
+        }),
         {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },

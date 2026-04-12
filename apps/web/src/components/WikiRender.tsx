@@ -48,7 +48,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { WikiPageVersion } from 'core';
+import type { WikiPageVersion } from '../../../../packages/core/types';
 import { renderWikiMarkdown } from './wiki-markdown';
 import type { CitationMarker } from './wiki-markdown';
 import {

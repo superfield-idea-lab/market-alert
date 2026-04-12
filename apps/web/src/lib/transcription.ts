@@ -45,7 +45,7 @@
  * - Buy-vs-build decision: docs/technical/transcription-buy-vs-build.md
  */
 
-import type { TranscriptSegment } from 'core';
+import type { TranscriptSegment } from '../../../../packages/core/types';
 
 // Re-export for callers that need the type without importing core directly.
 export type { TranscriptSegment };

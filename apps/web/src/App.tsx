@@ -71,6 +71,8 @@ function App() {
     return <Login />;
   }
 
+  const canAccessAdmin = user.isSuperadmin === true || user.isCrmAdmin === true;
+
   return (
     <div className="flex h-screen w-full bg-zinc-50 font-sans overflow-hidden text-zinc-900">
       {/* Left Sidebar - Extremely slim icon navigation */}
@@ -108,7 +110,7 @@ function App() {
             >
               <BookOpen size={20} strokeWidth={2.5} />
             </button>
-            {user.isSuperadmin && (
+            {canAccessAdmin && (
               <button
                 onClick={() => setActiveView('admin')}
                 className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
@@ -159,10 +161,10 @@ function App() {
             {activeView === 'board' && <TaskListView />}
             {activeView === 'pwa' && <PwaDemoPage />}
             {activeView === 'wiki' && <WikiViewPage customerId={wikiCustomerId} />}
-            {activeView === 'admin' && user.isSuperadmin && <AdminDashboard />}
-            {activeView === 'admin' && !user.isSuperadmin && (
+            {activeView === 'admin' && canAccessAdmin && <AdminDashboard />}
+            {activeView === 'admin' && !canAccessAdmin && (
               <div className="p-8 text-zinc-400 text-sm">
-                Access denied. Superadmin privileges required.
+                Access denied. Admin privileges required.
               </div>
             )}
             {activeView === 'settings' && <SettingsPage />}

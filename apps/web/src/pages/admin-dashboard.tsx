@@ -390,10 +390,291 @@ function FindingsTab() {
 }
 
 // ---------------------------------------------------------------------------
+// CRM entity management tab
+// ---------------------------------------------------------------------------
+
+type CrmEntityType = 'asset_manager' | 'fund';
+
+interface CrmEntity {
+  id: string;
+  type: CrmEntityType;
+  properties: {
+    name?: string;
+    notes?: string;
+    [key: string]: unknown;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+const CRM_TYPE_LABELS: Record<CrmEntityType, string> = {
+  asset_manager: 'Asset Managers',
+  fund: 'Funds',
+};
+
+function CrmEntitiesTab() {
+  const [entityType, setEntityType] = useState<CrmEntityType>('asset_manager');
+  const [entities, setEntities] = useState<CrmEntity[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, { name: string; notes: string }>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [createType, setCreateType] = useState<CrmEntityType>('asset_manager');
+  const [createName, setCreateName] = useState('');
+  const [createNotes, setCreateNotes] = useState('');
+
+  const fetchEntities = useCallback(async (type: CrmEntityType) => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/crm/entities?type=${type}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to load CRM entities');
+      }
+      const data = (await res.json()) as { entities?: CrmEntity[] };
+      const nextEntities = data.entities ?? [];
+      setEntities(nextEntities);
+      const nextDrafts: Record<string, { name: string; notes: string }> = {};
+      for (const entity of nextEntities) {
+        nextDrafts[entity.id] = {
+          name: typeof entity.properties.name === 'string' ? entity.properties.name : '',
+          notes: typeof entity.properties.notes === 'string' ? entity.properties.notes : '',
+        };
+      }
+      setDrafts(nextDrafts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load CRM entities');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEntities(entityType);
+    setCreateType(entityType);
+  }, [entityType, fetchEntities]);
+
+  const updateDraft = (id: string, field: 'name' | 'notes', value: string) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        name: prev[id]?.name ?? '',
+        notes: prev[id]?.notes ?? '',
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    try {
+      const res = await fetch('/api/admin/crm/entities', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: createType,
+          properties: {
+            name: createName,
+            notes: createNotes,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to create CRM entity');
+      }
+      setCreateName('');
+      setCreateNotes('');
+      setEntityType(createType);
+      await fetchEntities(createType);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create CRM entity');
+    }
+  };
+
+  const handleSave = async (entityId: string) => {
+    const draft = drafts[entityId];
+    if (!draft) return;
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/crm/entities/${entityId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          properties: {
+            name: draft.name,
+            notes: draft.notes,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to update CRM entity');
+      }
+      await fetchEntities(entityType);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update CRM entity');
+    }
+  };
+
+  const handleDelete = async (entityId: string) => {
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/crm/entities/${entityId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to delete CRM entity');
+      }
+      await fetchEntities(entityType);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete CRM entity');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-700 uppercase tracking-wide">
+            CRM entities
+          </h2>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Manage the asset-manager and fund registry used by campaign analysis.
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-zinc-200 bg-white p-1 text-xs font-medium">
+          {(Object.keys(CRM_TYPE_LABELS) as CrmEntityType[]).map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => setEntityType(type)}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                entityType === type ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:bg-zinc-100'
+              }`}
+            >
+              {CRM_TYPE_LABELS[type]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <form
+        onSubmit={handleCreate}
+        className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-4 md:grid-cols-[160px_1fr_1fr_auto]"
+      >
+        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500">
+          Type
+          <select
+            value={createType}
+            onChange={(e) => setCreateType(e.target.value as CrmEntityType)}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
+          >
+            <option value="asset_manager">Asset manager</option>
+            <option value="fund">Fund</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500">
+          Name
+          <input
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
+            placeholder="E.g. Atlas Capital"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500">
+          Notes
+          <input
+            value={createNotes}
+            onChange={(e) => setCreateNotes(e.target.value)}
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
+            placeholder="Optional note"
+          />
+        </label>
+        <button
+          type="submit"
+          className="self-end rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+        >
+          Create
+        </button>
+      </form>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-zinc-200 bg-white">
+        {loading ? (
+          <div className="flex h-24 items-center justify-center text-sm text-zinc-400">
+            Loading {CRM_TYPE_LABELS[entityType].toLowerCase()}...
+          </div>
+        ) : entities.length === 0 ? (
+          <div className="flex h-24 items-center justify-center text-sm text-zinc-400">
+            No {CRM_TYPE_LABELS[entityType].toLowerCase()} found.
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-100">
+            {entities.map((entity) => {
+              const draft = drafts[entity.id] ?? { name: '', notes: '' };
+              return (
+                <div key={entity.id} className="grid gap-3 p-4 md:grid-cols-[1fr_1fr_auto]">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500">
+                    Name
+                    <input
+                      value={draft.name}
+                      onChange={(e) => updateDraft(entity.id, 'name', e.target.value)}
+                      className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500">
+                    Notes
+                    <input
+                      value={draft.notes}
+                      onChange={(e) => updateDraft(entity.id, 'notes', e.target.value)}
+                      className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900"
+                    />
+                  </label>
+                  <div className="flex items-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSave(entity.id)}
+                      className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(entity.id)}
+                      className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-type AdminTab = 'tasks' | 'users' | 'findings';
+type AdminTab = 'tasks' | 'users' | 'findings' | 'crm';
 
 export function AdminDashboard() {
   const [tasks, setTasks] = useState<TaskQueueEntry[]>([]);
@@ -582,6 +863,7 @@ export function AdminDashboard() {
   const tabs: { id: AdminTab; label: string }[] = [
     { id: 'tasks', label: 'Task Queue' },
     { id: 'users', label: 'Users' },
+    { id: 'crm', label: 'CRM' },
     { id: 'findings', label: 'Findings' },
   ];
 
@@ -796,6 +1078,9 @@ export function AdminDashboard() {
 
       {/* Findings Tab */}
       {activeTab === 'findings' && <FindingsTab />}
+
+      {/* CRM Tab */}
+      {activeTab === 'crm' && <CrmEntitiesTab />}
     </div>
   );
 }

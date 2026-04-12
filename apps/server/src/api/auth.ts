@@ -6,6 +6,7 @@ import { authCookieClearHeader, authCookieHeader, getAuthToken } from '../auth/c
 import { getClientIp, globalLimiter, tooManyRequests } from '../security/rate-limiter';
 import { authenticateApiKey } from 'db/api-keys';
 import { isSuperuser } from '../lib/response';
+import { getUserAccessFlags } from '../lib/access';
 
 // Helper to parse cookies from headers
 export function parseCookies(cookieHeader: string | null): Record<string, string> {
@@ -159,10 +160,24 @@ export async function handleAuthRequest(
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    return new Response(JSON.stringify({ user: { ...user, isSuperadmin: isSuperuser(user.id) } }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    const access = await getUserAccessFlags(user.id, appState.sql).catch(() => ({
+      isSuperadmin: isSuperuser(user.id),
+      isCrmAdmin: false,
+      role: null,
+    }));
+    return new Response(
+      JSON.stringify({
+        user: {
+          ...user,
+          isSuperadmin: access.isSuperadmin,
+          isCrmAdmin: access.isCrmAdmin,
+        },
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   // 4. POST /api/auth/token/refresh (AUTH-C-018)
