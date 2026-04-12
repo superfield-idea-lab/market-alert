@@ -1,22 +1,15 @@
 /**
  * @file annotations.ts
  *
- * Annotation thread API — Phase 6 scout stub (issue #62).
- *
- * ## Scout stub
- *
- * This file is a **no-op stub** for the dev-scout issue that proves the
- * single annotation thread end-to-end invariant. All routes are wired into the
- * router and return structured 501 Not Implemented responses, encoding the
- * expected request/response contracts without implementing the full runtime
- * behaviour.
+ * Annotation thread API — Phase 6 (issue #65).
  *
  * ## Routes
  *
  *   POST   /api/annotations
  *     Open a new annotation thread on a wiki page passage.
  *     Body: { wiki_page_version_id, passage_ref, comment }
- *     Returns: { id, wiki_page_version_id, passage_ref, comment, state, agent_reply, created_by, created_at }
+ *     Calls the Anthropic API SDK to produce an agent reply.
+ *     Returns: { id, wiki_page_version_id, passage_ref, state, thread, created_by, created_at }
  *
  *   GET    /api/annotations/:id
  *     Fetch a single annotation thread by ID.
@@ -31,7 +24,7 @@
  *     No new version is written.
  *     Returns: { annotation_id, state }
  *
- * ## Integration points (captured for follow-on issues)
+ * ## Integration points
  *
  *   1. Anthropic API SDK (not Claude CLI — PRD §6, shorter interactive loop).
  *      Called when the RM opens an annotation; the API is asked to produce a
@@ -44,11 +37,10 @@
  *      The `thread` field is encrypted (corpus-key) — see phase1-entity-types.ts.
  *
  *   3. WikiPageVersion write on accept.
- *      The accept path must insert a new entity of type `wiki_page_version` with
+ *      The accept path inserts a new entity of type `wiki_page_version` with
  *      `published = true` (the RM's explicit accept is the publication gate for
  *      the corrective flow — no citation-coverage check is required here).
- *      Emits a `wiki_version.create` audit event and a `annotation.accepted`
- *      audit event.
+ *      Emits `wiki_version.create` and `annotation.accepted` audit events.
  *
  *   4. Audit events — one per step:
  *      - `annotation.opened`   — RM opens a thread
@@ -61,18 +53,20 @@
  *   - PRD §5.2   — inline annotation threads
  *   - PRD §4.3   — publication gate (corrective flow: RM accept = gate)
  *   - PRD §6     — Anthropic API SDK (annotation agent)
- *   - Implementation plan Phase 6 — single annotation thread end-to-end scout
+ *   - Implementation plan Phase 6 — annotation agent backed by Anthropic API SDK
  *
  * Canonical docs:
  *   - docs/implementation-plan-v1.md §Phase 6
  *   - docs/PRD.md §5.2, §4.3, §6
  *
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/62
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/65
  */
 
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { makeJson } from '../lib/response';
+import { callAnnotationAgent } from './annotation-agent';
+import { emitAuditEvent } from '../policies/audit-service';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,7 +81,7 @@ import { makeJson } from '../lib/response';
  * REJECTED     — RM rejected the correction; no version change
  *
  * Additional states (AUTO_RESOLVED, DISMISSED, REOPENED) are out of scope for
- * this scout — see Phase 6 follow-on: annotation state machine.
+ * this issue — see Phase 6 follow-on: annotation state machine.
  */
 export type AnnotationState = 'OPEN' | 'AGENT_REPLIED' | 'ACCEPTED' | 'REJECTED';
 
@@ -144,17 +138,18 @@ export interface RejectAnnotationResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Route handler (scout stub — all routes return 501)
+// Route handler
 // ---------------------------------------------------------------------------
 
 export async function handleAnnotationsRequest(
   req: Request,
   url: URL,
-  _appState: AppState,
+  appState: AppState,
 ): Promise<Response | null> {
   if (!url.pathname.startsWith('/api/annotations')) return null;
 
   const corsHeaders = getCorsHeaders(req);
+  const { sql } = appState;
   const json = makeJson(corsHeaders);
 
   const user = await getAuthenticatedUser(req);
@@ -183,26 +178,96 @@ export async function handleAnnotationsRequest(
       );
     }
 
-    // Scout stub: full implementation deferred to Phase 6 follow-on issues.
-    // The 501 body encodes the expected success-response shape so integration
-    // tests can assert against once the real implementation lands.
+    const { wiki_page_version_id, passage_ref, comment } = b as {
+      wiki_page_version_id: string;
+      passage_ref: string;
+      comment: string;
+    };
+
+    const now = new Date().toISOString();
+    const annotationId = crypto.randomUUID();
+
+    // Build the RM's opening message.
+    const rmMessage: AnnotationMessage = {
+      role: 'rm',
+      content: comment,
+      created_at: now,
+    };
+
+    // Emit annotation.opened audit event before DB write.
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'annotation.opened',
+      entity_type: 'wiki_annotation',
+      entity_id: annotationId,
+      before: null,
+      after: { wiki_page_version_id, passage_ref },
+      ts: now,
+    });
+
+    // Call the Anthropic API to get the agent's reply.
+    // The passage_ref is used as the passage text since the annotation targets
+    // the passage identified by that ref. The comment is the RM's concern.
+    let agentReplyText: string;
+    try {
+      agentReplyText = await callAnnotationAgent(passage_ref, comment);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return json({ error: `Agent call failed: ${message}` }, 502);
+    }
+
+    const agentReplyAt = new Date().toISOString();
+    const agentMessage: AnnotationMessage = {
+      role: 'agent',
+      content: agentReplyText,
+      created_at: agentReplyAt,
+    };
+
+    const thread: AnnotationMessage[] = [rmMessage, agentMessage];
+
+    // Persist the wiki_annotation entity.
+    // Cast through unknown to satisfy postgres.js JSONValue typing — the runtime
+    // serialises AnnotationMessage[] correctly via JSON.stringify.
+    const threadJson = thread as unknown as import('postgres').JSONValue;
+    await sql`
+      INSERT INTO entities (id, type, properties)
+      VALUES (
+        ${annotationId},
+        'wiki_annotation',
+        ${sql.json({
+          wiki_page_version_id,
+          passage_ref,
+          state: 'AGENT_REPLIED' as AnnotationState,
+          thread: threadJson,
+          created_by: user.id,
+          created_at: now,
+        })}
+      )
+    `;
+
+    // Emit annotation.reply audit event after the agent reply is stored.
+    await emitAuditEvent({
+      actor_id: 'agent',
+      action: 'annotation.reply',
+      entity_type: 'wiki_annotation',
+      entity_id: annotationId,
+      before: null,
+      after: { agent_reply: agentReplyText },
+      ts: agentReplyAt,
+    });
+
     return json(
       {
-        error: 'Not Implemented — annotation thread open is a Phase 6 follow-on issue',
-        expected_response_shape: {
-          id: '<uuid>',
-          wiki_page_version_id: b.wiki_page_version_id,
-          passage_ref: b.passage_ref,
-          state: 'AGENT_REPLIED',
-          thread: [
-            { role: 'rm', content: b.comment, created_at: '<iso8601>' },
-            { role: 'agent', content: '<anthropic-api-reply>', created_at: '<iso8601>' },
-          ],
-          created_by: user.id,
-          created_at: '<iso8601>',
-        } satisfies Record<string, unknown>,
-      },
-      501,
+        id: annotationId,
+        wiki_page_version_id,
+        passage_ref,
+        state: 'AGENT_REPLIED' as AnnotationState,
+        thread,
+        created_by: user.id,
+        created_at: now,
+        agent_visibility: 'agent',
+      } satisfies AnnotationResponse & { agent_visibility: string },
+      201,
     );
   }
 
@@ -212,21 +277,34 @@ export async function handleAnnotationsRequest(
   const getMatch = url.pathname.match(/^\/api\/annotations\/([^/]+)$/);
   if (req.method === 'GET' && getMatch) {
     const annotationId = getMatch[1];
-    return json(
+
+    const rows = await sql<
       {
-        error: 'Not Implemented — annotation thread fetch is a Phase 6 follow-on issue',
-        expected_response_shape: {
-          id: annotationId,
-          wiki_page_version_id: '<uuid>',
-          passage_ref: '<opaque-ref>',
-          state: 'OPEN' as AnnotationState,
-          thread: [] as AnnotationMessage[],
-          created_by: '<user-id>',
-          created_at: '<iso8601>',
-        } satisfies Record<string, unknown>,
-      },
-      501,
-    );
+        id: string;
+        properties: Record<string, unknown>;
+        created_at: string;
+      }[]
+    >`
+      SELECT id, properties, created_at
+      FROM entities
+      WHERE id   = ${annotationId}
+        AND type = 'wiki_annotation'
+    `;
+
+    if (rows.length === 0) return json({ error: 'Not found' }, 404);
+
+    const entity = rows[0];
+    const props = entity.properties;
+
+    return json({
+      id: entity.id,
+      wiki_page_version_id: props.wiki_page_version_id,
+      passage_ref: props.passage_ref,
+      state: props.state,
+      thread: props.thread ?? [],
+      created_by: props.created_by,
+      created_at: props.created_at ?? entity.created_at,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -235,17 +313,89 @@ export async function handleAnnotationsRequest(
   const acceptMatch = url.pathname.match(/^\/api\/annotations\/([^/]+)\/accept$/);
   if (req.method === 'POST' && acceptMatch) {
     const annotationId = acceptMatch[1];
+
+    // Fetch the annotation.
+    const rows = await sql<{ id: string; properties: Record<string, unknown> }[]>`
+      SELECT id, properties
+      FROM entities
+      WHERE id   = ${annotationId}
+        AND type = 'wiki_annotation'
+    `;
+
+    if (rows.length === 0) return json({ error: 'Not found' }, 404);
+
+    const entity = rows[0];
+    const props = entity.properties;
+
+    if (props.state !== 'AGENT_REPLIED') {
+      return json({ error: `Cannot accept annotation in state: ${props.state}` }, 422);
+    }
+
+    // Extract the agent's suggested correction from the thread.
+    const thread = (props.thread ?? []) as AnnotationMessage[];
+    const agentMessage = thread.find((m) => m.role === 'agent');
+    const correctedContent = agentMessage?.content ?? '';
+
+    const newVersionId = crypto.randomUUID();
+    const acceptedAt = new Date().toISOString();
+
+    // Emit wiki_version.create audit event before insert.
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'wiki_version.create',
+      entity_type: 'wiki_page_version',
+      entity_id: newVersionId,
+      before: null,
+      after: { annotation_id: annotationId, published: true },
+      ts: acceptedAt,
+    });
+
+    // Write the new published wiki_page_version.
+    const sourceVersionId =
+      typeof props.wiki_page_version_id === 'string' ? props.wiki_page_version_id : null;
+    await sql`
+      INSERT INTO entities (id, type, properties)
+      VALUES (
+        ${newVersionId},
+        'wiki_page_version',
+        ${sql.json({
+          content: correctedContent,
+          published: true,
+          published_by: user.id,
+          published_at: acceptedAt,
+          source_annotation_id: annotationId,
+          wiki_page_version_id: sourceVersionId,
+        })}
+      )
+    `;
+
+    // Update the annotation state to ACCEPTED.
+    await sql`
+      UPDATE entities
+      SET
+        properties = properties || ${sql.json({ state: 'ACCEPTED' as AnnotationState, accepted_by: user.id, accepted_at: acceptedAt })},
+        updated_at = NOW()
+      WHERE id = ${annotationId}
+    `;
+
+    // Emit annotation.accepted audit event.
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'annotation.accepted',
+      entity_type: 'wiki_annotation',
+      entity_id: annotationId,
+      before: { state: 'AGENT_REPLIED' },
+      after: { state: 'ACCEPTED', new_wiki_version_id: newVersionId },
+      ts: acceptedAt,
+    });
+
     return json(
       {
-        error:
-          'Not Implemented — annotation accept + wiki version publish is a Phase 6 follow-on issue',
-        expected_response_shape: {
-          annotation_id: annotationId,
-          new_wiki_version_id: '<uuid>',
-          state: 'ACCEPTED',
-        } satisfies Record<string, unknown>,
-      },
-      501,
+        annotation_id: annotationId,
+        new_wiki_version_id: newVersionId,
+        state: 'ACCEPTED',
+      } satisfies AcceptAnnotationResponse,
+      200,
     );
   }
 
@@ -255,15 +405,52 @@ export async function handleAnnotationsRequest(
   const rejectMatch = url.pathname.match(/^\/api\/annotations\/([^/]+)\/reject$/);
   if (req.method === 'POST' && rejectMatch) {
     const annotationId = rejectMatch[1];
+
+    // Fetch the annotation.
+    const rows = await sql<{ id: string; properties: Record<string, unknown> }[]>`
+      SELECT id, properties
+      FROM entities
+      WHERE id   = ${annotationId}
+        AND type = 'wiki_annotation'
+    `;
+
+    if (rows.length === 0) return json({ error: 'Not found' }, 404);
+
+    const entity = rows[0];
+    const props = entity.properties;
+
+    if (props.state !== 'AGENT_REPLIED') {
+      return json({ error: `Cannot reject annotation in state: ${props.state}` }, 422);
+    }
+
+    const rejectedAt = new Date().toISOString();
+
+    // Update the annotation state to REJECTED.
+    await sql`
+      UPDATE entities
+      SET
+        properties = properties || ${sql.json({ state: 'REJECTED' as AnnotationState, rejected_by: user.id, rejected_at: rejectedAt })},
+        updated_at = NOW()
+      WHERE id = ${annotationId}
+    `;
+
+    // Emit annotation.rejected audit event.
+    await emitAuditEvent({
+      actor_id: user.id,
+      action: 'annotation.rejected',
+      entity_type: 'wiki_annotation',
+      entity_id: annotationId,
+      before: { state: 'AGENT_REPLIED' },
+      after: { state: 'REJECTED' },
+      ts: rejectedAt,
+    });
+
     return json(
       {
-        error: 'Not Implemented — annotation reject is a Phase 6 follow-on issue',
-        expected_response_shape: {
-          annotation_id: annotationId,
-          state: 'REJECTED',
-        } satisfies Record<string, unknown>,
-      },
-      501,
+        annotation_id: annotationId,
+        state: 'REJECTED',
+      } satisfies RejectAnnotationResponse,
+      200,
     );
   }
 
