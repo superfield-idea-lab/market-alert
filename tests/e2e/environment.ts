@@ -1,10 +1,12 @@
 import type { Subprocess } from 'bun';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
+import postgres from 'postgres';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const SERVER_ENTRY = 'apps/server/src/index.ts';
+const AUDIT_SCHEMA_PATH = join(REPO_ROOT, 'packages/db/audit-schema.sql');
 const SERVER_ENTRY_ABS = join(REPO_ROOT, SERVER_ENTRY);
 const SERVER_BASE_PORT = Number(process.env.PORT ?? 31415);
 const WORKER_ID = Number(process.env.VITEST_WORKER_ID ?? process.env.VITEST_WORKER ?? 0);
@@ -22,12 +24,17 @@ export type E2EEnvironment = {
 export async function startE2EServer(): Promise<E2EEnvironment> {
   await runBuild();
   const pg = await startPostgres();
+  await applyAuditSchema(pg.url);
 
   const server = Bun.spawn([BUN_BIN, 'run', SERVER_ENTRY_ABS], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       DATABASE_URL: pg.url,
+      // Route audit writes to the same test Postgres container so
+      // POST /internal/wiki/versions and other audit-guarded endpoints work
+      // without an external audit database.
+      AUDIT_DATABASE_URL: pg.url,
       PORT: String(SERVER_PORT),
       // Enable the test-session backdoor so integration tests can obtain
       // session cookies without going through the WebAuthn ceremony.
@@ -52,6 +59,47 @@ export async function startE2EServer(): Promise<E2EEnvironment> {
 export async function stopE2EServer(context: E2EEnvironment): Promise<void> {
   context.server.kill();
   await context.pg.stop();
+}
+
+/**
+ * Apply the audit schema DDL to the test Postgres container.
+ *
+ * The main migrate() call covers the app schema. The audit_events table lives
+ * in a separate schema file (packages/db/audit-schema.sql) and is normally
+ * created by init-remote.ts at deploy time. For E2E tests we apply it directly
+ * to the same pg container so audit-gated endpoints (e.g. POST
+ * /internal/wiki/versions) succeed without a separate audit database.
+ */
+/**
+ * Apply the audit schema DDL to the test Postgres container.
+ *
+ * The main migrate() call covers the app schema. The audit_events table lives
+ * in a separate schema file (packages/db/audit-schema.sql) and is normally
+ * created by init-remote.ts at deploy time. For E2E tests we apply it directly
+ * to the same pg container so audit-gated endpoints (e.g. POST
+ * /internal/wiki/versions) succeed without a separate audit database.
+ */
+async function applyAuditSchema(pgUrl: string): Promise<void> {
+  const sql = postgres(pgUrl, { max: 1, idle_timeout: 5, connect_timeout: 10 });
+  try {
+    const rawSql = readFileSync(AUDIT_SCHEMA_PATH, 'utf-8');
+    // Strip single-line SQL comments before splitting so comment-only lines
+    // that precede a statement (e.g. "-- Audit database schema\nCREATE TABLE…")
+    // are removed without discarding the statement body.
+    const stripped = rawSql
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n');
+    const statements = stripped
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await sql.unsafe(stmt);
+    }
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 async function runBuild(): Promise<void> {
