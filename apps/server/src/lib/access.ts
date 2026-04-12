@@ -6,6 +6,8 @@ type Sql = postgres.Sql;
 export interface UserAccessFlags {
   isSuperadmin: boolean;
   isCrmAdmin: boolean;
+  /** True when the user has role 'bdm' (Business Development Manager). */
+  isBdm: boolean;
   role: string | null;
 }
 
@@ -14,11 +16,12 @@ export interface UserAccessFlags {
  *
  * Superusers always count as CRM admins. Any user entity with
  * `properties.role === 'crm_admin'` also counts as a CRM admin.
+ * Any user entity with `properties.role === 'bdm'` counts as a BDM.
  */
 export async function getUserAccessFlags(userId: string, sql: Sql): Promise<UserAccessFlags> {
   const isSuperadmin = isSuperuser(userId);
   if (isSuperadmin) {
-    return { isSuperadmin: true, isCrmAdmin: true, role: 'superuser' };
+    return { isSuperadmin: true, isCrmAdmin: true, isBdm: false, role: 'superuser' };
   }
 
   const rows = await sql<{ properties: Record<string, unknown> }[]>`
@@ -33,6 +36,7 @@ export async function getUserAccessFlags(userId: string, sql: Sql): Promise<User
   return {
     isSuperadmin: false,
     isCrmAdmin: role === 'crm_admin',
+    isBdm: role === 'bdm',
     role,
   };
 }
