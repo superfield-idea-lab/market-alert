@@ -981,3 +981,71 @@ CREATE TRIGGER trg_entities_retention_floor
 
 INSERT INTO _schema_version (migration) VALUES ('retention-engine-scout-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Phase 8 — Retention policy schema with tenant-scoped assignment (issue #79)
+--
+-- Extends the scout's flat retention_policies table with:
+--
+-- 1. retention_policy_entity_overrides: per-entity-type retention floor
+--    overrides. Allows a policy to specify different retention periods for
+--    different entity types (e.g. email may require 7 years under MiFID II
+--    while corpus_chunk requires 5 years). Rows here take precedence over
+--    retention_policies.retention_floor_days for the matching entity type.
+--
+-- 2. SEC 17a-4(f) default policy seed: 6-year minimum retention for broker-
+--    dealer records, as required by SEC Rule 17a-4(f).
+--
+-- 3. tenant_retention_policy_assignments audit log: every assignment of a
+--    named policy to a tenant is written here, preserving the actor_id and
+--    timestamp so that compliance audits can reconstruct the history of
+--    policy changes.
+--
+-- The application-layer assignment path (retention-engine.ts) is restricted
+-- to the compliance_officer role; the assignment emits an audit event via
+-- the server audit-service before writing to tenant_retention_policies.
+--
+-- Canonical docs: docs/PRD.md §7a, docs/implementation-plan-v1.md Phase 8
+-- ============================================================================
+
+-- Seed the SEC 17a-4(f) 6-year (2192 days) default policy.
+-- 6 years × 365 days + 1 leap day = 2191 days; using 2192 as conservative floor.
+INSERT INTO retention_policies (name, description, retention_floor_days)
+VALUES (
+  'sec17a4-6yr',
+  'SEC Rule 17a-4(f) — 6-year minimum retention for broker-dealer records',
+  2192
+)
+ON CONFLICT (name) DO NOTHING;
+
+-- Per-entity-type retention floor overrides for named policies.
+-- When a row exists for (policy_name, entity_type), the override
+-- retention_floor_days is used instead of retention_policies.retention_floor_days
+-- for entities of that type. A missing row means the policy-level default applies.
+CREATE TABLE IF NOT EXISTS retention_policy_entity_overrides (
+  policy_name          TEXT NOT NULL REFERENCES retention_policies (name) ON DELETE CASCADE,
+  entity_type          TEXT NOT NULL,
+  retention_floor_days INTEGER NOT NULL CHECK (retention_floor_days >= 0),
+  description          TEXT NOT NULL DEFAULT '',
+  created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (policy_name, entity_type)
+);
+
+-- Audit log for tenant retention policy assignments.
+-- Every call to assignRetentionPolicyToTenant is recorded here.
+-- actor_id: the user who performed the assignment.
+-- previous_policy: the policy that was in force before this assignment (NULL if none).
+CREATE TABLE IF NOT EXISTS tenant_retention_policy_assignments (
+  id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id        TEXT NOT NULL,
+  policy_name      TEXT NOT NULL REFERENCES retention_policies (name),
+  actor_id         TEXT NOT NULL,
+  previous_policy  TEXT,
+  assigned_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_trpa_tenant_assigned
+  ON tenant_retention_policy_assignments (tenant_id, assigned_at DESC);
+
+INSERT INTO _schema_version (migration) VALUES ('retention-policy-schema-001')
+  ON CONFLICT (migration) DO NOTHING;

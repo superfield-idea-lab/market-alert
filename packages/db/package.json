@@ -34,7 +34,8 @@
     "./rls-context": "./rls-context.ts",
     "./annotation-state-machine": "./annotation-state-machine.ts",
     "./hallucination-escalation": "./hallucination-escalation.ts",
-    "./analytics-emitter": "./analytics-emitter.ts"
+    "./analytics-emitter": "./analytics-emitter.ts",
+    "./retention-engine": "./retention-engine.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

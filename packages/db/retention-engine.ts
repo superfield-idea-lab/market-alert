@@ -1,59 +1,61 @@
 /**
  * @file retention-engine
  *
- * Phase 8 retention policy engine — scout stub.
+ * Phase 8 retention policy engine.
  *
  * ## Purpose
  *
- * This module is the planned public API surface for the Phase 8 retention
- * policy engine.  The scout establishes:
+ * This module is the public API surface for the Phase 8 retention policy
+ * engine. It provides:
  *
- *   1. Named retention policy lookup via the `retention_policies` catalogue.
- *   2. Tenant assignment of a named policy via `tenant_retention_policies`.
- *   3. Controlled deletion path: the retention scheduler bypasses the
- *      database-layer block by verifying the floor has elapsed before calling
- *      the privileged deletion helper.
+ *   1. Named retention policy lookup and listing via the `retention_policies`
+ *      catalogue.
+ *   2. Per-entity-type retention floor overrides via
+ *      `retention_policy_entity_overrides`.
+ *   3. Tenant assignment of a named policy, restricted to the
+ *      `compliance_officer` role.  Assignments are audit-logged via the
+ *      injected `auditWriter` callback.
+ *   4. Controlled deletion path: the retention scheduler verifies the floor
+ *      has elapsed at the application layer before issuing the DELETE.
  *
- * ## What this scout proves
+ * ## Scout foundation (issue #78)
  *
  * The `guard_retention_floor` trigger (schema.sql) rejects any DELETE on an
  * entity whose `retention_class` maps to a policy whose floor has not elapsed.
- * This module provides the type-safe application-layer wrappers for:
+ * The scout proved the trigger works; this issue builds the full policy library
+ * and tenant assignment path on top.
  *
- *   - looking up a named policy and checking whether a given entity is within
- *     its retention window (`isWithinRetentionFloor`), and
- *   - executing a scheduler-controlled deletion that first verifies the floor
- *     before issuing the DELETE (`deleteEntityPastRetention`).
+ * ## Role restriction
  *
- * ## Integration risks discovered during scout
+ * `assignRetentionPolicyToTenant` requires the caller to pass `actorId` and
+ * `actorRole`. If `actorRole` is not `compliance_officer` (and the caller is
+ * not a superuser identified by `isSuperuser`), the function throws
+ * `InsufficientRoleError` before touching the database.
+ *
+ * ## Audit trail
+ *
+ * Every successful call to `assignRetentionPolicyToTenant` records a row in
+ * `tenant_retention_policy_assignments` (DB layer) and invokes the optional
+ * `auditWriter` callback (server layer) to emit a hash-chained audit event.
+ *
+ * ## Integration risks
  *
  *   - The retention scheduler (future issue) must run as a role that either
  *     (a) is exempted from the trigger via a session-variable guard, or
  *     (b) always calls `deleteEntityPastRetention` so the floor check is
  *     duplicated at the application layer before the DELETE reaches the trigger.
- *     Option (b) is safer and what this scout implements.
+ *     Option (b) is safer and what this module implements.
  *   - Legal hold (future issue) must extend `isWithinRetentionFloor` to also
  *     return `true` (blocked) when `legal_hold = true` regardless of the floor.
  *   - WORM mode (future issue) requires additional DDL — this module has no
  *     overlap with the WORM surface.
- *   - The `retention_class` FK is currently a soft reference (plain TEXT). A
- *     follow-on should add a FK constraint to `retention_policies.name` once all
- *     existing tenants have been migrated to named policies.
- *
- * ## Downstream issues to update
- *
- *   After this scout merges, the following same-phase issues should be aware of
- *   the `guard_retention_floor` trigger and the `retention_policies` table:
- *
- *   - Phase 8: retention scheduler (hard-deletes entities past retention)
- *   - Phase 8: legal hold entity + four-eyes removal
- *   - Phase 8: WORM mode (must not conflict with the floor trigger)
  *
  * Canonical docs:
  *   - docs/PRD.md §7a (retention policy requirement)
  *   - docs/implementation-plan-v1.md Phase 8
  *
  * @see https://github.com/superfield-ai/superfield-kb-demo/issues/78
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/79
  */
 
 import type postgres from 'postgres';
@@ -112,6 +114,39 @@ export class RetentionFloorNotReachedError extends Error {
   }
 }
 
+/**
+ * Thrown when a caller without the `compliance_officer` role attempts to
+ * assign a retention policy to a tenant.
+ */
+export class InsufficientRoleError extends Error {
+  constructor(actorId: string, requiredRole: string, actualRole: string | null) {
+    super(
+      `Actor '${actorId}' (role=${actualRole ?? 'none'}) is not permitted to assign retention ` +
+        `policies. Required role: ${requiredRole}.`,
+    );
+    this.name = 'InsufficientRoleError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audit writer callback
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional callback injected by the server layer to emit a hash-chained audit
+ * event when a retention policy is assigned to a tenant. The db package does
+ * not import the audit service directly; the server wires it in.
+ */
+export type RetentionAuditWriterFn = (event: {
+  actor_id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  ts: string;
+}) => Promise<void>;
+
 // ---------------------------------------------------------------------------
 // Policy catalogue lookup
 // ---------------------------------------------------------------------------
@@ -144,31 +179,185 @@ export async function lookupRetentionPolicy(
 }
 
 // ---------------------------------------------------------------------------
+// Policy catalogue listing
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns all named retention policies in the `retention_policies` catalogue,
+ * ordered by name. Each entry includes its entity-type overrides (if any).
+ */
+export interface RetentionPolicyWithOverrides extends RetentionPolicy {
+  /** Per-entity-type floor overrides. Empty when none are configured. */
+  entityOverrides: RetentionPolicyEntityOverride[];
+}
+
+/**
+ * A per-entity-type retention floor override within a named policy.
+ */
+export interface RetentionPolicyEntityOverride {
+  entityType: string;
+  retentionFloorDays: number;
+  description: string;
+}
+
+export async function listRetentionPolicies(
+  sql: SqlClient,
+): Promise<RetentionPolicyWithOverrides[]> {
+  const policies = await sql<{ name: string; description: string; retention_floor_days: number }[]>`
+    SELECT name, description, retention_floor_days
+    FROM retention_policies
+    ORDER BY name
+  `;
+
+  const overrides = await sql<
+    {
+      policy_name: string;
+      entity_type: string;
+      retention_floor_days: number;
+      description: string;
+    }[]
+  >`
+    SELECT policy_name, entity_type, retention_floor_days, description
+    FROM retention_policy_entity_overrides
+    ORDER BY policy_name, entity_type
+  `;
+
+  const overridesByPolicy = new Map<string, RetentionPolicyEntityOverride[]>();
+  for (const o of overrides) {
+    if (!overridesByPolicy.has(o.policy_name)) {
+      overridesByPolicy.set(o.policy_name, []);
+    }
+    overridesByPolicy.get(o.policy_name)!.push({
+      entityType: o.entity_type,
+      retentionFloorDays: o.retention_floor_days,
+      description: o.description,
+    });
+  }
+
+  return policies.map((p) => ({
+    name: p.name,
+    description: p.description,
+    retentionFloorDays: p.retention_floor_days,
+    entityOverrides: overridesByPolicy.get(p.name) ?? [],
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Per-entity-type override management
+// ---------------------------------------------------------------------------
+
+/**
+ * Sets (upserts) a per-entity-type retention floor override for a named policy.
+ *
+ * When a row exists for (policyName, entityType), it is updated in place.
+ * This allows a policy to enforce different floors for different entity types —
+ * for example MiFID II may require 7 years for email but 5 years for corpus chunks.
+ *
+ * @throws {UnknownRetentionPolicyError} when `policyName` is not in the catalogue.
+ */
+export async function setEntityTypeRetentionOverride(
+  sql: SqlClient,
+  policyName: string,
+  entityType: string,
+  retentionFloorDays: number,
+  description = '',
+): Promise<void> {
+  // Verify the policy exists.
+  await lookupRetentionPolicy(sql, policyName);
+
+  await sql`
+    INSERT INTO retention_policy_entity_overrides
+      (policy_name, entity_type, retention_floor_days, description)
+    VALUES (${policyName}, ${entityType}, ${retentionFloorDays}, ${description})
+    ON CONFLICT (policy_name, entity_type) DO UPDATE
+      SET retention_floor_days = EXCLUDED.retention_floor_days,
+          description          = EXCLUDED.description
+  `;
+}
+
+// ---------------------------------------------------------------------------
 // Tenant policy assignment
 // ---------------------------------------------------------------------------
 
 /**
- * Assigns a named retention policy to a tenant, updating
- * `tenant_retention_policies.retention_class` to point at the named policy.
+ * Input for assigning a retention policy to a tenant.
+ */
+export interface AssignRetentionPolicyInput {
+  tenantId: string;
+  policyName: string;
+  /** The user ID performing the assignment. Must have compliance_officer role. */
+  actorId: string;
+  /** The role of the actor, as stored in entities.properties.role. */
+  actorRole: string | null;
+  /** True when the actor is the system superuser (bypasses role check). */
+  isSuperuser?: boolean;
+  /** Optional callback to emit a hash-chained audit event. */
+  auditWriter?: RetentionAuditWriterFn;
+}
+
+/**
+ * Assigns a named retention policy to a tenant.
  *
- * This is an upsert — calling it twice with the same arguments is idempotent.
+ * - Validates that the named policy exists.
+ * - Enforces that the actor has the `compliance_officer` role (or is superuser).
+ * - Records the previous policy (if any) in `tenant_retention_policy_assignments`.
+ * - Upserts `tenant_retention_policies` with the new `retention_class`.
+ * - Invokes `auditWriter` (if provided) to emit a hash-chained audit event.
  *
  * @throws {UnknownRetentionPolicyError} when `policyName` is not in the catalogue.
+ * @throws {InsufficientRoleError} when the actor lacks the required role.
  */
 export async function assignRetentionPolicyToTenant(
   sql: SqlClient,
-  tenantId: string,
-  policyName: string,
+  input: AssignRetentionPolicyInput,
 ): Promise<void> {
+  const { tenantId, policyName, actorId, actorRole, isSuperuser: superuser, auditWriter } = input;
+
+  // Role guard — only compliance_officer or superuser may assign.
+  if (!superuser && actorRole !== 'compliance_officer') {
+    throw new InsufficientRoleError(actorId, 'compliance_officer', actorRole);
+  }
+
   // Validate the named policy exists before writing.
   await lookupRetentionPolicy(sql, policyName);
 
+  // Capture the previous policy so the audit log records the full before state.
+  const existingRows = await sql<{ retention_class: string }[]>`
+    SELECT retention_class
+    FROM tenant_retention_policies
+    WHERE tenant_id = ${tenantId}
+  `;
+  const previousPolicy = existingRows[0]?.retention_class ?? null;
+
+  const ts = new Date().toISOString();
+
+  // Invoke audit writer BEFORE the DB write (write-before-mutate invariant).
+  if (auditWriter) {
+    await auditWriter({
+      actor_id: actorId,
+      action: 'retention_policy.assign',
+      entity_type: 'tenant',
+      entity_id: tenantId,
+      before: previousPolicy !== null ? { policyName: previousPolicy } : null,
+      after: { policyName },
+      ts,
+    });
+  }
+
+  // Upsert the tenant policy assignment.
   await sql`
     INSERT INTO tenant_retention_policies (tenant_id, retention_class, legal_hold_default)
     VALUES (${tenantId}, ${policyName}, false)
     ON CONFLICT (tenant_id) DO UPDATE
       SET retention_class = EXCLUDED.retention_class,
           updated_at      = CURRENT_TIMESTAMP
+  `;
+
+  // Record the assignment in the audit table at the DB layer.
+  await sql`
+    INSERT INTO tenant_retention_policy_assignments
+      (tenant_id, policy_name, actor_id, previous_policy, assigned_at)
+    VALUES (${tenantId}, ${policyName}, ${actorId}, ${previousPolicy}, ${ts}::TIMESTAMPTZ)
   `;
 }
 

@@ -63,6 +63,7 @@ import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 import { handleBdmCampaignRequest } from './api/bdm-campaign';
 import { handleCampaignSummaryRequest } from './api/campaign-summary';
+import { handleComplianceRequest } from './api/compliance';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -451,6 +452,14 @@ export default {
     if (url.pathname.startsWith('/api/campaign/')) {
       const summaryRes = await handleCampaignSummaryRequest(req, url, appState);
       if (summaryRes) return withTrace(summaryRes);
+    }
+
+    // Phase 8 compliance officer endpoints (issue #79).
+    // GET  /api/compliance/retention-policies — list policy library
+    // POST /api/compliance/tenants/:id/retention-policy — assign a policy (compliance_officer only)
+    if (url.pathname.startsWith('/api/compliance')) {
+      const complianceRes = await handleComplianceRequest(req, url, appState);
+      if (complianceRes) return withTrace(complianceRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd

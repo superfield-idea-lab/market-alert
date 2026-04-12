@@ -38,11 +38,14 @@ import { startPostgres, type PgContainer } from './pg-container';
 import { migrate } from './index';
 import {
   lookupRetentionPolicy,
+  listRetentionPolicies,
   assignRetentionPolicyToTenant,
+  setEntityTypeRetentionOverride,
   isWithinRetentionFloor,
   deleteEntityPastRetention,
   UnknownRetentionPolicyError,
   RetentionFloorNotReachedError,
+  InsufficientRoleError,
 } from './retention-engine';
 
 let pg: PgContainer;
@@ -97,9 +100,56 @@ describe('retention_policies catalogue', () => {
 // AC-1: tenant can be assigned a 5-year MiFID II policy
 // ---------------------------------------------------------------------------
 
+// Shorthand for tests that don't want to test role checks (pass as superuser).
+function asSystemActor(tenantId: string, policyName: string) {
+  return {
+    tenantId,
+    policyName,
+    actorId: 'system-test-actor',
+    actorRole: null as string | null,
+    isSuperuser: true,
+  } as const;
+}
+
+describe('retention_policies catalogue — listRetentionPolicies', () => {
+  test('lists all seeded policies including sec17a4-6yr', async () => {
+    const policies = await listRetentionPolicies(sql);
+    const names = policies.map((p) => p.name);
+    expect(names).toContain('mifid2-5yr');
+    expect(names).toContain('sec17a4-6yr');
+
+    const sec = policies.find((p) => p.name === 'sec17a4-6yr')!;
+    expect(sec.retentionFloorDays).toBe(2192);
+    expect(sec.description).toMatch(/SEC/);
+  });
+
+  test('includes entity overrides in the list', async () => {
+    // Add an override for the test.
+    await setEntityTypeRetentionOverride(
+      sql,
+      'mifid2-5yr',
+      'email',
+      2557, // 7 years
+      'MiFID II email records — 7-year override',
+    );
+
+    const policies = await listRetentionPolicies(sql);
+    const mifid = policies.find((p) => p.name === 'mifid2-5yr')!;
+    const emailOverride = mifid.entityOverrides.find((o) => o.entityType === 'email');
+    expect(emailOverride).toBeDefined();
+    expect(emailOverride!.retentionFloorDays).toBe(2557);
+
+    // Cleanup.
+    await sql`
+      DELETE FROM retention_policy_entity_overrides
+      WHERE policy_name = 'mifid2-5yr' AND entity_type = 'email'
+    `;
+  });
+});
+
 describe('assignRetentionPolicyToTenant — AC-1', () => {
   test('AC-1: assigns mifid2-5yr to a tenant and the row is readable', async () => {
-    await assignRetentionPolicyToTenant(sql, MIFID_TENANT, MIFID_POLICY);
+    await assignRetentionPolicyToTenant(sql, asSystemActor(MIFID_TENANT, MIFID_POLICY));
 
     const [row] = await sql<{ retention_class: string }[]>`
       SELECT retention_class FROM tenant_retention_policies
@@ -112,14 +162,70 @@ describe('assignRetentionPolicyToTenant — AC-1', () => {
   test('assignment is idempotent (upsert)', async () => {
     // Second call must not throw.
     await expect(
-      assignRetentionPolicyToTenant(sql, MIFID_TENANT, MIFID_POLICY),
+      assignRetentionPolicyToTenant(sql, asSystemActor(MIFID_TENANT, MIFID_POLICY)),
     ).resolves.toBeUndefined();
   });
 
   test('throws UnknownRetentionPolicyError for an unknown policy name', async () => {
     await expect(
-      assignRetentionPolicyToTenant(sql, MIFID_TENANT, 'nonexistent-policy'),
+      assignRetentionPolicyToTenant(sql, asSystemActor(MIFID_TENANT, 'nonexistent-policy')),
     ).rejects.toBeInstanceOf(UnknownRetentionPolicyError);
+  });
+
+  test('throws InsufficientRoleError when caller is not compliance_officer or superuser', async () => {
+    await expect(
+      assignRetentionPolicyToTenant(sql, {
+        tenantId: 'tenant-role-check',
+        policyName: MIFID_POLICY,
+        actorId: 'non-co-user',
+        actorRole: 'analyst',
+        isSuperuser: false,
+      }),
+    ).rejects.toBeInstanceOf(InsufficientRoleError);
+  });
+
+  test('compliance_officer role can assign without isSuperuser flag', async () => {
+    const co_tenant = `tenant-co-direct-${Date.now()}`;
+    await expect(
+      assignRetentionPolicyToTenant(sql, {
+        tenantId: co_tenant,
+        policyName: MIFID_POLICY,
+        actorId: 'co-actor',
+        actorRole: 'compliance_officer',
+        isSuperuser: false,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  test('assignment is recorded in tenant_retention_policy_assignments', async () => {
+    const auditTenant = `tenant-audit-${Date.now()}`;
+    const auditCalls: string[] = [];
+
+    await assignRetentionPolicyToTenant(sql, {
+      tenantId: auditTenant,
+      policyName: MIFID_POLICY,
+      actorId: 'co-actor',
+      actorRole: 'compliance_officer',
+      isSuperuser: false,
+      auditWriter: async (event) => {
+        auditCalls.push(event.action);
+      },
+    });
+
+    // Verify the audit writer callback was invoked.
+    expect(auditCalls).toContain('retention_policy.assign');
+
+    // Verify the DB audit row exists.
+    const assignRows = await sql<{ policy_name: string; actor_id: string }[]>`
+      SELECT policy_name, actor_id
+      FROM tenant_retention_policy_assignments
+      WHERE tenant_id = ${auditTenant}
+      ORDER BY assigned_at DESC
+      LIMIT 1
+    `;
+    expect(assignRows).toHaveLength(1);
+    expect(assignRows[0].policy_name).toBe(MIFID_POLICY);
+    expect(assignRows[0].actor_id).toBe('co-actor');
   });
 });
 
