@@ -31,7 +31,8 @@
     "./autolearn-state-machine": "./autolearn-state-machine.ts",
     "./transcription-state-machine": "./transcription-state-machine.ts",
     "./claim-citation-coverage": "./claim-citation-coverage.ts",
-    "./rls-context": "./rls-context.ts"
+    "./rls-context": "./rls-context.ts",
+    "./annotation-state-machine": "./annotation-state-machine.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
