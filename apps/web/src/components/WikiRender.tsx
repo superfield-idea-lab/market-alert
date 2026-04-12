@@ -4,14 +4,16 @@
  * Shared wiki render component for `apps/web`.
  *
  * Renders a `WikiPageVersion`'s markdown content as sanitised HTML and exposes
- * citation markers as interactive targets for downstream features (citation
- * hover, annotations).
+ * citation markers as interactive hover targets. Hovering a citation fetches
+ * the linked CorpusChunk and optionally resolves the sender/speaker name via
+ * the re-identification API (issue #49).
  *
  * ## Usage
  *
  * ```tsx
  * <WikiRender
  *   version={wikiPageVersion}
+ *   customerId="customer-123"
  *   onCitationClick={(citationId) => { ... }}
  * />
  * ```
@@ -23,23 +25,33 @@
  * rendering wiki markdown in the web app — see the `renderWikiMarkdown`
  * function for pipeline details.
  *
- * ## Citation interaction
+ * ## Citation hover
  *
- * After the HTML is injected into the DOM the component attaches a single
- * delegated click listener to the container `<article>`. Clicks on
- * `<sup class="wiki-citation">` elements bubble up and are forwarded to the
- * `onCitationClick` callback with the `data-citation-id` value. The actual
- * citation hover UI is a Phase 4 follow-on issue.
+ * Mouseover on `<sup class="wiki-citation">` triggers a fetch to
+ * GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token.
+ * The response is rendered in a `CitationHoverPopover` positioned next to
+ * the citation marker. Non-superusers see the excerpt only; superusers also
+ * see the resolved sender/speaker name.
+ *
+ * ## Citation click
+ *
+ * Clicks on citation markers also invoke the optional `onCitationClick`
+ * callback for callers that want to handle citations differently.
  *
  * References:
  * - docs/implementation-plan-v1.md §Phase 4 — Wiki web UX
- * - @see https://github.com/superfield-ai/superfield-kb-demo/issues/46
+ * - @see https://github.com/superfield-ai/superfield-kb-demo/issues/49
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WikiPageVersion } from 'core';
 import { renderWikiMarkdown } from './wiki-markdown';
 import type { CitationMarker } from './wiki-markdown';
+import {
+  CitationHoverPopover,
+  type CitationHoverState,
+  type CitationResolution,
+} from './CitationHoverPopover';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -48,6 +60,11 @@ import type { CitationMarker } from './wiki-markdown';
 export interface WikiRenderProps {
   /** The wiki page version to render. */
   version: WikiPageVersion;
+  /**
+   * Customer identifier used to build the citation resolution API path.
+   * Required for citation hover to work; omit only when hover is not needed.
+   */
+  customerId?: string;
   /**
    * Optional callback invoked when a citation marker is clicked.
    *
@@ -73,9 +90,13 @@ export interface WikiRenderProps {
  *
  * Uses `dangerouslySetInnerHTML` with DOMPurify-sanitised output; the
  * `wiki-markdown` module enforces the allowlist.
+ *
+ * When `customerId` is provided, hovering a citation marker fetches the
+ * citation resolution from the server and renders a `CitationHoverPopover`.
  */
 export function WikiRender({
   version,
+  customerId,
   onCitationClick,
   onCitationsReady,
   className,
@@ -85,6 +106,9 @@ export function WikiRender({
   // Memoise the render result — re-compute only when the markdown changes.
   const { html, citations } = useMemo(() => renderWikiMarkdown(version.content), [version.content]);
 
+  // Citation hover state — drives the CitationHoverPopover.
+  const [hoverState, setHoverState] = useState<CitationHoverState>({ status: 'idle' });
+
   // Notify caller of citation list whenever it changes.
   useEffect(() => {
     if (onCitationsReady) {
@@ -92,36 +116,105 @@ export function WikiRender({
     }
   }, [citations, onCitationsReady]);
 
-  // Attach a delegated click listener for citation markers.
+  // Fetch citation resolution from the server.
+  const fetchCitation = useCallback(
+    async (citationId: string, anchorRect: DOMRect) => {
+      if (!customerId) return;
+
+      setHoverState({ status: 'loading', citationId, anchorRect });
+
+      const url = `/api/wiki/pages/${encodeURIComponent(customerId)}/versions/${encodeURIComponent(version.id)}/citations/${encodeURIComponent(citationId)}`;
+
+      try {
+        const res = await fetch(url, { credentials: 'include' });
+
+        if (res.status === 401 || res.status === 403) {
+          setHoverState({ status: 'unauthorized', citationId, anchorRect });
+          return;
+        }
+
+        if (res.status === 404) {
+          setHoverState({
+            status: 'error',
+            citationId,
+            anchorRect,
+            message: 'Citation source not found.',
+          });
+          return;
+        }
+
+        if (!res.ok) {
+          setHoverState({
+            status: 'error',
+            citationId,
+            anchorRect,
+            message: 'Failed to load citation.',
+          });
+          return;
+        }
+
+        const resolution: CitationResolution = await res.json();
+        setHoverState({ status: 'loaded', citationId, anchorRect, resolution });
+      } catch {
+        setHoverState({
+          status: 'error',
+          citationId,
+          anchorRect,
+          message: 'Network error loading citation.',
+        });
+      }
+    },
+    [customerId, version.id],
+  );
+
+  const closePopover = useCallback(() => {
+    setHoverState({ status: 'idle' });
+  }, []);
+
+  // Attach delegated mouseover and click listeners for citation markers.
   useEffect(() => {
-    if (!onCitationClick) return;
     const container = containerRef.current;
     if (!container) return;
+
+    function handleMouseOver(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+      const citation = target.closest('sup.wiki-citation');
+      if (!citation) return;
+      const citationId = (citation as HTMLElement).dataset.citationId;
+      if (!citationId) return;
+      const anchorRect = (citation as HTMLElement).getBoundingClientRect();
+      fetchCitation(citationId, anchorRect);
+    }
 
     function handleClick(event: MouseEvent) {
       const target = event.target as HTMLElement;
       const citation = target.closest('sup.wiki-citation');
       if (!citation) return;
       const citationId = (citation as HTMLElement).dataset.citationId;
-      if (citationId) {
-        onCitationClick!(citationId);
+      if (citationId && onCitationClick) {
+        onCitationClick(citationId);
       }
     }
 
+    container.addEventListener('mouseover', handleMouseOver);
     container.addEventListener('click', handleClick);
     return () => {
+      container.removeEventListener('mouseover', handleMouseOver);
       container.removeEventListener('click', handleClick);
     };
-  }, [onCitationClick]);
+  }, [fetchCitation, onCitationClick]);
 
   return (
-    <article
-      ref={containerRef}
-      className={['wiki-render', className].filter(Boolean).join(' ')}
-      data-wiki-version-id={version.id}
-      data-wiki-state={version.state}
-      // DOMPurify-sanitised HTML — safe to inject.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <>
+      <article
+        ref={containerRef}
+        className={['wiki-render', className].filter(Boolean).join(' ')}
+        data-wiki-version-id={version.id}
+        data-wiki-state={version.state}
+        // DOMPurify-sanitised HTML — safe to inject.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <CitationHoverPopover state={hoverState} onClose={closePopover} />
+    </>
   );
 }

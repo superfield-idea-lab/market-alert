@@ -1,16 +1,19 @@
 /**
  * @file wiki-view.spec.ts
  *
- * End-to-end tests — wiki version history UI (issue #47).
+ * End-to-end tests — wiki version history UI (issue #47) and citation hover
+ * with re-identification lookup (issue #49).
  *
  * Tests cover:
  *   - Playwright: open the history panel and assert entries, ordering, and
  *     metadata rendering.
  *   - API auth invariant: 401 for unauthenticated callers.
+ *   - Citation hover: API returns 200 with excerpt + null resolved_name for
+ *     non-superusers; 404 for non-existent tokens; 401 for unauthenticated.
  *
  * No mocks — real Bun server + Postgres via the shared E2E environment helper.
  *
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/49
  */
 
 import { chromium, type Browser } from '@playwright/test';
@@ -100,7 +103,6 @@ test('wiki-view API: returns 401 for unauthenticated callers', async () => {
 test('wiki-view: history panel lists versions in reverse-chronological order', async () => {
   const customerId = `e2e-customer-${Date.now()}`;
 
-  // Seed two versions.
   await seedWikiVersion(env.baseUrl, {
     customer: customerId,
     dept: 'e2e-dept',
@@ -113,7 +115,6 @@ test('wiki-view: history panel lists versions in reverse-chronological order', a
     content: '# Second Version\n\nUpdated content.',
   });
 
-  // Inject the auth cookie into a new browser context.
   const cookie = await getTestSession(env.baseUrl, 'test-rm');
   const cookieValue = cookie.replace('calypso_auth=', '');
 
@@ -131,16 +132,12 @@ test('wiki-view: history panel lists versions in reverse-chronological order', a
 
   const page = await context.newPage();
 
-  // Navigate to a page that mounts WikiViewPage for this customer.
-  // We test via the API since the React app is a SPA without deep-link routes
-  // for wiki pages yet. Assert the API response shapes the UI correctly.
   const apiRes = await fetch(`${env.baseUrl}/api/wiki/pages/${customerId}`, {
     headers: { Cookie: cookie },
   });
   expect(apiRes.status).toBe(200);
   const body = await apiRes.json();
 
-  // Verify API returns versions in reverse-chronological order.
   expect(body.versions.length).toBeGreaterThanOrEqual(2);
   const timestamps = body.versions.map((v: { created_at: string }) =>
     new Date(v.created_at).getTime(),
@@ -149,7 +146,6 @@ test('wiki-view: history panel lists versions in reverse-chronological order', a
     expect(timestamps[i - 1]).toBeGreaterThanOrEqual(timestamps[i]);
   }
 
-  // Verify each version has required metadata fields.
   for (const v of body.versions) {
     expect(typeof v.id).toBe('string');
     expect(typeof v.created_by).toBe('string');
@@ -180,4 +176,71 @@ test('wiki-view: GET /api/wiki/pages/:customerId/versions/:id returns content', 
   const body = await res.json();
   expect(body.content).toBe(testContent);
   expect(body.id).toBe(seeded.id);
+});
+
+// ---------------------------------------------------------------------------
+// Citation hover — API assertions (issue #49)
+// ---------------------------------------------------------------------------
+
+test('citation hover: API returns 401 for unauthenticated callers', async () => {
+  const res = await fetch(
+    `${env.baseUrl}/api/wiki/pages/customer-x/versions/version-y/citations/any-token`,
+  );
+  expect(res.status).toBe(401);
+});
+
+test('citation hover: API returns 404 for non-existent citation token', async () => {
+  const cookie = await getTestSession(env.baseUrl, `test-rm-404-${Date.now()}`);
+  const res = await fetch(
+    `${env.baseUrl}/api/wiki/pages/customer-x/versions/version-y/citations/does-not-exist`,
+    { headers: { Cookie: cookie } },
+  );
+  expect(res.status).toBe(404);
+});
+
+test('citation hover: popover content — API returns excerpt for authenticated user', async () => {
+  const sessionRes = await fetch(`${env.baseUrl}/api/test/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: `test-rm-playwright-${Date.now()}` }),
+  });
+  expect(sessionRes.ok).toBe(true);
+  const setCookie = sessionRes.headers.get('set-cookie') ?? '';
+  const cookieMatch = /calypso_auth=([^;]+)/.exec(setCookie);
+  const cookie = cookieMatch ? `calypso_auth=${cookieMatch[1]}` : '';
+
+  // Create a source entity and a corpus chunk.
+  const sourceRes = await fetch(`${env.baseUrl}/api/test/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: `source-entity-${Date.now()}` }),
+  });
+  expect(sourceRes.ok).toBe(true);
+  const sourceBody = (await sourceRes.json()) as { user: { id: string } };
+  const sourceId = sourceBody.user.id;
+
+  const chunkRes = await fetch(`${env.baseUrl}/api/corpus-chunks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({
+      source_id: sourceId,
+      text: 'The client discussed revenue targets for the upcoming fiscal quarter.',
+    }),
+  });
+  expect(chunkRes.ok).toBe(true);
+  const chunkBody = (await chunkRes.json()) as { chunks: Array<{ id: string }> };
+  const chunkId = chunkBody.chunks[0].id;
+
+  // Call the citation resolution endpoint and assert the response.
+  const citationRes = await fetch(
+    `${env.baseUrl}/api/wiki/pages/test-customer/versions/test-version/citations/${chunkId}`,
+    { headers: { Cookie: cookie } },
+  );
+  expect(citationRes.status).toBe(200);
+  const citationBody = await citationRes.json();
+  expect(citationBody).toHaveProperty('excerpt');
+  expect(typeof citationBody.excerpt).toBe('string');
+  expect(citationBody.excerpt.length).toBeGreaterThan(0);
+  // Non-superuser: resolved_name must be null.
+  expect(citationBody.resolved_name).toBeNull();
 });

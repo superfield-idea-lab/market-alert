@@ -1,7 +1,7 @@
 /**
  * @file wiki-page-view.ts
  *
- * Read-only wiki page view API — Phase 4 wiki web UX (issue #47).
+ * Read-only wiki page view API — Phase 4 wiki web UX (issues #47 and #49).
  *
  * Routes:
  *
@@ -16,8 +16,10 @@
  *     content for rendering.
  *
  *   GET  /api/wiki/pages/:customerId/versions/:versionId/citations/:citationToken
- *     Resolve a citation token to the underlying CorpusChunk via the
- *     re-identification service. Used by the citation hover UI.
+ *     Resolve a citation token to the underlying CorpusChunk and optionally
+ *     the re-identified sender/speaker name via the re-identification service.
+ *     Used by the citation hover UI. LIVE implementation — superuser required
+ *     for re-id data (issue #49).
  *
  * Authentication:
  *   All routes require an authenticated session cookie (RM role or above).
@@ -31,12 +33,14 @@
  * Blueprint references:
  * - PRD §5.3 — history panel
  * - Implementation plan Phase 4 — Wiki web UX
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/49
  */
 
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
-import { makeJson } from '../lib/response';
+import { makeJson, isSuperuser } from '../lib/response';
+import { decryptProperties } from 'core';
+import { resolveToken } from '../policies/reidentification-service';
 
 /**
  * Shape of a WikiPageVersion entry in the version picker list.
@@ -68,13 +72,21 @@ export interface CitationResolution {
   excerpt: string | null;
   /** Opaque source reference (e.g. email entity id). */
   source_id: string | null;
+  /**
+   * Real sender/speaker name resolved via the re-identification service.
+   * Only present when the caller has superuser role; null otherwise.
+   */
+  resolved_name: string | null;
 }
 
 /**
  * Handle GET /api/wiki/pages/* routes.
  *
  * All routes enforce authentication. Accessible versions are filtered by the
- * customer ID in the URL path; archived rows are excluded.
+ * customer ID in the URL path; archived rows are excluded. The citation
+ * resolution route is fully implemented: it fetches the CorpusChunk entity,
+ * decrypts its body, and (for superusers) resolves the sender token via the
+ * re-identification service with audit event emission.
  */
 export async function handleWikiPageViewRequest(
   req: Request,
@@ -172,27 +184,74 @@ export async function handleWikiPageViewRequest(
   }
 
   // ── GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token ─
-  // Resolve a citation token — stub until citation service is implemented.
+  // Resolve a citation token to the linked CorpusChunk + optional re-id.
 
   const citationMatch = url.pathname.match(
     /^\/api\/wiki\/pages\/([^/]+)\/versions\/([^/]+)\/citations\/([^/]+)$/,
   );
   if (citationMatch) {
     const citationToken = citationMatch[3];
-    // Citation resolution requires the re-identification service (Phase 6).
-    // Return 501 with the planned shape so callers can detect the stub.
-    return json(
-      {
-        error: 'Not Implemented — citation hover resolution is a Phase 6 follow-on issue',
-        expected_response_shape: {
-          token: citationToken,
-          entity_id: '<corpus-chunk-uuid>',
-          excerpt: '<plaintext-excerpt-or-null>',
-          source_id: '<source-entity-id-or-null>',
-        } satisfies CitationResolution,
-      },
-      501,
-    );
+    const correlationId = req.headers.get('X-Trace-Id') ?? undefined;
+    const ip =
+      req.headers.get('X-Forwarded-For') ?? req.headers.get('CF-Connecting-IP') ?? undefined;
+
+    // Step 1: look up the CorpusChunk entity whose id matches the citation token.
+    // The citation token IS the corpus chunk entity id embedded by the autolearn worker.
+    type ChunkRow = {
+      id: string;
+      properties: Record<string, unknown>;
+    };
+    const chunkRows = await sql<ChunkRow[]>`
+      SELECT id, properties
+      FROM entities
+      WHERE id = ${citationToken}
+        AND type = 'corpus_chunk'
+      LIMIT 1
+    `;
+
+    if (chunkRows.length === 0) {
+      return json({ error: 'Citation not found' }, 404);
+    }
+
+    const chunkRow = chunkRows[0];
+
+    // Step 2: decrypt sensitive fields (body is encrypted at rest).
+    const decrypted = await decryptProperties('corpus_chunk', chunkRow.properties);
+    const excerpt = typeof decrypted.body === 'string' ? decrypted.body : null;
+    const sourceId = typeof decrypted.source_id === 'string' ? decrypted.source_id : null;
+
+    // Step 3: resolve the sender/speaker token for superusers.
+    // Non-superusers see the chunk excerpt but NOT the re-identified name.
+    let resolvedName: string | null = null;
+
+    if (isSuperuser(user.id) && sourceId) {
+      try {
+        const identity = await resolveToken({
+          token: sourceId,
+          actorId: user.id,
+          correlationId,
+          ip,
+        });
+        if (identity) {
+          resolvedName = identity.real_name;
+        }
+      } catch (err) {
+        // If re-id fails we still return the excerpt — audit failure propagates
+        // as 500 per the reidentification-service contract.
+        console.error('[wiki-page-view] Re-identification failed:', err);
+        return json({ error: 'Internal Server Error' }, 500);
+      }
+    }
+
+    const resolution: CitationResolution = {
+      token: citationToken,
+      entity_id: chunkRow.id,
+      excerpt,
+      source_id: sourceId,
+      resolved_name: resolvedName,
+    };
+
+    return json(resolution, 200);
   }
 
   return null;

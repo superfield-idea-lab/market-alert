@@ -1,7 +1,8 @@
 /**
  * @file wiki-view.spec.ts
  *
- * Integration tests — wiki version history API (issue #47).
+ * Integration tests — wiki version history API (issue #47) and citation hover
+ * with re-identification lookup (issue #49).
  *
  * Tests cover:
  *   - 401 when unauthenticated
@@ -11,12 +12,12 @@
  *   - RLS: versions for customer-A are not visible under customer-B's path
  *   - GET single version by ID
  *   - 404 for unknown version or cross-customer access
- *   - Citation endpoint returns 501 (Phase 6 stub)
+ *   - Citation endpoint: 401, 404, 200 with excerpt, resolved_name null for non-superuser
  *
  * No mocks — real Postgres + real Bun server via the shared E2E environment
  * helper. TEST_MODE=true is set by startE2EServer.
  *
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/49
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -64,8 +65,6 @@ async function seedWikiVersion(
     created_by?: string;
   },
 ): Promise<{ id: string }> {
-  // We use the internal write endpoint with a worker token to seed data.
-  // First mint a worker token via the TEST_MODE helper.
   const tokenRes = await fetch(`${base}/api/test/worker-token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -100,6 +99,35 @@ async function seedWikiVersion(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: seed a corpus_chunk entity via the corpus-chunks API
+// ---------------------------------------------------------------------------
+
+async function seedCorpusChunk(
+  base: string,
+  cookie: string,
+  body: string,
+): Promise<{ chunkId: string; sourceId: string }> {
+  const sourceRes = await fetch(`${base}/api/test/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: `source-entity-${Date.now()}` }),
+  });
+  if (!sourceRes.ok) throw new Error('Failed to create source entity via test-session');
+  const sourceBody = (await sourceRes.json()) as { user: { id: string } };
+  const sourceId = sourceBody.user.id;
+
+  const ingRes = await fetch(`${base}/api/corpus-chunks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ source_id: sourceId, text: body }),
+  });
+  if (!ingRes.ok) throw new Error(`corpus-chunks POST failed: ${ingRes.status}`);
+  const ingBody = (await ingRes.json()) as { chunks: Array<{ id: string }> };
+  if (!ingBody.chunks[0]) throw new Error('No chunk returned from corpus-chunks POST');
+  return { chunkId: ingBody.chunks[0].id, sourceId };
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/wiki/pages/:customerId
 // ---------------------------------------------------------------------------
 
@@ -127,13 +155,11 @@ describe('GET /api/wiki/pages/:customerId', () => {
     const cookie = await getTestSession(env.baseUrl, 'test-rm');
     const customerId = `customer-order-${Date.now()}`;
 
-    // Seed two versions for the same customer in sequence.
     const v1 = await seedWikiVersion(env.baseUrl, {
       customer: customerId,
       dept: 'test-dept',
       content: 'Version one content',
     });
-    // Small delay to ensure different created_at timestamps.
     await Bun.sleep(10);
     const v2 = await seedWikiVersion(env.baseUrl, {
       customer: customerId,
@@ -149,12 +175,10 @@ describe('GET /api/wiki/pages/:customerId', () => {
     expect(body.customer_id).toBe(customerId);
     expect(body.versions.length).toBeGreaterThanOrEqual(2);
 
-    // Newest first.
     const ids = body.versions.map((v: { id: string }) => v.id);
     expect(ids[0]).toBe(v2.id);
     expect(ids).toContain(v1.id);
 
-    // Each entry must carry the required metadata fields.
     for (const v of body.versions as {
       id: string;
       content: string;
@@ -188,7 +212,6 @@ describe('GET /api/wiki/pages/:customerId', () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    // customer-B should have zero versions.
     expect(body.versions).toHaveLength(0);
   });
 });
@@ -247,7 +270,6 @@ describe('GET /api/wiki/pages/:customerId/versions/:versionId', () => {
       content: 'Owned by customerOwner',
     });
 
-    // Access the version via the wrong customer path.
     const res = await fetch(
       `${env.baseUrl}/api/wiki/pages/${customerOther}/versions/${seeded.id}`,
       { headers: { Cookie: cookie } },
@@ -258,9 +280,10 @@ describe('GET /api/wiki/pages/:customerId/versions/:versionId', () => {
 
 // ---------------------------------------------------------------------------
 // GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token
+// (issue #49 — live implementation)
 // ---------------------------------------------------------------------------
 
-describe('GET .../citations/:token (Phase 6 stub)', () => {
+describe('GET .../citations/:token', () => {
   it('returns 401 when the caller is not authenticated', async () => {
     const res = await fetch(
       `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/token-abc`,
@@ -268,19 +291,54 @@ describe('GET .../citations/:token (Phase 6 stub)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 501 when the caller is authenticated (citation resolution is Phase 6)', async () => {
-    const cookie = await getTestSession(env.baseUrl, 'test-rm');
+  it('returns 404 when the corpus chunk does not exist', async () => {
+    const cookie = await getTestSession(env.baseUrl, `test-rm-404-${Date.now()}`);
     const res = await fetch(
-      `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/token-abc`,
+      `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/nonexistent-chunk-id`,
       { headers: { Cookie: cookie } },
     );
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body).toHaveProperty('expected_response_shape');
-    const shape = body.expected_response_shape;
-    expect(shape).toHaveProperty('token');
-    expect(shape).toHaveProperty('entity_id');
-    expect(shape).toHaveProperty('excerpt');
-    expect(shape).toHaveProperty('source_id');
+    expect(body).toHaveProperty('error');
+  });
+
+  it('returns 200 with excerpt for an authenticated user with a valid corpus chunk id', async () => {
+    const cookie = await getTestSession(env.baseUrl, `test-rm-excerpt-${Date.now()}`);
+    const chunkText = 'The customer expressed concern about Q3 delivery timelines.';
+    const { chunkId } = await seedCorpusChunk(env.baseUrl, cookie, chunkText);
+
+    const res = await fetch(
+      `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/${chunkId}`,
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveProperty('token', chunkId);
+    expect(body).toHaveProperty('entity_id', chunkId);
+    expect(body).toHaveProperty('excerpt');
+    expect(typeof body.excerpt).toBe('string');
+    expect(body.excerpt).toContain('customer');
+    // Non-superuser: resolved_name must be null (re-id gated by role).
+    expect(body).toHaveProperty('resolved_name', null);
+  });
+
+  it('returns resolved_name: null for a non-superuser (re-id gated by role)', async () => {
+    const cookie = await getTestSession(env.baseUrl, `test-rm-noreid-${Date.now()}`);
+    const { chunkId } = await seedCorpusChunk(
+      env.baseUrl,
+      cookie,
+      'Another relevant passage about project scope.',
+    );
+
+    const res = await fetch(
+      `${env.baseUrl}/api/wiki/pages/customer-abc/versions/version-xyz/citations/${chunkId}`,
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Non-superuser should NOT receive resolved identity.
+    expect(body.resolved_name).toBeNull();
   });
 });
