@@ -55,6 +55,7 @@ import {
   handleTranscriptIngestionRequest,
   registerTranscriptEntityType,
 } from './api/transcript-ingestion';
+import { handleTranscriptionRequest } from './api/transcription';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -334,6 +335,15 @@ export default {
     if (url.pathname.startsWith('/api/reidentification')) {
       const reidentRes = await handleReidentificationRequest(req, url, appState);
       if (reidentRes) return withTrace(reidentRes);
+    }
+
+    // Cluster-internal transcription worker path (issue #57).
+    // POST /api/transcriptions — submit a transcript (delegated-token or session-cookie auth)
+    // GET  /api/transcriptions — list transcripts
+    // GET  /api/transcriptions/:id — fetch a single transcript
+    if (url.pathname.startsWith('/api/transcriptions')) {
+      const transcriptionRes = await handleTranscriptionRequest(req, url, appState);
+      if (transcriptionRes) return withTrace(transcriptionRes);
     }
 
     // Phase 5 edge-path transcript ingestion (POST /internal/ingestion/transcript).

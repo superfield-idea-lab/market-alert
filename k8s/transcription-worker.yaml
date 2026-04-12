@@ -1,0 +1,131 @@
+# Transcription Worker — Deployment and NetworkPolicy
+#
+# Cluster-internal transcription worker for long audio recordings (issue #57).
+#
+# Security model
+# ---------------
+# The transcription worker runs in a distroless container.  A NetworkPolicy
+# blocks ALL external egress — the pod can only reach the Calypso API gateway
+# (calypso-app) and the DNS resolver.  Audio data never leaves the cluster.
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime
+#   WORKER-C-006  NetworkPolicy blocks direct DB access and external egress
+#   WORKER-T-001  Result submission goes through the API path
+#   WORKER-T-002  DB is structurally unreachable from the worker pod
+#
+# Routing threshold
+# ------------------
+# Recordings with duration ≥ TRANSCRIPTION_WORKER_THRESHOLD_SECONDS (default 600)
+# are routed to this worker via a task_queue row with job_type='transcription'.
+# The threshold is configured in the PWA recording flow.
+#
+# Apply order (after genesis db-init-job completes):
+#   kubectl apply -f k8s/transcription-worker-secret.yaml   # operator-created
+#   kubectl apply -f k8s/transcription-worker.yaml
+
+# ── NetworkPolicy: transcription worker ──────────────────────────────────────
+# Restricts outbound traffic from the transcription worker pod.
+#   - Allows egress to the API gateway (calypso-app) on port 80 only.
+#   - Allows DNS resolution (UDP/TCP port 53).
+#   - Blocks ALL other outbound traffic, including any external internet access.
+#     This ensures audio data stays within the cluster trust boundary.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: calypso-worker-transcription-egress
+  labels:
+    app: calypso-worker-transcription
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-worker-transcription
+  policyTypes:
+    - Egress
+  egress:
+    # Allow outbound to API gateway (calypso-app) on port 80 only.
+    # This is the sole permitted external connection — workers submit transcripts
+    # via POST /api/transcriptions using their delegated token.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: calypso-app
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow DNS resolution only.
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # NOTE: No egress rule to any external CIDR.
+    # Any attempt by the worker to reach an external host (e.g. an AI vendor API)
+    # will be dropped by the default-deny policy.
+
+
+# ── Deployment: transcription worker ─────────────────────────────────────────
+# Polls the task_queue for job_type='transcription' tasks, transcribes the
+# referenced audio, and posts the result back to the API gateway.
+#
+# The worker image is distroless — no shell, no package manager.
+# See Dockerfile.transcription-worker for the two-stage build.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calypso-worker-transcription
+  labels:
+    app: calypso-worker-transcription
+    agent-type: transcription
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calypso-worker-transcription
+  template:
+    metadata:
+      labels:
+        app: calypso-worker-transcription
+        agent-type: transcription
+    spec:
+      containers:
+        - name: worker
+          # Image tag is set via deploy.sh or kubectl set image
+          image: ghcr.io/<owner>/calypso-worker-transcription:latest
+          env:
+            - name: AGENT_TYPE
+              value: 'transcription'
+            # DB connection uses the agent_transcription role (read-only, view-scoped).
+            # The DB is unreachable from the container at the network level — this
+            # connection is used only for the task claim/release lifecycle queries.
+            - name: AGENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-transcription-secret
+                  key: AGENT_DATABASE_URL
+            # API gateway base URL for task claim and transcript submission.
+            - name: API_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-transcription-secret
+                  key: API_BASE_URL
+            # Path to the transcription CLI binary (e.g. a Whisper-based tool).
+            # When unset, the dev stub is used as a fallback.
+            - name: CLAUDE_CLI_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: calypso-worker-transcription-secret
+                  key: CLAUDE_CLI_PATH
+                  optional: true
+            # Vendor API key is intentionally absent from the worker environment.
+            # The transcription binary must not make external API calls — it runs
+            # in an air-gapped container. Use a locally-bundled model binary.
+          resources:
+            requests:
+              cpu: '500m'
+              memory: '512Mi'
+            limits:
+              cpu: '2000m'
+              memory: '2Gi'

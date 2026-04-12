@@ -25,6 +25,7 @@ import { StorageDemoCard } from '../components/pwa/demos/storage-demo';
 import { CameraDemoCard } from '../components/pwa/demos/camera-demo';
 import { MicDemoCard } from '../components/pwa/demos/mic-demo';
 import { MeetingRecordingDemoCard } from '../components/pwa/demos/meeting-recording-demo';
+import { TranscriptionDemoCard } from '../components/pwa/demos/transcription-demo';
 import { AudioRecorder } from '../components/pwa/audio-recorder';
 import { DemoCard } from '../components/pwa/demo-card';
 import { Mic2 } from 'lucide-react';
@@ -125,6 +126,7 @@ export function PwaDemoPage() {
           <MicDemoCard />
           <MeetingRecordingDemoCard />
           <AudioRecorderCard />
+          <TranscriptionDemoCard />
         </div>
       </div>
     </div>

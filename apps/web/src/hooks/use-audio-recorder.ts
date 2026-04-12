@@ -80,34 +80,35 @@ export interface AudioRecorderState {
 // Web Speech API type stubs
 // ---------------------------------------------------------------------------
 
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionInstance;
-    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-  }
+// Local Speech Recognition type stubs — avoid augmenting the DOM globals
+// because lib.dom.d.ts already declares SpeechRecognition and the two types
+// are not assignable to each other.  We cast to this interface at the call site.
+interface SpeechRecognitionWindow {
+  SpeechRecognition?: new () => LocalSpeechRecognitionInstance;
+  webkitSpeechRecognition?: new () => LocalSpeechRecognitionInstance;
 }
 
-interface SpeechRecognitionInstance extends EventTarget {
+interface LocalSpeechRecognitionInstance extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   start(): void;
   stop(): void;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onresult: ((event: LocalSpeechRecognitionEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
   onend: (() => void) | null;
 }
 
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
+interface LocalSpeechRecognitionEvent extends Event {
+  results: LocalSpeechRecognitionResultList;
 }
 
-interface SpeechRecognitionResultList {
+interface LocalSpeechRecognitionResultList {
   length: number;
-  [index: number]: SpeechRecognitionResult;
+  [index: number]: LocalSpeechRecognitionResult;
 }
 
-interface SpeechRecognitionResult {
+interface LocalSpeechRecognitionResult {
   isFinal: boolean;
   0: { transcript: string };
 }
@@ -187,7 +188,7 @@ export function useAudioRecorder(): AudioRecorderState {
   const mimeTypeRef = useRef<string>('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const recognitionRef = useRef<LocalSpeechRecognitionInstance | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const finalTranscriptRef = useRef<string>('');
   const interimTranscriptRef = useRef<string>('');
@@ -343,7 +344,9 @@ export function useAudioRecorder(): AudioRecorderState {
       // SpeechRecognition — on-device transcription stub (will be Whisper.cpp WASM)
       const SpeechRecognitionCtor =
         typeof window !== 'undefined'
-          ? (window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null)
+          ? ((window as SpeechRecognitionWindow).SpeechRecognition ??
+            (window as SpeechRecognitionWindow).webkitSpeechRecognition ??
+            null)
           : null;
 
       if (SpeechRecognitionCtor) {
@@ -352,7 +355,7 @@ export function useAudioRecorder(): AudioRecorderState {
         recognition.interimResults = true;
         recognition.lang = 'en-US';
 
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
+        recognition.onresult = (event: LocalSpeechRecognitionEvent) => {
           let interim = '';
           for (let i = 0; i < event.results.length; i++) {
             const result = event.results[i];

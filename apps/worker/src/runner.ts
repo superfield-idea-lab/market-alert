@@ -88,6 +88,12 @@ import {
   buildAutolearnCliPayload,
   validateAutolearnResult,
 } from './autolearn-job';
+import {
+  TRANSCRIPTION_JOB_TYPE,
+  TRANSCRIPTION_TIMEOUT_MS,
+  buildTranscriptionCliPayload,
+  validateTranscriptionResult,
+} from './transcription-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -293,6 +299,18 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateAutolearnResult(rawResult);
+    } else if (task.job_type === TRANSCRIPTION_JOB_TYPE) {
+      // Cluster-internal transcription worker path (issue #57).
+      // Long recordings exceeding the threshold are routed here from the PWA.
+      // The worker runs in a distroless container with no external egress.
+      const cliPayload = buildTranscriptionCliPayload(task.id, agentType, task.payload);
+      const rawResult = await invokeCli({
+        cliPath: CLAUDE_CLI_PATH,
+        taskPayload: cliPayload,
+        timeoutMs: TRANSCRIPTION_TIMEOUT_MS,
+        sigtermGraceMs,
+      });
+      result = validateTranscriptionResult(rawResult);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

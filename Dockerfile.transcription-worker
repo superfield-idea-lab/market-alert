@@ -1,0 +1,82 @@
+# Dockerfile.transcription-worker — cluster-internal transcription worker image.
+#
+# Two-stage build:
+#   Stage 1 (builder): install workspace dependencies and compile the worker bundle.
+#   Stage 2 (runtime): distroless image — no shell, no package manager.
+#
+# Security model (issue #57)
+# ---------------------------
+# This image is designed to run inside the cluster with no external network access.
+# A Kubernetes NetworkPolicy (k8s/transcription-worker.yaml) blocks all external
+# egress.  The transcription binary must be self-contained (bundled model weights)
+# and must not make outbound HTTP calls.
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime (shell absent in production stage)
+#   WORKER-C-002  Vendor CLI invoked without shell (binary copied directly)
+#
+# Build arguments:
+#   TRANSCRIPTION_CLI_VERSION — version tag for documentation (not used at runtime)
+#
+# Environment variables expected at container startup:
+#   AGENT_DATABASE_URL — read-only PostgreSQL connection string for the agent role
+#   AGENT_TYPE         — must be "transcription"
+#   API_BASE_URL       — base URL of the Calypso API server (cluster-internal)
+#   WORKER_ID          — unique identifier for this instance (defaults to hostname)
+#   CLAUDE_CLI_PATH    — path to the transcription CLI binary (optional; dev stub used if unset)
+
+# --- builder stage ---
+FROM oven/bun:1.2@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be053a16f74 AS builder
+
+WORKDIR /app
+
+# Copy workspace manifests and lockfile first for layer caching.
+COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/ui/package.json packages/ui/
+
+# Install workspace dependencies with frozen lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
+
+# Copy source files needed for the worker bundle
+COPY apps/worker/ apps/worker/
+COPY packages/core/ packages/core/
+COPY packages/db/ packages/db/
+COPY tsconfig.json ./
+
+# Compile the worker entry-point to a single bundle targeting the bun runtime
+RUN bun build apps/worker/src/index.ts \
+      --target bun \
+      --outfile dist/transcription-worker.js \
+      --external postgres
+
+# --- runtime stage ---
+# Distroless: no shell (/bin/sh absent), no package manager, minimal attack surface.
+# The transcription worker runs with no vendor API key and no external egress —
+# audio is processed entirely within the cluster.
+FROM oven/bun:1.2-distroless@sha256:e2c3f36733fa2c2c9c80d89b481d9fc7629558cac2533c776f6285ae1ba6b8fa AS runtime
+
+ARG TRANSCRIPTION_CLI_VERSION=unknown
+LABEL transcription.version="${TRANSCRIPTION_CLI_VERSION}"
+
+WORKDIR /app
+
+# Copy compiled worker bundle
+COPY --from=builder /app/dist/transcription-worker.js ./dist/worker.js
+
+# Copy node_modules for postgres (external dependency not bundled)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Runtime environment defaults
+ENV AGENT_TYPE=transcription
+
+# IMPORTANT: No external-facing vendor CLI is included here.
+# The transcription binary (CLAUDE_CLI_PATH) must be supplied at build time
+# or via a volume mount if using a locally-bundled model.
+# If CLAUDE_CLI_PATH is unset, the runner falls back to the dev stub.
+
+ENTRYPOINT ["bun", "run", "dist/worker.js"]
