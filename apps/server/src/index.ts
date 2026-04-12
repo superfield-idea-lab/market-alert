@@ -49,6 +49,7 @@ import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
+import { handleWikiPageViewRequest } from './api/wiki-page-view';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -300,6 +301,16 @@ export default {
     if (url.pathname.startsWith('/api/wiki')) {
       const wikiRes = await handleWikiRequest(req, url, appState);
       if (wikiRes) return withTrace(wikiRes);
+    }
+
+    // Read-only wiki page view + version picker + citation hover (issue #45).
+    // GET  /api/wiki/pages/:customerId                                  — list versions
+    // GET  /api/wiki/pages/:customerId/versions/:versionId             — fetch single version
+    // GET  /api/wiki/pages/:customerId/versions/:versionId/citations/:t — resolve citation
+    // Scout stub: all routes return 501 Not Implemented (Phase 4 follow-on).
+    if (url.pathname.startsWith('/api/wiki/pages')) {
+      const wikiPageRes = await handleWikiPageViewRequest(req, url, appState);
+      if (wikiPageRes) return withTrace(wikiPageRes);
     }
 
     if (url.pathname.startsWith('/api/reidentification')) {
