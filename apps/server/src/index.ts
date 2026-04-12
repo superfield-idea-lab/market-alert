@@ -58,6 +58,7 @@ import {
 import { handleTranscriptionRequest } from './api/transcription';
 import { handleAnnotationsRequest } from './api/annotations';
 import { handleAnnotationThreadsRequest } from './api/annotation-threads';
+import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -307,6 +308,16 @@ export default {
     if (url.pathname.startsWith('/api/deepclean')) {
       const deepcleanRes = await handleDeepcleanRequest(req, url, appState);
       if (deepcleanRes) return withTrace(deepcleanRes);
+    }
+
+    // Draft review + publication gate (issue #66).
+    // GET  /api/wiki/drafts/:id           — fetch draft with diff and materiality
+    // POST /api/wiki/drafts/:id/approve   — publish the draft (approver only)
+    // POST /api/wiki/drafts/:id/reject    — close the draft  (approver only)
+    // Must be checked before the generic /api/wiki handler.
+    if (url.pathname.startsWith('/api/wiki/drafts')) {
+      const draftReviewRes = await handleWikiDraftReviewRequest(req, url, appState);
+      if (draftReviewRes) return withTrace(draftReviewRes);
     }
 
     // Pending-drafts badge count for approvers (issue #48).

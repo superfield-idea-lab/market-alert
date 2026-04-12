@@ -31,6 +31,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { PendingDraftsBadge } from '../components/PendingDraftsBadge';
 import { WikiRender } from '../components/WikiRender';
 import { AnnotationSidebar } from '../components/AnnotationThread';
+import { DraftReviewModal } from '../components/DraftReviewModal';
 import type { NewThreadAnchor, AnnotationThread } from '../components/AnnotationThread';
 
 // ---------------------------------------------------------------------------
@@ -94,43 +95,63 @@ export function WikiVersionCard({
   version,
   selected,
   onSelect,
+  onReview,
 }: {
   version: WikiPageVersionSummary;
   selected: boolean;
   onSelect: (id: string) => void;
+  onReview?: (id: string) => void;
 }): React.ReactElement {
   return (
-    <button
+    <div
       data-testid="wiki-version-card"
-      onClick={() => onSelect(version.id)}
-      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all ${
         selected
           ? 'border-indigo-400 bg-indigo-50 text-indigo-900'
           : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium truncate" data-testid="wiki-version-card-created-by">
-          {version.created_by}
-        </span>
-        {version.published && (
-          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-            published
+      <button
+        className="w-full text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-400 rounded"
+        onClick={() => onSelect(version.id)}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium truncate" data-testid="wiki-version-card-created-by">
+            {version.created_by}
           </span>
-        )}
-      </div>
-      <div className="mt-1 text-[11px] text-zinc-500" data-testid="wiki-version-card-timestamp">
-        {formatTimestamp(version.created_at)}
-      </div>
-      {version.source && (
-        <div
-          className="mt-0.5 text-[11px] text-zinc-400 truncate"
-          data-testid="wiki-version-card-source"
-        >
-          Source: {version.source}
+          {version.published && (
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+              published
+            </span>
+          )}
+          {!version.published && (
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+              draft
+            </span>
+          )}
         </div>
+        <div className="mt-1 text-[11px] text-zinc-500" data-testid="wiki-version-card-timestamp">
+          {formatTimestamp(version.created_at)}
+        </div>
+        {version.source && (
+          <div
+            className="mt-0.5 text-[11px] text-zinc-400 truncate"
+            data-testid="wiki-version-card-source"
+          >
+            Source: {version.source}
+          </div>
+        )}
+      </button>
+      {!version.published && onReview && (
+        <button
+          data-testid="review-draft-button"
+          onClick={() => onReview(version.id)}
+          className="mt-2 w-full text-center text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded px-2 py-1 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400"
+        >
+          Review draft
+        </button>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -148,10 +169,12 @@ export function WikiVersionPicker({
   versions,
   selectedId,
   onSelect,
+  onReview,
 }: {
   versions: WikiPageVersionSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onReview?: (id: string) => void;
 }): React.ReactElement {
   if (versions.length === 0) {
     return (
@@ -172,6 +195,7 @@ export function WikiVersionPicker({
           version={v}
           selected={v.id === selectedId}
           onSelect={onSelect}
+          onReview={onReview}
         />
       ))}
     </div>
@@ -263,47 +287,73 @@ export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElem
   const [error, setError] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<NewThreadAnchor | null>(null);
   const [threads, setThreads] = useState<AnnotationThread[]>([]);
+  // Draft review modal state
+  const [reviewDraftId, setReviewDraftId] = useState<string | null>(null);
+
+  // Fetch version list — extracted so it can be called after a review decision.
+  const fetchVersions = useCallback(
+    (opts?: { signal?: AbortSignal }) => {
+      setLoading(true);
+      setError(null);
+
+      fetch(`/api/wiki/pages/${encodeURIComponent(customerId)}`, {
+        credentials: 'include',
+        signal: opts?.signal,
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+          }
+          return res.json() as Promise<{
+            customer_id: string;
+            versions: WikiPageVersionSummary[];
+          }>;
+        })
+        .then((data) => {
+          setVersions(data.versions);
+          // Select the newest version by default (index 0 — API returns desc order).
+          if (data.versions.length > 0) {
+            setSelectedId((prev) => prev ?? data.versions[0].id);
+          }
+        })
+        .catch((err: unknown) => {
+          if ((err as { name?: string }).name === 'AbortError') return;
+          setError(err instanceof Error ? err.message : 'Unknown error');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    },
+    [customerId],
+  );
 
   // Fetch version list on mount or when customerId changes.
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    fetch(`/api/wiki/pages/${encodeURIComponent(customerId)}`, {
-      credentials: 'include',
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-        }
-        return res.json() as Promise<{ customer_id: string; versions: WikiPageVersionSummary[] }>;
-      })
-      .then((data) => {
-        if (cancelled) return;
-        setVersions(data.versions);
-        // Select the newest version by default (index 0 — API returns desc order).
-        if (data.versions.length > 0) {
-          setSelectedId(data.versions[0].id);
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Unknown error');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
+    const controller = new AbortController();
+    fetchVersions({ signal: controller.signal });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [customerId]);
+  }, [fetchVersions]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
   }, []);
+
+  const handleReview = useCallback((id: string) => {
+    setReviewDraftId(id);
+  }, []);
+
+  const handleReviewClose = useCallback(() => {
+    setReviewDraftId(null);
+  }, []);
+
+  const handleReviewDecision = useCallback(() => {
+    setReviewDraftId(null);
+    // Reload versions to reflect the new state
+    fetchVersions();
+  }, [fetchVersions]);
 
   const selectedVersion = versions.find((v) => v.id === selectedId) ?? null;
 
@@ -324,77 +374,91 @@ export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElem
   }
 
   return (
-    <div data-testid="wiki-view-page" className="flex h-full overflow-hidden">
-      {/* History panel sidebar */}
-      <aside
-        data-testid="wiki-history-panel"
-        className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50 flex flex-col overflow-hidden"
-      >
-        <div className="px-3 py-3 border-b border-zinc-200 shrink-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
-              Version History
-            </h2>
-            <PendingDraftsBadge customerId={customerId} />
-          </div>
-          <p className="mt-0.5 text-[11px] text-zinc-400 font-mono truncate">{customerId}</p>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          <WikiVersionPicker versions={versions} selectedId={selectedId} onSelect={handleSelect} />
-        </div>
-      </aside>
-
-      {/* Content area */}
-      <main className="flex-1 flex overflow-hidden bg-white">
-        {/* Wiki render area */}
-        <div className="flex-1 overflow-y-auto">
-          {selectedVersion ? (
-            <WikiRender
-              version={{
-                id: selectedVersion.id,
-                content: selectedVersion.content,
-                state: selectedVersion.published ? 'PUBLISHED' : 'AWAITING_REVIEW',
-                wiki_page_id: null,
-                tenant_id: null,
-                created_at: selectedVersion.created_at,
-                updated_at: selectedVersion.created_at,
-              }}
-              customerId={customerId}
-              className="p-4"
-              onTextSelected={setPendingAnchor}
-              threads={threads}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-zinc-400 text-sm">
-              {versions.length === 0
-                ? 'No versions found for this customer.'
-                : 'Select a version to view its content.'}
-            </div>
-          )}
-        </div>
-
-        {/* Annotation sidebar — only shown when a version is selected */}
-        {selectedVersion && (
-          <aside
-            data-testid="annotation-sidebar-panel"
-            className="w-64 shrink-0 border-l border-zinc-200 bg-zinc-50 overflow-y-auto"
-          >
-            <div className="px-3 py-2.5 border-b border-zinc-200">
+    <>
+      {reviewDraftId && (
+        <DraftReviewModal
+          draftId={reviewDraftId}
+          onClose={handleReviewClose}
+          onDecision={handleReviewDecision}
+        />
+      )}
+      <div data-testid="wiki-view-page" className="flex h-full overflow-hidden">
+        {/* History panel sidebar */}
+        <aside
+          data-testid="wiki-history-panel"
+          className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50 flex flex-col overflow-hidden"
+        >
+          <div className="px-3 py-3 border-b border-zinc-200 shrink-0">
+            <div className="flex items-center gap-2">
               <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
-                Comments
+                Version History
               </h2>
+              <PendingDraftsBadge customerId={customerId} />
             </div>
-            <AnnotationSidebar
-              customerId={customerId}
-              versionId={selectedVersion.id}
-              content={selectedVersion.content}
-              pendingAnchor={pendingAnchor}
-              onPendingAnchorCleared={() => setPendingAnchor(null)}
-              onThreadsChange={setThreads}
+            <p className="mt-0.5 text-[11px] text-zinc-400 font-mono truncate">{customerId}</p>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            <WikiVersionPicker
+              versions={versions}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onReview={handleReview}
             />
-          </aside>
-        )}
-      </main>
-    </div>
+          </div>
+        </aside>
+
+        {/* Content area */}
+        <main className="flex-1 flex overflow-hidden bg-white">
+          {/* Wiki render area */}
+          <div className="flex-1 overflow-y-auto">
+            {selectedVersion ? (
+              <WikiRender
+                version={{
+                  id: selectedVersion.id,
+                  content: selectedVersion.content,
+                  state: selectedVersion.published ? 'PUBLISHED' : 'AWAITING_REVIEW',
+                  wiki_page_id: null,
+                  tenant_id: null,
+                  created_at: selectedVersion.created_at,
+                  updated_at: selectedVersion.created_at,
+                }}
+                customerId={customerId}
+                className="p-4"
+                onTextSelected={setPendingAnchor}
+                threads={threads}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-zinc-400 text-sm">
+                {versions.length === 0
+                  ? 'No versions found for this customer.'
+                  : 'Select a version to view its content.'}
+              </div>
+            )}
+          </div>
+
+          {/* Annotation sidebar — only shown when a version is selected */}
+          {selectedVersion && (
+            <aside
+              data-testid="annotation-sidebar-panel"
+              className="w-64 shrink-0 border-l border-zinc-200 bg-zinc-50 overflow-y-auto"
+            >
+              <div className="px-3 py-2.5 border-b border-zinc-200">
+                <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
+                  Comments
+                </h2>
+              </div>
+              <AnnotationSidebar
+                customerId={customerId}
+                versionId={selectedVersion.id}
+                content={selectedVersion.content}
+                pendingAnchor={pendingAnchor}
+                onPendingAnchorCleared={() => setPendingAnchor(null)}
+                onThreadsChange={setThreads}
+              />
+            </aside>
+          )}
+        </main>
+      </div>
+    </>
   );
 }
