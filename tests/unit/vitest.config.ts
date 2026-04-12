@@ -5,9 +5,10 @@
  * flags, workspace aliases) that cannot live inside a single app workspace.
  *
  * Tests added here:
- *  - scaffold.test.ts         — monorepo structure assertions (Phase 0 dev-scout)
- *  - secrets.test.ts          — packages/core/secrets abstraction layer (issue #11)
- *  - fixture-recorder.test.ts — golden fixture recorder + MSW handler factory (issue #98)
+ *  - scaffold.test.ts            — monorepo structure assertions (Phase 0 dev-scout)
+ *  - secrets.test.ts             — packages/core/secrets abstraction layer (issue #11)
+ *  - fixture-recorder.test.ts    — golden fixture recorder + MSW handler factory (issue #98)
+ *  - linkerd-manifests.test.ts   — Linkerd mTLS manifest structure validation (issue #88)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -18,7 +19,12 @@ import { resolve } from 'node:path';
 export default defineConfig({
   test: {
     name: 'scaffold',
-    include: ['scaffold.test.ts', 'secrets.test.ts', 'fixture-recorder.test.ts'],
+    include: [
+      'scaffold.test.ts',
+      'secrets.test.ts',
+      'fixture-recorder.test.ts',
+      'linkerd-manifests.test.ts',
+    ],
     root: resolve(import.meta.dirname),
   },
 });

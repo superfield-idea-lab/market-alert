@@ -144,9 +144,35 @@ to the RM's session.
 ## Encryption in Transit
 
 - All external traffic (PWA → API, AssemblyAI webhook, IMAP client) over TLS 1.2+.
-- All cluster-internal traffic between worker pods and the embedding service over
-  cluster-internal TLS or mTLS (to be confirmed at infrastructure design time).
+- All cluster-internal pod-to-pod traffic traverses a Linkerd mTLS proxy sidecar.
+  Every call between meshed pods is encrypted end-to-end with a SPIFFE-style identity
+  certificate issued by the Linkerd identity controller. A workload without a valid
+  mesh identity cannot reach any other service in the cluster (default-deny
+  AuthorizationPolicy per namespace — see `k8s/linkerd/authorization-policies.yaml`).
 - Postgres connections from application pods require SSL (`sslmode=require`).
+
+### Linkerd mTLS implementation details
+
+**Why Linkerd:** Linkerd uses eBPF-free, Rust-based micro-proxies injected as
+sidecars. It adds mTLS with zero application-code changes and supports distroless
+workload images (the sidecar uses its own init container for iptables rules; no
+shell in the workload container is required).
+
+**Namespace injection:** The three application namespaces (`calypso-server`,
+`calypso-web`, `calypso-worker`) carry `linkerd.io/inject: enabled`. Every pod
+created in these namespaces receives a Linkerd proxy sidecar automatically unless
+explicitly opted out.
+
+**Default-deny posture:** Each namespace has a `Server` resource describing the
+protected port(s) and an `AuthorizationPolicy` that grants access only to workloads
+presenting a valid `MeshTLSAuthentication` identity. Non-meshed callers (pods
+without a valid SPIFFE certificate) are denied at the mesh layer.
+
+**Upgrade path:** `k8s/linkerd/upgrade.sh` performs a rolling sidecar version
+upgrade with zero downtime. The script applies CRD updates, upgrades the control
+plane, then performs a `kubectl rollout restart` for each deployment in the meshed
+namespaces — replacing old sidecars one pod at a time. `linkerd check` runs at
+the end to verify the upgraded state.
 
 ---
 
@@ -168,8 +194,6 @@ synthetic tables (wiki pages, customer interests) within their scope only.
 
 ## Open Questions
 
-- **mTLS between pods:** Confirm whether cluster-internal traffic requires mTLS or
-  whether network policy isolation is sufficient.
 - **KMS provider:** Confirm which KMS is used for Kubernetes Secret encryption
   (cloud provider KMS or self-hosted).
 - **Audit logging:** Define which operations (dictionary access, cross-department

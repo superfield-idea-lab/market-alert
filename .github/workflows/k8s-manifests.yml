@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'k8s/**'
+      - 'k8s/linkerd/**'
       - 'Dockerfile'
       - 'Dockerfile.release'
       - 'Dockerfile.worker'
@@ -21,6 +22,7 @@ on:
     branches: [main]
     paths:
       - 'k8s/**'
+      - 'k8s/linkerd/**'
       - 'Dockerfile'
       - 'Dockerfile.release'
       - 'Dockerfile.worker'
@@ -72,6 +74,10 @@ jobs:
       - name: Validate manifests (dry-run)
         # Skip secrets.example.yaml — it contains template placeholders, not real values.
         # Skip dev/ — dev-only configs that intentionally diverge from production schema.
+        # Skip k8s/linkerd/authorization-policies.yaml — requires Linkerd CRDs
+        #   (Server, MeshTLSAuthentication, AuthorizationPolicy from policy.linkerd.io)
+        #   which are not installed in vanilla k3s.  Structural correctness of that file
+        #   is validated by tests/unit/linkerd-manifests.test.ts instead.
         run: |
           echo "=== Validating k8s manifests ==="
           FAIL=0
@@ -92,12 +98,24 @@ jobs:
             fi
           done
 
+          # Validate the Linkerd namespace manifest (uses only core/v1 Namespace resources
+          # which are always available — no Linkerd CRDs required).
+          echo "--- dry-run: k8s/linkerd/namespaces.yaml"
+          if kubectl apply --dry-run=server -f k8s/linkerd/namespaces.yaml; then
+            echo "OK: k8s/linkerd/namespaces.yaml"
+          else
+            echo "FAIL: k8s/linkerd/namespaces.yaml"
+            FAIL=1
+          fi
+
           if [[ $FAIL -ne 0 ]]; then
             echo "One or more manifests failed validation."
             exit 1
           fi
 
           echo "All manifests validated successfully."
+          echo "NOTE: k8s/linkerd/authorization-policies.yaml is validated structurally"
+          echo "by tests/unit/linkerd-manifests.test.ts (requires Linkerd CRDs not in k3s)."
 
       - name: Check no plaintext secrets in manifests
         # Detect patterns that look like real secret values (not template placeholders)

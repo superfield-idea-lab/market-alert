@@ -1,0 +1,188 @@
+# Linkerd Authorization Policies — default-deny per namespace.
+#
+# PRD §7: "A workload without a valid mesh identity cannot reach any other
+# service in the cluster."
+#
+# Linkerd's policy model:
+#   - Server resources define a protected port on a set of pods.
+#   - AuthorizationPolicy resources grant access to a Server from specific
+#     MeshTLSAuthentication or NetworkAuthentication sources.
+#   - Without an AuthorizationPolicy, a Server resource blocks all traffic by
+#     default (default-deny).
+#
+# This file creates a Server resource for every HTTP port in each namespace and
+# an AuthorizationPolicy that grants access only to workloads presenting a
+# valid SPIFFE identity from the same trust domain (i.e. meshed pods).
+# Non-meshed pods (no valid mTLS identity) are denied at the mesh layer.
+#
+# Apply order:
+#   kubectl apply -f k8s/linkerd/namespaces.yaml
+#   kubectl apply -f k8s/linkerd/authorization-policies.yaml
+#
+# Canonical references:
+#   https://linkerd.io/2.14/reference/authorization-policy/
+#   https://linkerd.io/2.14/tasks/restricting-access/
+
+# ── calypso-server namespace ──────────────────────────────────────────────────
+
+# Server: protect the API gateway HTTP port in calypso-server.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: Server
+metadata:
+  name: calypso-app-http
+  namespace: calypso-server
+  labels:
+    app: calypso-app
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-app
+  port: 31415
+  proxyProtocol: HTTP/1
+
+
+# MeshTLSAuthentication: accept requests from any meshed identity within
+# the cluster trust domain.  The empty meshTLS block matches all valid
+# mesh identities — only pods with a Linkerd-issued SPIFFE certificate pass.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: MeshTLSAuthentication
+metadata:
+  name: meshed-identity-server
+  namespace: calypso-server
+spec:
+  identityRefs:
+    - kind: Namespace
+      name: calypso-server
+    - kind: Namespace
+      name: calypso-worker
+
+
+# AuthorizationPolicy: bind the MeshTLSAuthentication to the Server.
+# Grants access only to workloads that present a valid mesh identity.
+# Non-meshed callers are implicitly denied because they cannot present a
+# Linkerd-issued SPIFFE certificate.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: AuthorizationPolicy
+metadata:
+  name: allow-meshed-to-calypso-app
+  namespace: calypso-server
+spec:
+  targetRef:
+    group: policy.linkerd.io
+    kind: Server
+    name: calypso-app-http
+  requiredAuthenticationRefs:
+    - name: meshed-identity-server
+      kind: MeshTLSAuthentication
+      group: policy.linkerd.io
+
+
+# ── calypso-worker namespace ──────────────────────────────────────────────────
+
+# Server: protect any HTTP-speaking worker in the calypso-worker namespace.
+# Workers don't expose HTTP ports to each other in normal operation, but
+# the Server resource is declared here to ensure the default-deny posture
+# is in effect if a worker ever exposes a port in the future.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: Server
+metadata:
+  name: calypso-worker-http
+  namespace: calypso-worker
+  labels:
+    app.kubernetes.io/component: worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  port: 8080
+  proxyProtocol: HTTP/1
+
+
+# MeshTLSAuthentication: accept requests from meshed identities in the same namespace.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: MeshTLSAuthentication
+metadata:
+  name: meshed-identity-worker
+  namespace: calypso-worker
+spec:
+  identityRefs:
+    - kind: Namespace
+      name: calypso-worker
+    - kind: Namespace
+      name: calypso-server
+
+
+# AuthorizationPolicy: bind the worker MeshTLSAuthentication to the worker Server.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: AuthorizationPolicy
+metadata:
+  name: allow-meshed-to-calypso-worker
+  namespace: calypso-worker
+spec:
+  targetRef:
+    group: policy.linkerd.io
+    kind: Server
+    name: calypso-worker-http
+  requiredAuthenticationRefs:
+    - name: meshed-identity-worker
+      kind: MeshTLSAuthentication
+      group: policy.linkerd.io
+
+
+# ── calypso-web namespace ─────────────────────────────────────────────────────
+
+# Server: protect the web serving pod (PWA static server) in calypso-web.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: Server
+metadata:
+  name: calypso-web-http
+  namespace: calypso-web
+  labels:
+    app: calypso-web
+spec:
+  podSelector:
+    matchLabels:
+      app: calypso-web
+  port: 3000
+  proxyProtocol: HTTP/1
+
+
+# MeshTLSAuthentication: accept requests from calypso-server (API gateway →
+# web static assets) and within calypso-web itself.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: MeshTLSAuthentication
+metadata:
+  name: meshed-identity-web
+  namespace: calypso-web
+spec:
+  identityRefs:
+    - kind: Namespace
+      name: calypso-web
+    - kind: Namespace
+      name: calypso-server
+
+
+# AuthorizationPolicy: bind the web MeshTLSAuthentication to the web Server.
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: AuthorizationPolicy
+metadata:
+  name: allow-meshed-to-calypso-web
+  namespace: calypso-web
+spec:
+  targetRef:
+    group: policy.linkerd.io
+    kind: Server
+    name: calypso-web-http
+  requiredAuthenticationRefs:
+    - name: meshed-identity-web
+      kind: MeshTLSAuthentication
+      group: policy.linkerd.io
