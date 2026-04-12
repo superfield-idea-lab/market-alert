@@ -23,7 +23,8 @@
     "./approvals": "./approvals.ts",
     "./ingestion-token": "./ingestion-token.ts",
     "./corpus-chunk-store": "./corpus-chunk-store.ts",
-    "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts"
+    "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts",
+    "./backup": "./backup.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
