@@ -1,47 +1,41 @@
 /**
  * @file wiki-view.tsx
  *
- * Read-only rendered wiki view with version picker and citation hover.
+ * Read-only wiki view with version history panel.
  *
- * ## Scout stub (Phase 4, issue #45)
+ * Implements the history panel UI for issue #47 (Phase 4 — Wiki web UX).
  *
- * This component is a **no-op stub** for the dev-scout issue. It renders a
- * placeholder UI with the planned component hierarchy documented so follow-on
- * implementation issues can build against a stable surface.
- *
- * ## Planned component hierarchy
+ * ## Component hierarchy
  *
  *   WikiViewPage
  *   ├── WikiVersionPicker          — lists all prior WikiPageVersion entries
  *   │     └── WikiVersionCard      — shows created_by, source, timestamp
  *   └── WikiMarkdownRenderer       — renders markdown content of selected version
- *         └── CitationHoverCard    — revealed on hover over a cited claim
+ *         └── CitationHoverCard    — revealed on hover over a cited claim (stub)
  *
- * ## Planned data flow
+ * ## Data flow
  *
  *   1. WikiViewPage fetches GET /api/wiki/pages/:customerId on mount.
  *   2. Version list is passed to WikiVersionPicker.
- *   3. Selecting a version fetches GET /api/wiki/pages/:customerId/versions/:id.
- *   4. Markdown is rendered by WikiMarkdownRenderer.
- *   5. Hovering a citation anchor calls
- *      GET /api/wiki/pages/:customerId/versions/:id/citations/:token.
- *   6. CitationHoverCard displays the resolved CorpusChunk excerpt.
+ *   3. The newest version is selected by default.
+ *   4. Selecting a version updates rendered content.
+ *   5. WikiMarkdownRenderer renders the selected version's markdown.
  *
  * Blueprint references:
- * - PRD §4.3 — read-only wiki rendering
+ * - PRD §5.3 — history panel
  * - Implementation plan Phase 4 — Wiki web UX
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/45
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 // ---------------------------------------------------------------------------
-// Type stubs — will be driven by the real API response shapes in Phase 4
+// Types
 // ---------------------------------------------------------------------------
 
 /**
  * Summary of a single WikiPageVersion entry as returned by the version-list
- * endpoint. Matches WikiPageVersionSummary in api/wiki-page-view.ts.
+ * endpoint (GET /api/wiki/pages/:customerId).
  */
 export interface WikiPageVersionSummary {
   id: string;
@@ -64,86 +58,186 @@ export interface CitationResolution {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component stubs
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WikiVersionCard
 // ---------------------------------------------------------------------------
 
 /**
- * WikiVersionCard — stub.
+ * WikiVersionCard — renders metadata for a single wiki version.
  *
- * Planned: display created_by, source, and timestamp for one wiki version.
- * On click: update selected version in WikiViewPage state.
+ * Displays created_by, source, timestamp, and publication state.
+ * Calls onSelect when clicked.
  */
-export function WikiVersionCard(_props: {
+export function WikiVersionCard({
+  version,
+  selected,
+  onSelect,
+}: {
   version: WikiPageVersionSummary;
   selected: boolean;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  // Stub — not yet implemented (Phase 4).
   return (
-    <div data-testid="wiki-version-card-stub" className="hidden">
-      stub
-    </div>
+    <button
+      data-testid="wiki-version-card"
+      onClick={() => onSelect(version.id)}
+      className={`w-full text-left px-3 py-2.5 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+        selected
+          ? 'border-indigo-400 bg-indigo-50 text-indigo-900'
+          : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium truncate" data-testid="wiki-version-card-created-by">
+          {version.created_by}
+        </span>
+        {version.published && (
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+            published
+          </span>
+        )}
+      </div>
+      <div className="mt-1 text-[11px] text-zinc-500" data-testid="wiki-version-card-timestamp">
+        {formatTimestamp(version.created_at)}
+      </div>
+      {version.source && (
+        <div
+          className="mt-0.5 text-[11px] text-zinc-400 truncate"
+          data-testid="wiki-version-card-source"
+        >
+          Source: {version.source}
+        </div>
+      )}
+    </button>
   );
 }
 
+// ---------------------------------------------------------------------------
+// WikiVersionPicker
+// ---------------------------------------------------------------------------
+
 /**
- * WikiVersionPicker — stub.
+ * WikiVersionPicker — scrollable list of WikiVersionCard entries.
  *
- * Planned: render a scrollable list of WikiVersionCard entries ordered by
- * version descending.
+ * Versions are displayed in the order provided (expected: reverse-chronological
+ * from the API). The currently selected version is highlighted.
  */
-export function WikiVersionPicker(_props: {
+export function WikiVersionPicker({
+  versions,
+  selectedId,
+  onSelect,
+}: {
   versions: WikiPageVersionSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  // Stub — not yet implemented (Phase 4).
-  return (
-    <div data-testid="wiki-version-picker-stub" className="hidden">
-      stub
-    </div>
-  );
-}
+  if (versions.length === 0) {
+    return (
+      <div
+        data-testid="wiki-version-picker"
+        className="flex-1 flex items-center justify-center text-zinc-400 text-xs"
+      >
+        No versions found.
+      </div>
+    );
+  }
 
-/**
- * CitationHoverCard — stub.
- *
- * Planned: display CorpusChunk excerpt and source reference when a citation
- * anchor in the rendered markdown is hovered.
- */
-export function CitationHoverCard(_props: {
-  resolution: CitationResolution | null;
-}): React.ReactElement {
-  // Stub — not yet implemented (Phase 4).
   return (
-    <div data-testid="citation-hover-card-stub" className="hidden">
-      stub
-    </div>
-  );
-}
-
-/**
- * WikiMarkdownRenderer — stub.
- *
- * Planned: render the markdown content of the selected WikiPageVersion using
- * a safe Markdown renderer (e.g. react-markdown). Each citation anchor
- * `[^N]` triggers a CitationHoverCard on mouseenter.
- */
-export function WikiMarkdownRenderer(_props: {
-  content: string;
-  customerId: string;
-  versionId: string;
-}): React.ReactElement {
-  // Stub — not yet implemented (Phase 4).
-  return (
-    <div data-testid="wiki-markdown-renderer-stub" className="hidden">
-      stub
+    <div data-testid="wiki-version-picker" className="flex flex-col gap-1.5">
+      {versions.map((v) => (
+        <WikiVersionCard
+          key={v.id}
+          version={v}
+          selected={v.id === selectedId}
+          onSelect={onSelect}
+        />
+      ))}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main page component
+// CitationHoverCard — stub (Phase 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * CitationHoverCard — stub.
+ *
+ * Will display CorpusChunk excerpt and source reference when a citation
+ * anchor in the rendered markdown is hovered. Requires the re-identification
+ * service (Phase 6).
+ */
+export function CitationHoverCard({
+  resolution,
+}: {
+  resolution: CitationResolution | null;
+}): React.ReactElement {
+  if (!resolution) return <></>;
+  return (
+    <div
+      data-testid="citation-hover-card"
+      className="absolute z-10 max-w-xs rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg text-xs text-zinc-700"
+    >
+      {resolution.excerpt ? (
+        <p>{resolution.excerpt}</p>
+      ) : (
+        <p className="text-zinc-400">No excerpt available.</p>
+      )}
+      {resolution.source_id && (
+        <p className="mt-1 text-zinc-400 truncate">Source: {resolution.source_id}</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WikiMarkdownRenderer
+// ---------------------------------------------------------------------------
+
+/**
+ * WikiMarkdownRenderer — renders the markdown content of the selected version.
+ *
+ * Uses a safe whitelist-based approach: renders the markdown as preformatted
+ * text to avoid XSS risk until a proper sanitised renderer (react-markdown)
+ * is added in a follow-on issue.
+ */
+export function WikiMarkdownRenderer({
+  content,
+}: {
+  content: string;
+  customerId: string;
+  versionId: string;
+}): React.ReactElement {
+  return (
+    <article
+      data-testid="wiki-markdown-renderer"
+      className="prose prose-zinc prose-sm max-w-none p-4 whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800"
+    >
+      {content}
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WikiViewPage
 // ---------------------------------------------------------------------------
 
 export interface WikiViewPageProps {
@@ -152,31 +246,111 @@ export interface WikiViewPageProps {
 }
 
 /**
- * WikiViewPage — Scout stub.
+ * WikiViewPage — history panel with version picker and markdown renderer.
  *
- * Renders a placeholder that communicates the pending implementation to devs
- * and QA while keeping the route wired and TypeScript-clean.
+ * Fetches all accessible versions from GET /api/wiki/pages/:customerId,
+ * displays them in a sidebar picker (reverse-chronological), and renders
+ * the selected version's content.
  */
 export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElement {
-  return (
-    <div
-      data-testid="wiki-view-page"
-      className="p-8 max-w-3xl mx-auto text-zinc-500 text-sm space-y-4"
-    >
-      <h2 className="text-base font-semibold text-zinc-900">Wiki</h2>
-      <p className="text-xs text-zinc-400">
-        Customer: <span className="font-mono text-zinc-600">{customerId}</span>
-      </p>
-      <p className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-center text-zinc-400">
-        Read-only wiki view is not yet implemented.
-        <br />
-        <span className="text-xs">Phase 4 — issue #45</span>
-      </p>
+  const [versions, setVersions] = useState<WikiPageVersionSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-      {/* Sub-component stubs — hidden, present for type-checking only */}
-      <WikiVersionPicker versions={[]} selectedId={null} onSelect={() => undefined} />
-      <WikiMarkdownRenderer content="" customerId={customerId} versionId="" />
-      <CitationHoverCard resolution={null} />
+  // Fetch version list on mount or when customerId changes.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/wiki/pages/${encodeURIComponent(customerId)}`, {
+      credentials: 'include',
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+        }
+        return res.json() as Promise<{ customer_id: string; versions: WikiPageVersionSummary[] }>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setVersions(data.versions);
+        // Select the newest version by default (index 0 — API returns desc order).
+        if (data.versions.length > 0) {
+          setSelectedId(data.versions[0].id);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id);
+  }, []);
+
+  const selectedVersion = versions.find((v) => v.id === selectedId) ?? null;
+
+  if (loading) {
+    return (
+      <div data-testid="wiki-view-page" className="flex h-full items-center justify-center">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-zinc-400" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div data-testid="wiki-view-page" className="p-8 text-sm text-red-600">
+        Failed to load wiki history: {error}
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="wiki-view-page" className="flex h-full overflow-hidden">
+      {/* History panel sidebar */}
+      <aside
+        data-testid="wiki-history-panel"
+        className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50 flex flex-col overflow-hidden"
+      >
+        <div className="px-3 py-3 border-b border-zinc-200 shrink-0">
+          <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
+            Version History
+          </h2>
+          <p className="mt-0.5 text-[11px] text-zinc-400 font-mono truncate">{customerId}</p>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          <WikiVersionPicker versions={versions} selectedId={selectedId} onSelect={handleSelect} />
+        </div>
+      </aside>
+
+      {/* Content area */}
+      <main className="flex-1 overflow-y-auto bg-white">
+        {selectedVersion ? (
+          <WikiMarkdownRenderer
+            content={selectedVersion.content}
+            customerId={customerId}
+            versionId={selectedVersion.id}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-zinc-400 text-sm">
+            {versions.length === 0
+              ? 'No versions found for this customer.'
+              : 'Select a version to view its content.'}
+          </div>
+        )}
+      </main>
     </div>
   );
 }

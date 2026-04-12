@@ -1,27 +1,22 @@
 /**
  * @file wiki-view.spec.ts
  *
- * Integration test stub — read-only wiki view API (issue #45).
+ * Integration tests — wiki version history API (issue #47).
  *
- * ## Scout stub (Phase 4)
- *
- * The routes under test are no-op stubs that return 501 Not Implemented.
- * These tests assert the stub contract:
- *   - 401 when the caller is unauthenticated (auth invariant lives in stub).
- *   - 501 when authenticated (stub signals follow-on implementation required).
- *   - Response body contains `expected_response_shape` with the planned shape.
- *
- * Once the real Phase 4 implementation lands, these tests should be replaced
- * with assertions against the actual response data.
+ * Tests cover:
+ *   - 401 when unauthenticated
+ *   - Empty list when no versions exist for a customer
+ *   - Returns versions in reverse-chronological order
+ *   - Each entry has created_by, source, created_at, published metadata
+ *   - RLS: versions for customer-A are not visible under customer-B's path
+ *   - GET single version by ID
+ *   - 404 for unknown version or cross-customer access
+ *   - Citation endpoint returns 501 (Phase 6 stub)
  *
  * No mocks — real Postgres + real Bun server via the shared E2E environment
- * helper. TEST_MODE=true must be set (done by startE2EServer in environment.ts).
+ * helper. TEST_MODE=true is set by startE2EServer.
  *
- * Test plan items (issue #45):
- *   TP-2  Integration: fetch the wiki for a customer via the API and assert
- *         version and metadata shape.
- *
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/45
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -56,72 +51,216 @@ async function getTestSession(base: string, username: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Wiki page view — stub contract tests
+// Helper: seed a wiki_page_versions row directly via the internal API
 // ---------------------------------------------------------------------------
 
-describe('GET /api/wiki/pages/:customerId (scout stub)', () => {
+async function seedWikiVersion(
+  base: string,
+  opts: {
+    customer: string;
+    dept: string;
+    content: string;
+    state?: string;
+    created_by?: string;
+  },
+): Promise<{ id: string }> {
+  // We use the internal write endpoint with a worker token to seed data.
+  // First mint a worker token via the TEST_MODE helper.
+  const tokenRes = await fetch(`${base}/api/test/worker-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dept: opts.dept,
+      customer: opts.customer,
+    }),
+  });
+  if (!tokenRes.ok) {
+    throw new Error(`worker-token mint failed: ${tokenRes.status} ${await tokenRes.text()}`);
+  }
+  const { token } = (await tokenRes.json()) as { token: string };
+
+  const writeRes = await fetch(`${base}/internal/wiki/versions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      page_id: `${opts.dept}/${opts.customer}`,
+      dept: opts.dept,
+      customer: opts.customer,
+      content: opts.content,
+      source_task: 'test-task-001',
+    }),
+  });
+  if (!writeRes.ok) {
+    throw new Error(`wiki write failed: ${writeRes.status} ${await writeRes.text()}`);
+  }
+  return writeRes.json() as Promise<{ id: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/wiki/pages/:customerId
+// ---------------------------------------------------------------------------
+
+describe('GET /api/wiki/pages/:customerId', () => {
   it('returns 401 when the caller is not authenticated', async () => {
-    const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-123`);
+    const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-rls-test`);
     expect(res.status).toBe(401);
   });
 
-  it('returns 501 when the caller is authenticated (stub signals not implemented)', async () => {
+  it('returns an empty versions array when no versions exist for the customer', async () => {
     const cookie = await getTestSession(env.baseUrl, 'test-rm');
-    const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-123`, {
+    const customerId = `customer-empty-${Date.now()}`;
+    const res = await fetch(`${env.baseUrl}/api/wiki/pages/${customerId}`, {
       headers: { Cookie: cookie },
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty('error');
-    // The stub must encode the planned response shape for follow-on issues.
-    expect(body).toHaveProperty('expected_response_shape');
-    expect(body.expected_response_shape).toHaveProperty('versions');
-    expect(Array.isArray(body.expected_response_shape.versions)).toBe(true);
+    expect(body).toHaveProperty('customer_id', customerId);
+    expect(body).toHaveProperty('versions');
+    expect(Array.isArray(body.versions)).toBe(true);
+    expect(body.versions).toHaveLength(0);
   });
 
-  it('stub response shape includes required metadata fields on each version', async () => {
+  it('returns versions in reverse-chronological order with required metadata', async () => {
     const cookie = await getTestSession(env.baseUrl, 'test-rm');
-    const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-123`, {
+    const customerId = `customer-order-${Date.now()}`;
+
+    // Seed two versions for the same customer in sequence.
+    const v1 = await seedWikiVersion(env.baseUrl, {
+      customer: customerId,
+      dept: 'test-dept',
+      content: 'Version one content',
+    });
+    // Small delay to ensure different created_at timestamps.
+    await Bun.sleep(10);
+    const v2 = await seedWikiVersion(env.baseUrl, {
+      customer: customerId,
+      dept: 'test-dept',
+      content: 'Version two content',
+    });
+
+    const res = await fetch(`${env.baseUrl}/api/wiki/pages/${customerId}`, {
       headers: { Cookie: cookie },
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    const shape = body.expected_response_shape;
-    expect(shape).toHaveProperty('customer_id');
-    const firstVersion = shape.versions[0];
-    expect(firstVersion).toHaveProperty('id');
-    expect(firstVersion).toHaveProperty('content');
-    expect(firstVersion).toHaveProperty('created_by');
-    expect(firstVersion).toHaveProperty('source');
-    expect(firstVersion).toHaveProperty('created_at');
-    expect(firstVersion).toHaveProperty('published');
+    expect(body.customer_id).toBe(customerId);
+    expect(body.versions.length).toBeGreaterThanOrEqual(2);
+
+    // Newest first.
+    const ids = body.versions.map((v: { id: string }) => v.id);
+    expect(ids[0]).toBe(v2.id);
+    expect(ids).toContain(v1.id);
+
+    // Each entry must carry the required metadata fields.
+    for (const v of body.versions as {
+      id: string;
+      content: string;
+      created_by: string;
+      source: string | null;
+      created_at: string;
+      published: boolean;
+    }[]) {
+      expect(typeof v.id).toBe('string');
+      expect(typeof v.content).toBe('string');
+      expect(typeof v.created_by).toBe('string');
+      expect(v.source === null || typeof v.source === 'string').toBe(true);
+      expect(typeof v.created_at).toBe('string');
+      expect(typeof v.published).toBe('boolean');
+    }
+  });
+
+  it('RLS: versions for customer-A are not listed under customer-B path', async () => {
+    const cookie = await getTestSession(env.baseUrl, 'test-rm');
+    const customerA = `customer-rls-a-${Date.now()}`;
+    const customerB = `customer-rls-b-${Date.now()}`;
+
+    await seedWikiVersion(env.baseUrl, {
+      customer: customerA,
+      dept: 'test-dept',
+      content: 'Customer A secret',
+    });
+
+    const res = await fetch(`${env.baseUrl}/api/wiki/pages/${customerB}`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // customer-B should have zero versions.
+    expect(body.versions).toHaveLength(0);
   });
 });
 
-describe('GET /api/wiki/pages/:customerId/versions/:versionId (scout stub)', () => {
+// ---------------------------------------------------------------------------
+// GET /api/wiki/pages/:customerId/versions/:versionId
+// ---------------------------------------------------------------------------
+
+describe('GET /api/wiki/pages/:customerId/versions/:versionId', () => {
   it('returns 401 when the caller is not authenticated', async () => {
     const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456`);
     expect(res.status).toBe(401);
   });
 
-  it('returns 501 when the caller is authenticated (stub signals not implemented)', async () => {
+  it('returns the full version content when authenticated and version exists', async () => {
     const cookie = await getTestSession(env.baseUrl, 'test-rm');
-    const res = await fetch(`${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456`, {
+    const customerId = `customer-version-${Date.now()}`;
+    const content = 'Full markdown content for version test';
+
+    const seeded = await seedWikiVersion(env.baseUrl, {
+      customer: customerId,
+      dept: 'test-dept',
+      content,
+    });
+
+    const res = await fetch(`${env.baseUrl}/api/wiki/pages/${customerId}/versions/${seeded.id}`, {
       headers: { Cookie: cookie },
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty('expected_response_shape');
-    const shape = body.expected_response_shape;
-    expect(shape).toHaveProperty('id');
-    expect(shape).toHaveProperty('content');
-    expect(shape).toHaveProperty('created_by');
-    expect(shape).toHaveProperty('source');
-    expect(shape).toHaveProperty('published');
+    expect(body.id).toBe(seeded.id);
+    expect(body.customer_id).toBe(customerId);
+    expect(body.content).toBe(content);
+    expect(typeof body.created_by).toBe('string');
+    expect(typeof body.created_at).toBe('string');
+    expect(typeof body.published).toBe('boolean');
+  });
+
+  it('returns 404 for an unknown version ID', async () => {
+    const cookie = await getTestSession(env.baseUrl, 'test-rm');
+    const res = await fetch(
+      `${env.baseUrl}/api/wiki/pages/some-customer/versions/non-existent-id`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 when the version exists but belongs to a different customer (RLS)', async () => {
+    const cookie = await getTestSession(env.baseUrl, 'test-rm');
+    const customerOwner = `customer-own-${Date.now()}`;
+    const customerOther = `customer-other-${Date.now()}`;
+
+    const seeded = await seedWikiVersion(env.baseUrl, {
+      customer: customerOwner,
+      dept: 'test-dept',
+      content: 'Owned by customerOwner',
+    });
+
+    // Access the version via the wrong customer path.
+    const res = await fetch(
+      `${env.baseUrl}/api/wiki/pages/${customerOther}/versions/${seeded.id}`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(res.status).toBe(404);
   });
 });
 
-describe('GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token (scout stub)', () => {
+// ---------------------------------------------------------------------------
+// GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token
+// ---------------------------------------------------------------------------
+
+describe('GET .../citations/:token (Phase 6 stub)', () => {
   it('returns 401 when the caller is not authenticated', async () => {
     const res = await fetch(
       `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/token-abc`,
@@ -129,7 +268,7 @@ describe('GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token (
     expect(res.status).toBe(401);
   });
 
-  it('returns 501 when the caller is authenticated (stub signals not implemented)', async () => {
+  it('returns 501 when the caller is authenticated (citation resolution is Phase 6)', async () => {
     const cookie = await getTestSession(env.baseUrl, 'test-rm');
     const res = await fetch(
       `${env.baseUrl}/api/wiki/pages/customer-123/versions/version-456/citations/token-abc`,

@@ -1,46 +1,37 @@
 /**
  * @file wiki-page-view.ts
  *
- * Read-only wiki page view API — Phase 4 wiki web UX.
+ * Read-only wiki page view API — Phase 4 wiki web UX (issue #47).
  *
- * ## Scout stub (Phase 4, issue #45)
- *
- * This file is a **no-op stub** for the dev-scout issue that proves the
- * read-only wiki view API contract. All routes return 501 Not Implemented,
- * encoding the expected request/response shapes so follow-on implementation
- * issues can build against a stable contract.
- *
- * ## Routes (planned)
+ * Routes:
  *
  *   GET  /api/wiki/pages/:customerId
- *     List all published WikiPageVersion entities for a customer, ordered by
- *     version descending. Returns `created_by` and `source` metadata on each.
+ *     List all accessible WikiPageVersion rows for a customer, ordered by
+ *     created_at descending. Returns created_by and source metadata on each.
+ *     RLS: only rows where customer = :customerId AND state IN ('draft', 'published')
+ *     are returned; archived rows are hidden.
  *
  *   GET  /api/wiki/pages/:customerId/versions/:versionId
- *     Fetch a single published WikiPageVersion by ID, including full markdown
+ *     Fetch a single accessible WikiPageVersion by ID, including full markdown
  *     content for rendering.
  *
  *   GET  /api/wiki/pages/:customerId/versions/:versionId/citations/:citationToken
  *     Resolve a citation token to the underlying CorpusChunk via the
  *     re-identification service. Used by the citation hover UI.
  *
- * ## Authentication
+ * Authentication:
+ *   All routes require an authenticated session cookie (RM role or above).
  *
- * All routes require an authenticated session cookie (RM role or above).
- * Citation resolution additionally requires superuser role via the
- * re-identification service boundary (issue #20).
- *
- * ## Real implementation will
- *   1. Query `entities` filtered by type=wiki_page_version AND published=true
- *      for the given tenant/customer.
- *   2. Return created_by and source fields from entity properties.
- *   3. For citation hover: call resolveToken from the reidentification policy
- *      after checking superuser role.
+ * RLS (Row-Level Security):
+ *   Versions are filtered to the authenticated user's accessible customer IDs.
+ *   For now, the authenticated user can view any customer's wiki (RM-level
+ *   access). Scoping to specific tenant/dept is enforced via the customer
+ *   field on the wiki_page_versions table.
  *
  * Blueprint references:
- * - PRD §4.3 — read-only wiki rendering
+ * - PRD §5.3 — history panel
  * - Implementation plan Phase 4 — Wiki web UX
- * @see https://github.com/superfield-ai/superfield-kb-demo/issues/45
+ * @see https://github.com/superfield-ai/superfield-kb-demo/issues/47
  */
 
 import type { AppState } from '../index';
@@ -49,8 +40,6 @@ import { makeJson } from '../lib/response';
 
 /**
  * Shape of a WikiPageVersion entry in the version picker list.
- *
- * The real implementation will populate these fields from the entities table.
  */
 export interface WikiPageVersionSummary {
   /** Opaque version identifier. */
@@ -59,7 +48,7 @@ export interface WikiPageVersionSummary {
   content: string;
   /** Agent or user that created this version. */
   created_by: string;
-  /** Opaque reference to the ground-truth source entity. */
+  /** Opaque reference to the ground-truth source task (source_task column). */
   source: string | null;
   /** ISO timestamp of version creation. */
   created_at: string;
@@ -69,8 +58,6 @@ export interface WikiPageVersionSummary {
 
 /**
  * Shape of a resolved citation — the source CorpusChunk revealed on hover.
- *
- * The real implementation will be populated by the re-identification service.
  */
 export interface CitationResolution {
   /** The original citation token embedded in the wiki markdown. */
@@ -86,86 +73,119 @@ export interface CitationResolution {
 /**
  * Handle GET /api/wiki/pages/* routes.
  *
- * Scout stub: returns 501 for all matching routes, encoding the expected
- * response shapes. Auth enforcement (401 for unauthenticated callers) is live
- * even in the stub so integration tests can assert the auth invariant.
+ * All routes enforce authentication. Accessible versions are filtered by the
+ * customer ID in the URL path; archived rows are excluded.
  */
 export async function handleWikiPageViewRequest(
   req: Request,
   url: URL,
-  _appState: AppState,
+  appState: AppState,
 ): Promise<Response | null> {
   if (!url.pathname.startsWith('/api/wiki/pages')) return null;
   if (req.method !== 'GET') return null;
 
   const corsHeaders = getCorsHeaders(req);
   const json = makeJson(corsHeaders);
+  const { sql } = appState;
 
-  // Auth invariant — live in the stub.
+  // Auth invariant — all wiki page view routes require authentication.
   const user = await getAuthenticatedUser(req);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
-  // ── GET /api/wiki/pages/:customerId ──────────────────────────────────────
+  // ── GET /api/wiki/pages/:customerId ───────────────────────────────────────
+  // List all accessible versions for a customer, ordered newest-first.
 
   const listMatch = url.pathname.match(/^\/api\/wiki\/pages\/([^/]+)$/);
   if (listMatch) {
-    // Scout stub: returns 501 with the expected response shape.
-    return json(
+    const customerId = listMatch[1];
+
+    const rows = await sql<
       {
-        error: 'Not Implemented — wiki page view is a Phase 4 follow-on issue',
-        expected_response_shape: {
-          customer_id: '<customerId>',
-          versions: [
-            {
-              id: '<uuid>',
-              content: '<markdown>',
-              created_by: '<user-or-agent-id>',
-              source: '<ground-truth-ref-or-null>',
-              created_at: '<iso-timestamp>',
-              published: true,
-            } satisfies WikiPageVersionSummary,
-          ],
-        },
-      },
-      501,
-    );
+        id: string;
+        content: string;
+        created_by: string;
+        source_task: string | null;
+        created_at: Date;
+        state: string;
+      }[]
+    >`
+      SELECT id, content, created_by, source_task, created_at, state
+      FROM wiki_page_versions
+      WHERE customer = ${customerId}
+        AND state != 'archived'
+      ORDER BY created_at DESC
+    `;
+
+    const versions: WikiPageVersionSummary[] = rows.map((row) => ({
+      id: row.id,
+      content: row.content,
+      created_by: row.created_by,
+      source: row.source_task,
+      created_at:
+        row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      published: row.state === 'published',
+    }));
+
+    return json({ customer_id: customerId, versions });
   }
 
   // ── GET /api/wiki/pages/:customerId/versions/:versionId ──────────────────
+  // Fetch a single accessible version by ID (RLS: must belong to customerId).
 
   const versionMatch = url.pathname.match(/^\/api\/wiki\/pages\/([^/]+)\/versions\/([^/]+)$/);
   if (versionMatch) {
-    // Scout stub: returns 501 with the expected response shape.
-    return json(
+    const customerId = versionMatch[1];
+    const versionId = versionMatch[2];
+
+    const rows = await sql<
       {
-        error: 'Not Implemented — wiki version fetch is a Phase 4 follow-on issue',
-        expected_response_shape: {
-          id: '<uuid>',
-          customer_id: '<customerId>',
-          content: '<markdown>',
-          created_by: '<user-or-agent-id>',
-          source: '<ground-truth-ref-or-null>',
-          created_at: '<iso-timestamp>',
-          published: true,
-        } satisfies Omit<WikiPageVersionSummary, never> & { customer_id: string },
-      },
-      501,
-    );
+        id: string;
+        content: string;
+        created_by: string;
+        source_task: string | null;
+        created_at: Date;
+        state: string;
+      }[]
+    >`
+      SELECT id, content, created_by, source_task, created_at, state
+      FROM wiki_page_versions
+      WHERE id       = ${versionId}
+        AND customer = ${customerId}
+        AND state   != 'archived'
+    `;
+
+    if (rows.length === 0) return json({ error: 'Not found' }, 404);
+
+    const row = rows[0];
+    const version: WikiPageVersionSummary & { customer_id: string } = {
+      id: row.id,
+      customer_id: customerId,
+      content: row.content,
+      created_by: row.created_by,
+      source: row.source_task,
+      created_at:
+        row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      published: row.state === 'published',
+    };
+
+    return json(version);
   }
 
   // ── GET /api/wiki/pages/:customerId/versions/:versionId/citations/:token ─
+  // Resolve a citation token — stub until citation service is implemented.
 
   const citationMatch = url.pathname.match(
     /^\/api\/wiki\/pages\/([^/]+)\/versions\/([^/]+)\/citations\/([^/]+)$/,
   );
   if (citationMatch) {
-    // Scout stub: returns 501 with the expected response shape.
-    // The real implementation requires superuser role — stub enforces 501 only.
+    const citationToken = citationMatch[3];
+    // Citation resolution requires the re-identification service (Phase 6).
+    // Return 501 with the planned shape so callers can detect the stub.
     return json(
       {
-        error: 'Not Implemented — citation hover resolution is a Phase 4 follow-on issue',
+        error: 'Not Implemented — citation hover resolution is a Phase 6 follow-on issue',
         expected_response_shape: {
-          token: '<citation-token>',
+          token: citationToken,
           entity_id: '<corpus-chunk-uuid>',
           excerpt: '<plaintext-excerpt-or-null>',
           source_id: '<source-entity-id-or-null>',
