@@ -84,9 +84,11 @@ await registerCorpusChunkEntityType().catch((err) =>
   console.error('[corpus-chunk] Entity type registration failed:', err),
 );
 
-// Register the Transcript entity type for Phase 5 edge-path recording (issue #53).
+// Register Phase 5 entity types: audio_recording and transcript (issues #53, #58).
+// audio_recording is metadata-only — no raw audio column.
+// transcript.text is encrypted at rest.
 await registerTranscriptEntityType().catch((err) =>
-  console.error('[transcript] Entity type registration failed:', err),
+  console.error('[phase5-entity-types] Registration failed:', err),
 );
 
 // Purge any already-expired revocation rows left from a previous run, then

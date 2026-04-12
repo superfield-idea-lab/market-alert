@@ -77,40 +77,50 @@ export interface AudioRecorderState {
 }
 
 // ---------------------------------------------------------------------------
-// Web Speech API type stubs
+// Web Speech API type stubs (hook-local)
 // ---------------------------------------------------------------------------
+//
+// The Window.SpeechRecognition / webkitSpeechRecognition augmentation lives in
+// `apps/web/src/lib/transcription.ts`. This file provides hook-local interfaces
+// for the SpeechRecognition object and its event — named with an `_Rec` suffix
+// to avoid collisions with DOM lib types and the module-local types in
+// transcription.ts.
 
-// Local Speech Recognition type stubs — avoid augmenting the DOM globals
-// because lib.dom.d.ts already declares SpeechRecognition and the two types
-// are not assignable to each other.  We cast to this interface at the call site.
-interface SpeechRecognitionWindow {
-  SpeechRecognition?: new () => LocalSpeechRecognitionInstance;
-  webkitSpeechRecognition?: new () => LocalSpeechRecognitionInstance;
+interface _RecAlternative {
+  transcript: string;
 }
 
-interface LocalSpeechRecognitionInstance extends EventTarget {
+interface _RecResult {
+  isFinal: boolean;
+  item(index: number): _RecAlternative;
+  readonly length: number;
+  [index: number]: _RecAlternative;
+}
+
+interface _RecResultList {
+  readonly length: number;
+  [index: number]: _RecResult;
+}
+
+interface _RecEvent extends Event {
+  results: _RecResultList;
+}
+
+interface _RecInstance extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   start(): void;
   stop(): void;
-  onresult: ((event: LocalSpeechRecognitionEvent) => void) | null;
+  onresult: ((event: _RecEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
   onend: (() => void) | null;
 }
 
-interface LocalSpeechRecognitionEvent extends Event {
-  results: LocalSpeechRecognitionResultList;
-}
-
-interface LocalSpeechRecognitionResultList {
-  length: number;
-  [index: number]: LocalSpeechRecognitionResult;
-}
-
-interface LocalSpeechRecognitionResult {
-  isFinal: boolean;
-  0: { transcript: string };
+// Used to cast `window` when accessing SpeechRecognition constructors.
+interface SpeechRecognitionWindow {
+  SpeechRecognition?: new () => _RecInstance;
+  webkitSpeechRecognition?: new () => _RecInstance;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +198,7 @@ export function useAudioRecorder(): AudioRecorderState {
   const mimeTypeRef = useRef<string>('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<LocalSpeechRecognitionInstance | null>(null);
+  const recognitionRef = useRef<_RecInstance | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const finalTranscriptRef = useRef<string>('');
   const interimTranscriptRef = useRef<string>('');
@@ -350,19 +360,24 @@ export function useAudioRecorder(): AudioRecorderState {
           : null;
 
       if (SpeechRecognitionCtor) {
-        const recognition = new SpeechRecognitionCtor();
+        // Cast to _RecInstance so we can use item() on SpeechRecognitionResult
+        // and assign to recognitionRef. The Window augmentation in transcription.ts
+        // types this as SpeechRecognitionLike (onresult: SpeechRecognitionResultEvent),
+        // which is structurally compatible — we just need the broader _RecInstance
+        // view for our handler.
+        const recognition = new SpeechRecognitionCtor() as unknown as _RecInstance;
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
 
-        recognition.onresult = (event: LocalSpeechRecognitionEvent) => {
+        recognition.onresult = (event: _RecEvent) => {
           let interim = '';
           for (let i = 0; i < event.results.length; i++) {
             const result = event.results[i];
             if (result.isFinal) {
-              finalTranscriptRef.current += result[0].transcript + ' ';
+              finalTranscriptRef.current += result.item(0).transcript + ' ';
             } else {
-              interim += result[0].transcript;
+              interim += result.item(0).transcript;
             }
           }
           interimTranscriptRef.current = interim;

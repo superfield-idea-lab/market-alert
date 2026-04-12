@@ -34,7 +34,7 @@ import { encryptProperties } from 'core';
 import { emitAuditEvent } from '../policies/audit-service';
 import { extractTraceId } from 'core';
 import { enqueueTask, TASK_TYPE_AGENT_MAP, TaskType } from 'db/task-queue';
-import { EntityTypeRegistry } from 'db/entity-type-registry';
+import { registerPhase5EntityTypesWithDb } from 'db/phase5-entity-types';
 import { sql as globalSql } from 'db';
 
 // ---------------------------------------------------------------------------
@@ -42,36 +42,16 @@ import { sql as globalSql } from 'db';
 // ---------------------------------------------------------------------------
 
 /**
- * Registers the `transcript` entity type against the database at server
- * startup (Phase 5 — PWA & meeting transcription, issue #53).
+ * Registers Phase 5 entity types (`audio_recording` and `transcript`) against
+ * the database at server startup (Phase 5 — PWA & meeting transcription, issue #58).
  *
- * Properties shape:
- *   - `text`        {string} — transcript body (sensitive, encrypted at rest)
- *   - `customer_id` {string} — owning customer entity id
- *   - `duration_s`  {number} — recording duration in seconds (optional)
- *   - `source`      {string} — always "edge_device" for this path
- *   - `recorded_at` {string} — ISO-8601 timestamp when recording started
+ * Delegates to `registerPhase5EntityTypesWithDb` which is the single
+ * source of truth for Phase 5 entity type definitions.
  *
  * Called idempotently — safe to call multiple times.
  */
 export async function registerTranscriptEntityType(): Promise<void> {
-  const registry = new EntityTypeRegistry();
-  await registry.registerWithDb(globalSql, {
-    type: 'transcript',
-    schema: {
-      type: 'object',
-      required: ['text', 'customer_id', 'source', 'recorded_at'],
-      properties: {
-        text: { type: 'string' },
-        customer_id: { type: 'string' },
-        duration_s: { type: 'number', minimum: 0 },
-        source: { type: 'string', enum: ['edge_device', 'worker_path'] },
-        recorded_at: { type: 'string' },
-      },
-    },
-    sensitive: ['text'],
-    kmsKeyId: 'transcript',
-  });
+  await registerPhase5EntityTypesWithDb(globalSql);
 }
 
 // ---------------------------------------------------------------------------
