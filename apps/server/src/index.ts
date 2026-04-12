@@ -62,6 +62,7 @@ import { handleAnnotationsRequest } from './api/annotations';
 import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 import { handleBdmCampaignRequest } from './api/bdm-campaign';
+import { handleCampaignSummaryRequest } from './api/campaign-summary';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -443,6 +444,13 @@ export default {
     if (url.pathname === '/internal/relations') {
       const internalRelRes = await handleInternalRelationsRequest(req, url, appState);
       if (internalRelRes) return withTrace(internalRelRes);
+    }
+
+    // Campaign summary endpoint — Phase 7 BDM campaign analysis (issue #75).
+    // POST /api/campaign/summarise — summarise anonymised chunks via Claude API.
+    if (url.pathname.startsWith('/api/campaign/')) {
+      const summaryRes = await handleCampaignSummaryRequest(req, url, appState);
+      if (summaryRes) return withTrace(summaryRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
