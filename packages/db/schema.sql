@@ -1145,3 +1145,72 @@ CREATE TRIGGER trg_entities_worm_update
 
 INSERT INTO _schema_version (migration) VALUES ('worm-mode-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Phase 8 — LegalHold entity with four-eyes removal flow (issue #82)
+--
+-- A LegalHold is placed by a Compliance Officer on a set of records identified
+-- by a tenant_id. Held records are exempt from retention-scheduler deletion
+-- regardless of their retention floor. Removing a hold requires co-approval
+-- from a second, distinct Compliance Officer (four-eyes principle).
+--
+-- Table: legal_holds
+--   placed_by:    user ID of the Compliance Officer who placed the hold.
+--   tenant_id:    the tenant whose records are held.
+--   reason:       free-text description of the legal matter or case reference.
+--   status:       'active' | 'pending_removal' | 'removed'
+--   removed_at:   timestamp when the hold was successfully lifted (NULL while active).
+--
+-- Table: legal_hold_removal_requests
+--   hold_id:      FK to legal_holds.
+--   requested_by: first Compliance Officer who initiated removal.
+--   co_approved_by: second, distinct Compliance Officer who co-approved.
+--   status:       'pending' | 'approved' | 'rejected'
+--
+-- Business rules:
+--   1. Only Compliance Officers may place holds.
+--   2. Removal requires two distinct Compliance Officers (four-eyes).
+--   3. The initiator of the removal request cannot also be the co-approver.
+--   4. A hold in 'active' status can receive at most one pending removal request.
+--   5. Audit events are emitted on place and remove (via server-layer callback).
+--
+-- Canonical docs: docs/PRD.md, docs/implementation-plan-v1.md Phase 8
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS legal_holds (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id    TEXT NOT NULL,
+  placed_by    TEXT NOT NULL,
+  reason       TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'active'
+                 CHECK (status IN ('active', 'pending_removal', 'removed')),
+  placed_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  removed_at   TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_legal_holds_tenant_id
+  ON legal_holds (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_legal_holds_status
+  ON legal_holds (status);
+CREATE INDEX IF NOT EXISTS idx_legal_holds_placed_by
+  ON legal_holds (placed_by);
+
+CREATE TABLE IF NOT EXISTS legal_hold_removal_requests (
+  id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  hold_id         TEXT NOT NULL REFERENCES legal_holds (id) ON DELETE CASCADE,
+  requested_by    TEXT NOT NULL,
+  co_approved_by  TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_at     TIMESTAMP WITH TIME ZONE,
+  UNIQUE (hold_id, status, requested_by)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lhrr_hold_id
+  ON legal_hold_removal_requests (hold_id);
+CREATE INDEX IF NOT EXISTS idx_lhrr_status
+  ON legal_hold_removal_requests (status);
+
+INSERT INTO _schema_version (migration) VALUES ('legal-hold-001')
+  ON CONFLICT (migration) DO NOTHING;

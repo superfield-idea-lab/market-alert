@@ -64,6 +64,7 @@ import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 import { handleBdmCampaignRequest } from './api/bdm-campaign';
 import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
+import { handleLegalHoldRequest } from './api/legal-hold';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -460,6 +461,19 @@ export default {
     if (url.pathname.startsWith('/api/compliance')) {
       const complianceRes = await handleComplianceRequest(req, url, appState);
       if (complianceRes) return withTrace(complianceRes);
+    }
+
+    // Phase 8 legal hold endpoints (issue #82).
+    // POST /api/legal-holds — place a hold (compliance_officer only)
+    // GET  /api/legal-holds — list holds
+    // GET  /api/legal-holds/:holdId — fetch a single hold
+    // POST /api/legal-holds/:holdId/removal-request — initiate four-eyes removal
+    // POST /api/legal-holds/removal-requests/:requestId/approve — co-approve removal
+    // POST /api/legal-holds/removal-requests/:requestId/reject — reject removal
+    // GET  /api/legal-holds/pending-removals — approval queue
+    if (url.pathname.startsWith('/api/legal-holds')) {
+      const legalHoldRes = await handleLegalHoldRequest(req, url, appState);
+      if (legalHoldRes) return withTrace(legalHoldRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd

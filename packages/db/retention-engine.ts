@@ -59,6 +59,7 @@
  */
 
 import type postgres from 'postgres';
+import { hasActiveLegalHold } from './legal-hold';
 
 // ---------------------------------------------------------------------------
 // Internal type alias
@@ -379,9 +380,11 @@ export async function assignRetentionPolicyToTenant(
 export async function isWithinRetentionFloor(
   sql: SqlClient,
   entityId: string,
-): Promise<{ blocked: boolean; eligibleAt: Date | null }> {
-  const rows = await sql<{ retention_class: string | null; created_at: Date }[]>`
-    SELECT retention_class, created_at
+): Promise<{ blocked: boolean; eligibleAt: Date | null; legalHoldActive?: boolean }> {
+  const rows = await sql<
+    { retention_class: string | null; created_at: Date; tenant_id: string | null }[]
+  >`
+    SELECT retention_class, created_at, tenant_id
     FROM entities
     WHERE id = ${entityId}
   `;
@@ -390,7 +393,16 @@ export async function isWithinRetentionFloor(
     return { blocked: false, eligibleAt: null };
   }
 
-  const { retention_class, created_at } = rows[0];
+  const { retention_class, created_at, tenant_id } = rows[0];
+
+  // Legal hold check: if the tenant has an active or pending_removal hold,
+  // deletion is blocked regardless of the retention floor.
+  if (tenant_id) {
+    const holdActive = await hasActiveLegalHold(sql, tenant_id);
+    if (holdActive) {
+      return { blocked: true, eligibleAt: null, legalHoldActive: true };
+    }
+  }
 
   if (!retention_class) {
     return { blocked: false, eligibleAt: null };
@@ -441,10 +453,17 @@ export async function deleteEntityPastRetention(sql: SqlClient, entityId: string
     return;
   }
 
-  const { blocked, eligibleAt } = await isWithinRetentionFloor(sql, entityId);
+  const { blocked, eligibleAt, legalHoldActive } = await isWithinRetentionFloor(sql, entityId);
 
-  if (blocked && eligibleAt !== null) {
-    throw new RetentionFloorNotReachedError(entityId, rows[0].retention_class ?? '', eligibleAt);
+  if (blocked) {
+    if (legalHoldActive) {
+      throw new Error(
+        `Entity '${entityId}' cannot be deleted: an active legal hold is in force on its tenant.`,
+      );
+    }
+    if (eligibleAt !== null) {
+      throw new RetentionFloorNotReachedError(entityId, rows[0].retention_class ?? '', eligibleAt);
+    }
   }
 
   await sql`DELETE FROM entities WHERE id = ${entityId}`;

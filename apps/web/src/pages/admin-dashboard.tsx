@@ -671,10 +671,367 @@ function CrmEntitiesTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Legal Holds tab
+// ---------------------------------------------------------------------------
+
+interface LegalHold {
+  id: string;
+  tenant_id: string;
+  placed_by: string;
+  reason: string;
+  status: 'active' | 'pending_removal' | 'removed';
+  placed_at: string;
+  removed_at: string | null;
+}
+
+interface LegalHoldRemovalRequest {
+  id: string;
+  hold_id: string;
+  requested_by: string;
+  co_approved_by: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  resolved_at: string | null;
+  hold: LegalHold;
+}
+
+const HOLD_STATUS_COLORS: Record<string, string> = {
+  active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  pending_removal: 'bg-amber-50 text-amber-700 border-amber-200',
+  removed: 'bg-zinc-100 text-zinc-500 border-zinc-300',
+};
+
+function HoldStatusBadge({ status }: { status: string }) {
+  const colors = HOLD_STATUS_COLORS[status] ?? 'bg-zinc-50 text-zinc-600 border-zinc-200';
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${colors}`}
+    >
+      {status.replace('_', ' ')}
+    </span>
+  );
+}
+
+function LegalHoldsTab() {
+  const [holds, setHolds] = useState<LegalHold[]>([]);
+  const [pendingRemovals, setPendingRemovals] = useState<LegalHoldRemovalRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Place hold form state
+  const [placeTenantId, setPlaceTenantId] = useState('');
+  const [placeReason, setPlaceReason] = useState('');
+  const [placing, setPlacing] = useState(false);
+  const [placeError, setPlaceError] = useState<string | null>(null);
+
+  // Action state
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [holdsRes, pendingRes] = await Promise.all([
+        fetch('/api/legal-holds?limit=50', { credentials: 'include' }),
+        fetch('/api/legal-holds/pending-removals?limit=50', { credentials: 'include' }),
+      ]);
+
+      if (holdsRes.ok) {
+        const data = (await holdsRes.json()) as { holds: LegalHold[] };
+        setHolds(data.holds ?? []);
+      }
+
+      if (pendingRes.ok) {
+        const data = (await pendingRes.json()) as { requests: LegalHoldRemovalRequest[] };
+        setPendingRemovals(data.requests ?? []);
+      }
+    } catch (err) {
+      setError('Failed to load legal hold data.');
+      console.error('Legal hold fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  const handlePlaceHold = useCallback(async () => {
+    if (!placeTenantId.trim()) return;
+    setPlacing(true);
+    setPlaceError(null);
+    try {
+      const res = await fetch('/api/legal-holds', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId: placeTenantId.trim(), reason: placeReason.trim() }),
+      });
+      if (res.ok) {
+        setPlaceTenantId('');
+        setPlaceReason('');
+        await fetchData();
+      } else {
+        const data = (await res.json()) as { error?: string };
+        setPlaceError(data.error ?? 'Failed to place hold.');
+      }
+    } catch (err) {
+      setPlaceError('Network error placing hold.');
+      console.error(err);
+    } finally {
+      setPlacing(false);
+    }
+  }, [placeTenantId, placeReason, fetchData]);
+
+  const handleRequestRemoval = useCallback(
+    async (holdId: string) => {
+      setActionInProgress(holdId);
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/legal-holds/${holdId}/removal-request`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          await fetchData();
+        } else {
+          const data = (await res.json()) as { error?: string };
+          setActionError(data.error ?? 'Failed to request removal.');
+        }
+      } catch (err) {
+        setActionError('Network error.');
+        console.error(err);
+      } finally {
+        setActionInProgress(null);
+      }
+    },
+    [fetchData],
+  );
+
+  const handleApproveRemoval = useCallback(
+    async (requestId: string) => {
+      setActionInProgress(requestId);
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/legal-holds/removal-requests/${requestId}/approve`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          await fetchData();
+        } else {
+          const data = (await res.json()) as { error?: string };
+          setActionError(data.error ?? 'Failed to approve removal.');
+        }
+      } catch (err) {
+        setActionError('Network error.');
+        console.error(err);
+      } finally {
+        setActionInProgress(null);
+      }
+    },
+    [fetchData],
+  );
+
+  const handleRejectRemoval = useCallback(
+    async (requestId: string) => {
+      setActionInProgress(requestId);
+      setActionError(null);
+      try {
+        const res = await fetch(`/api/legal-holds/removal-requests/${requestId}/reject`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (res.ok) {
+          await fetchData();
+        } else {
+          const data = (await res.json()) as { error?: string };
+          setActionError(data.error ?? 'Failed to reject removal.');
+        }
+      } catch (err) {
+        setActionError('Network error.');
+        console.error(err);
+      } finally {
+        setActionInProgress(null);
+      }
+    },
+    [fetchData],
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-24 text-zinc-400 text-sm">
+        Loading legal holds...
+      </div>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-6">
+      {error && (
+        <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* Place a new hold */}
+      <div className="border border-zinc-200 rounded-xl bg-white p-4">
+        <h2 className="text-sm font-semibold text-zinc-800 mb-3">Place Legal Hold</h2>
+        <div className="flex flex-col gap-2 md:flex-row md:items-end">
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 flex-1">
+            Tenant ID
+            <input
+              value={placeTenantId}
+              onChange={(e) => setPlaceTenantId(e.target.value)}
+              placeholder="tenant-id"
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-500 flex-1">
+            Reason
+            <input
+              value={placeReason}
+              onChange={(e) => setPlaceReason(e.target.value)}
+              placeholder="Legal matter reference (optional)"
+              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            />
+          </label>
+          <button
+            onClick={() => void handlePlaceHold()}
+            disabled={placing || !placeTenantId.trim()}
+            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {placing ? 'Placing…' : 'Place Hold'}
+          </button>
+        </div>
+        {placeError && <p className="mt-2 text-xs text-red-600">{placeError}</p>}
+      </div>
+
+      {/* Pending removal queue */}
+      {pendingRemovals.length > 0 && (
+        <div className="border border-amber-200 rounded-xl bg-amber-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-200 bg-amber-100">
+            <h2 className="text-sm font-semibold text-amber-800">
+              Pending Removal Requests ({pendingRemovals.length})
+            </h2>
+            <p className="text-xs text-amber-600 mt-0.5">
+              A second Compliance Officer must co-approve each removal.
+            </p>
+          </div>
+          <div className="divide-y divide-amber-100">
+            {pendingRemovals.map((req) => (
+              <div
+                key={req.id}
+                className="px-4 py-3 flex flex-col md:flex-row md:items-center gap-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-mono text-zinc-500 truncate">Hold: {req.hold_id}</p>
+                  <p className="text-sm text-zinc-800">
+                    Tenant: <span className="font-medium">{req.hold.tenant_id}</span>
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Reason: {req.hold.reason || <em>none</em>}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Requested by: {req.requested_by} · {formatTimestamp(req.created_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => void handleApproveRemoval(req.id)}
+                    disabled={actionInProgress === req.id}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => void handleRejectRemoval(req.id)}
+                    disabled={actionInProgress === req.id}
+                    className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {actionError && (
+            <div className="px-4 py-2 bg-red-50 border-t border-red-200 text-xs text-red-600">
+              {actionError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* All holds list */}
+      <div className="border border-zinc-200 rounded-xl bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-zinc-100 bg-zinc-50 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-800">All Legal Holds ({holds.length})</h2>
+          <button
+            onClick={() => void fetchData()}
+            className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-700 border border-zinc-200 rounded-md hover:bg-white transition-colors"
+          >
+            <RefreshCw size={11} />
+            Refresh
+          </button>
+        </div>
+
+        {holds.length === 0 ? (
+          <div className="flex items-center justify-center h-16 text-zinc-400 text-sm italic">
+            No legal holds found.
+          </div>
+        ) : (
+          <div className="divide-y divide-zinc-50">
+            {holds.map((hold) => (
+              <div
+                key={hold.id}
+                className="px-4 py-3 flex flex-col md:flex-row md:items-center gap-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <HoldStatusBadge status={hold.status} />
+                    <span className="font-mono text-xs text-zinc-400 truncate">{hold.id}</span>
+                  </div>
+                  <p className="text-sm text-zinc-800">
+                    Tenant: <span className="font-medium">{hold.tenant_id}</span>
+                  </p>
+                  {hold.reason && <p className="text-xs text-zinc-500">{hold.reason}</p>}
+                  <p className="text-xs text-zinc-400">
+                    Placed by {hold.placed_by} · {formatTimestamp(hold.placed_at)}
+                    {hold.removed_at && ` · Removed ${formatTimestamp(hold.removed_at)}`}
+                  </p>
+                </div>
+                {hold.status === 'active' && (
+                  <button
+                    onClick={() => void handleRequestRemoval(hold.id)}
+                    disabled={actionInProgress === hold.id}
+                    className="px-3 py-1.5 rounded-lg border border-zinc-200 text-zinc-600 text-xs font-medium hover:bg-zinc-50 disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    Request Removal
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-type AdminTab = 'tasks' | 'users' | 'findings' | 'crm';
+type AdminTab = 'tasks' | 'users' | 'findings' | 'crm' | 'legal-holds';
 
 export function AdminDashboard() {
   const [tasks, setTasks] = useState<TaskQueueEntry[]>([]);
@@ -865,6 +1222,7 @@ export function AdminDashboard() {
     { id: 'users', label: 'Users' },
     { id: 'crm', label: 'CRM' },
     { id: 'findings', label: 'Findings' },
+    { id: 'legal-holds', label: 'Legal Holds' },
   ];
 
   return (
@@ -1081,6 +1439,9 @@ export function AdminDashboard() {
 
       {/* CRM Tab */}
       {activeTab === 'crm' && <CrmEntitiesTab />}
+
+      {/* Legal Holds Tab */}
+      {activeTab === 'legal-holds' && <LegalHoldsTab />}
     </div>
   );
 }
