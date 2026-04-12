@@ -642,6 +642,59 @@ CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_state
   ON wiki_page_versions (state);
 
 -- ============================================================================
+-- Autolearn jobs — PRD §4.3 state machine (issue #42)
+--
+-- Tracks the lifecycle of each ephemeral autolearn worker run.
+-- One row per pod invocation; state advances through the PRD §4.3 machine:
+--
+--   WORKER_STARTED → FETCHING_GROUND_TRUTH → FETCHING_WIKI
+--     → WRITING_TEMP_FILES → CLAUDE_CLI_RUNNING → WRITING_NEW_VERSION
+--     → EMBEDDING → AWAITING_REVIEW → PUBLISHED → COMPLETE
+--
+--   AWAITING_REVIEW → REJECTED  (reviewer rejects draft)
+--   Any state       → FAILED    (unrecoverable error; previous wiki retained)
+--
+-- source_type: 'gardening' (scheduled cron) or 'deepclean' (on-demand admin).
+-- wiki_version_id: set when WRITING_NEW_VERSION succeeds; FK to wiki_page_versions.
+-- task_queue_id:   optional link back to the task_queue row that spawned this job.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS autolearn_jobs (
+  id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id        TEXT NOT NULL,
+  customer_id      TEXT NOT NULL,
+  dept_id          TEXT NOT NULL,
+  source_type      TEXT NOT NULL DEFAULT 'gardening'
+                     CHECK (source_type IN ('gardening', 'deepclean')),
+  state            TEXT NOT NULL DEFAULT 'WORKER_STARTED'
+                     CHECK (state IN (
+                       'WORKER_STARTED',
+                       'FETCHING_GROUND_TRUTH',
+                       'FETCHING_WIKI',
+                       'WRITING_TEMP_FILES',
+                       'CLAUDE_CLI_RUNNING',
+                       'WRITING_NEW_VERSION',
+                       'EMBEDDING',
+                       'AWAITING_REVIEW',
+                       'PUBLISHED',
+                       'REJECTED',
+                       'COMPLETE',
+                       'FAILED'
+                     )),
+  task_queue_id    TEXT,
+  error_message    TEXT,
+  wiki_version_id  TEXT,
+  created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_autolearn_jobs_tenant_customer
+  ON autolearn_jobs (tenant_id, customer_id);
+CREATE INDEX IF NOT EXISTS idx_autolearn_jobs_state
+  ON autolearn_jobs (state);
+CREATE INDEX IF NOT EXISTS idx_autolearn_jobs_created_at
+  ON autolearn_jobs (created_at DESC);
+
+-- ============================================================================
 -- pgvector HNSW index -- CorpusChunk embedding column (issue #31, PRD §7)
 -- ============================================================================
 -- The entire corpus_chunks DDL block is guarded by a pgvector availability

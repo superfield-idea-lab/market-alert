@@ -26,7 +26,8 @@
     "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts",
     "./backup": "./backup.ts",
     "./worker-tokens": "./worker-tokens.ts",
-    "./tenant-policies": "./tenant-policies.ts"
+    "./tenant-policies": "./tenant-policies.ts",
+    "./autolearn-state-machine": "./autolearn-state-machine.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
