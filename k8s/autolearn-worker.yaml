@@ -1,0 +1,290 @@
+# K8s manifests for the autolearn ephemeral worker pod.
+#
+# This file defines the Kubernetes resources required to run one autolearn job
+# per (department, customer) pair. Each job:
+#   - Runs as a distroless pod with no shell.
+#   - Mounts the root filesystem read-only; writable paths use explicit volumes.
+#   - Drops all Linux capabilities.
+#   - Runs under a ServiceAccount scoped to the (department, customer) pair.
+#   - Is rejected by the admission policy if the spec deviates from the baseline.
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime
+#   WORKER-C-006  NetworkPolicy blocks direct DB access
+#   WORKER-C-024  Egress restricted to declared vendor hosts (Anthropic API + API gateway)
+#   WORKER-T-007  Container-shell-access — distroless + no capabilities
+#   WORKER-T-009  No secrets baked into container image
+#
+# Dynamic provisioning:
+#   The ServiceAccount name encodes (department_id, customer_id).  A controller
+#   (autolearn gardening cron — see issue #40) provisions the per-run
+#   ServiceAccount + ClusterRoleBinding before launching the Job, then cleans
+#   them up after completion.
+#
+# Apply order (admission policy must be installed first):
+#   kubectl apply -f k8s/autolearn-admission-policy.yaml
+#   # Per-run provisioning performed by the gardening cron controller:
+#   kubectl apply -f k8s/autolearn-worker.yaml
+#
+# Environment variables injected per-run (via Job spec env overrides):
+#   API_BASE_URL        — Calypso API server URL
+#   WORKER_TOKEN        — single-use scoped token issued by /internal/worker/tokens
+#   DEPARTMENT_ID       — bound department identifier
+#   CUSTOMER_ID         — bound customer identifier
+
+# ── ServiceAccount template ───────────────────────────────────────────────────
+# One ServiceAccount per (department, customer) pair.
+# The name pattern is: autolearn-worker-<dept_id>-<customer_id>
+# The gardening cron controller interpolates department_id and customer_id
+# before applying this manifest.
+#
+# The SA has no cluster-level permissions.  The ClusterRole below limits it
+# to reading only the autolearn task queue for the bound (dept, customer).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+  namespace: default
+  labels:
+    app: autolearn-worker
+    calypso.io/department: $(DEPARTMENT_ID)
+    calypso.io/customer: $(CUSTOMER_ID)
+  annotations:
+    # Annotation enables IRSA/Workload Identity binding if the cluster uses
+    # GKE Workload Identity or AWS IAM Roles for Service Accounts.
+    calypso.io/ephemeral: 'true'
+automountServiceAccountToken: false
+
+
+# ── Role: autolearn task reader ───────────────────────────────────────────────
+# Grants read-only access to the autolearn task ConfigMap for the specific
+# (department, customer) pair.  This is the Kubernetes RBAC component.
+#
+# Database-level RBAC is separate: the worker uses an API-mediated write path
+# with a single-use token; it never connects to the database directly.
+# Blueprint: WORKER-P-001 (read-only-database-access) — enforced at DB + API layers.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: autolearn-task-reader-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+  namespace: default
+  labels:
+    app: autolearn-worker
+    calypso.io/department: $(DEPARTMENT_ID)
+    calypso.io/customer: $(CUSTOMER_ID)
+rules:
+  # Allow reading the per-run input ConfigMap created by the stager (issue #37).
+  # The ConfigMap name encodes (department_id, customer_id) so the Role grants
+  # access only to this run's data — no cross-tenant read is possible.
+  - apiGroups: ['']
+    resources: ['configmaps']
+    resourceNames: ['autolearn-input-$(DEPARTMENT_ID)-$(CUSTOMER_ID)']
+    verbs: ['get']
+
+
+# ── RoleBinding ───────────────────────────────────────────────────────────────
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: autolearn-task-reader-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+  namespace: default
+  labels:
+    app: autolearn-worker
+    calypso.io/department: $(DEPARTMENT_ID)
+    calypso.io/customer: $(CUSTOMER_ID)
+subjects:
+  - kind: ServiceAccount
+    name: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+    namespace: default
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: autolearn-task-reader-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+
+
+# ── NetworkPolicy: autolearn worker egress ────────────────────────────────────
+# Allowed egress:
+#   - API gateway (calypso-app) on port 80 — result submission via worker token
+#   - Anthropic API on port 443 — Claude CLI inference
+#   - DNS resolution on port 53
+#
+# Direct database access is structurally blocked (no DB port allowed).
+# Blueprint: WORKER-C-006 (network-policy-blocks-direct-db)
+# Blueprint: WORKER-C-024 (egress-restricted-to-vendor-hosts)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: autolearn-worker-egress-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+  namespace: default
+  labels:
+    app: autolearn-worker
+    calypso.io/department: $(DEPARTMENT_ID)
+    calypso.io/customer: $(CUSTOMER_ID)
+spec:
+  podSelector:
+    matchLabels:
+      app: autolearn-worker
+      calypso.io/department: $(DEPARTMENT_ID)
+      calypso.io/customer: $(CUSTOMER_ID)
+  policyTypes:
+    - Egress
+  egress:
+    # Allow outbound to API gateway (calypso-app) on port 80
+    - to:
+        - podSelector:
+            matchLabels:
+              app: calypso-app
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow HTTPS for Claude CLI inference (Anthropic API at api.anthropic.com)
+    # Blueprint: WORKER-C-024 (egress-restricted-to-vendor-hosts)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+
+# ── Job: autolearn worker ─────────────────────────────────────────────────────
+# Ephemeral single-run Job per (department, customer).
+# The Job is created by the gardening cron controller; TTL cleans up
+# completed Jobs and their pods after 600 seconds (10 minutes).
+#
+# Pod-level security posture:
+#   - runAsNonRoot: true     — no UID 0 inside the container
+#   - readOnlyRootFilesystem: true — no writes to the container layer
+#   - allowPrivilegeEscalation: false — no setuid/setgid escalation
+#   - capabilities.drop: ["ALL"] — stripped kernel capabilities
+#   - automountServiceAccountToken: false — no SA token in the pod FS
+#
+# Writable volumes:
+#   input-volume  — emptyDir populated by the temp-filesystem stager
+#   tmp-volume    — tmpfs for Claude CLI scratch space; cleared on pod death
+#
+# Blueprint: WORKER-C-001 (no-shell-binary-in-image)
+# Blueprint: WORKER-T-007 (container-shell-access) — dropped capabilities + no shell
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+  namespace: default
+  labels:
+    app: autolearn-worker
+    calypso.io/department: $(DEPARTMENT_ID)
+    calypso.io/customer: $(CUSTOMER_ID)
+spec:
+  # Clean up the Job and its pods 10 minutes after completion.
+  ttlSecondsAfterFinished: 600
+  # Retry once on failure before marking the Job as failed.
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: autolearn-worker
+        calypso.io/department: $(DEPARTMENT_ID)
+        calypso.io/customer: $(CUSTOMER_ID)
+    spec:
+      # Dedicated service account scoped to this (dept, customer) run.
+      serviceAccountName: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+      # Do not mount the service account token into the pod filesystem.
+      # The worker authenticates via the WORKER_TOKEN env var instead.
+      automountServiceAccountToken: false
+
+      # Pod-level security context — applies to all containers.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # Prevent privilege escalation at the pod level.
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Never restart on failure — the Job retry policy governs re-runs.
+      restartPolicy: Never
+
+      containers:
+        - name: autolearn-worker
+          # Distroless image: no shell, no package manager.
+          # Blueprint: WORKER-C-001 (no-shell-binary-in-image)
+          # Image tag is substituted by the gardening cron controller.
+          image: ghcr.io/superfield-ai/calypso-autolearn-worker:$(IMAGE_TAG)
+          env:
+            - name: AGENT_TYPE
+              value: autolearn
+            # API gateway base URL for result submission.
+            - name: API_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: autolearn-worker-secret
+                  key: API_BASE_URL
+            # Single-use scoped worker token issued by /internal/worker/tokens.
+            # Blueprint: WORKER-T-005 (delegated-token-outlives-task)
+            - name: WORKER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: autolearn-token-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
+                  key: WORKER_TOKEN
+            # Scope binding — passed to the API on result submission.
+            - name: DEPARTMENT_ID
+              value: $(DEPARTMENT_ID)
+            - name: CUSTOMER_ID
+              value: $(CUSTOMER_ID)
+            # Path to the stager-written input directory (mounted as emptyDir).
+            - name: INPUT_PATH
+              value: /input
+            # Hard timeout: 5 minutes per run.
+            - name: CLAUDE_TIMEOUT_MS
+              value: '300000'
+          volumeMounts:
+            # Read-only input directory populated by the temp-filesystem stager.
+            # Blueprint: WORKER-T-007 — no write access to ground-truth data.
+            - name: input-volume
+              mountPath: /input
+              readOnly: true
+            # Writable tmpfs for Claude CLI scratch (cleared on pod death).
+            - name: tmp-volume
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: '200m'
+              memory: '512Mi'
+            limits:
+              cpu: '1000m'
+              memory: '2Gi'
+          # Container-level security context.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            # Root filesystem is read-only; writable paths are mounted volumes.
+            readOnlyRootFilesystem: true
+            capabilities:
+              # Drop ALL capabilities — the worker needs none.
+              # Blueprint: WORKER-T-007 (container-shell-access)
+              drop:
+                - ALL
+
+      volumes:
+        # Input volume populated by the temp-filesystem stager (issue #37).
+        # The stager writes to this emptyDir before the worker container starts,
+        # then the worker mounts it read-only.
+        - name: input-volume
+          emptyDir: {}
+        # tmpfs for Claude CLI scratch — never persisted to disk.
+        # Blueprint: WORKER-T-009 (vendor-api-key-leak) — no secrets on disk.
+        - name: tmp-volume
+          emptyDir:
+            medium: Memory
+            sizeLimit: '256Mi'

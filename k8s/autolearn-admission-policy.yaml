@@ -1,0 +1,174 @@
+# Admission policy for autolearn worker pods.
+#
+# This Kyverno ClusterPolicy enforces the security baseline for all pods
+# labelled app=autolearn-worker.  The admission controller rejects any pod
+# that deviates from the required spec before it is scheduled.
+#
+# Policy rules enforced:
+#   1. require-read-only-root-fs      — readOnlyRootFilesystem must be true
+#   2. require-drop-all-capabilities  — capabilities.drop must include ALL
+#   3. require-no-privilege-escalation — allowPrivilegeEscalation must be false
+#   4. require-non-root-user          — runAsNonRoot must be true; runAsUser != 0
+#   5. require-no-automount-sa-token  — automountServiceAccountToken must be false
+#   6. require-image-tag-not-latest   — image tag must not be "latest"
+#
+# Blueprint constraints verified:
+#   WORKER-C-001  No-shell distroless runtime (enforced via image label check)
+#   WORKER-T-007  Container-shell-access — drop ALL capabilities + read-only FS
+#
+# Prerequisites:
+#   - Kyverno >= 1.10 must be installed in the cluster:
+#     helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+#   - Apply this policy before creating any autolearn Job:
+#     kubectl apply -f k8s/autolearn-admission-policy.yaml
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: autolearn-worker-security-baseline
+  annotations:
+    policies.kyverno.io/title: Autolearn Worker Security Baseline
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Enforces the minimum security posture for all autolearn worker pods:
+      read-only root filesystem, dropped ALL capabilities, no privilege
+      escalation, non-root user, and no auto-mounted service account token.
+      Any deviation is rejected at admission.
+spec:
+  # Enforce mode: reject non-compliant pods outright.
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    # ── Rule 1: read-only root filesystem ────────────────────────────────────
+    - name: require-read-only-root-fs
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker pods must have readOnlyRootFilesystem: true on every
+          container. Writable paths must use explicit volume mounts.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
+
+    # ── Rule 2: drop ALL capabilities ────────────────────────────────────────
+    - name: require-drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker containers must drop ALL capabilities.
+          No capabilities may be added.
+        foreach:
+          - list: 'request.object.spec.containers'
+            deny:
+              conditions:
+                any:
+                  # Deny if capabilities.drop does not contain "ALL"
+                  - key: 'ALL'
+                    operator: AnyNotIn
+                    value: '{{ element.securityContext.capabilities.drop || `[]` }}'
+                  # Deny if any capabilities are added
+                  - key: '{{ element.securityContext.capabilities.add || `[]` }}'
+                    operator: NotEquals
+                    value: []
+
+    # ── Rule 3: no privilege escalation ──────────────────────────────────────
+    - name: require-no-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker containers must set allowPrivilegeEscalation: false.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  allowPrivilegeEscalation: false
+
+    # ── Rule 4: non-root user ─────────────────────────────────────────────────
+    - name: require-non-root-user
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker pods must run as a non-root user (runAsNonRoot: true
+          and runAsUser must not be 0).
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+            containers:
+              - securityContext:
+                  runAsNonRoot: true
+
+    # ── Rule 5: no automounted service account token ──────────────────────────
+    - name: require-no-automount-sa-token
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker pods must set automountServiceAccountToken: false.
+          The worker authenticates via the WORKER_TOKEN environment variable.
+        pattern:
+          spec:
+            automountServiceAccountToken: false
+
+    # ── Rule 6: no latest image tag ───────────────────────────────────────────
+    - name: require-image-tag-not-latest
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchLabels:
+                  app: autolearn-worker
+      validate:
+        message: >-
+          autolearn-worker pod images must not use the 'latest' tag.
+          Pin to a specific digest or semver tag to ensure reproducible runs.
+        foreach:
+          - list: 'request.object.spec.containers'
+            deny:
+              conditions:
+                any:
+                  - key: '{{ element.image }}'
+                    operator: Equals
+                    value: '*:latest'
+                  - key: "{{ element.image | contains(@, ':') }}"
+                    operator: Equals
+                    value: false

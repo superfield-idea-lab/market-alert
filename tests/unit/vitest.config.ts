@@ -10,6 +10,7 @@
  *  - fixture-recorder.test.ts    — golden fixture recorder + MSW handler factory (issue #98)
  *  - linkerd-manifests.test.ts   — Linkerd mTLS manifest structure validation (issue #88)
  *  - chunker.test.ts             — sentence-boundary max-tokens chunker (issue #29)
+ *  - autolearn-pod-spec.test.ts  — distroless pod spec manifest assertions (issue #35)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -31,6 +32,7 @@ export default defineConfig({
       'fixture-recorder.test.ts',
       'linkerd-manifests.test.ts',
       'chunker.test.ts',
+      'autolearn-pod-spec.test.ts',
     ],
     root: resolve(import.meta.dirname),
   },

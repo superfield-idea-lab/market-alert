@@ -1,0 +1,110 @@
+# Dockerfile.autolearn-worker — Distroless ephemeral autolearn worker image.
+#
+# This image runs as a single-use ephemeral Kubernetes Job pod. Each pod:
+#   - Receives anonymised ground-truth and current wiki markdown via a
+#     temp-filesystem stager (separate follow-on issue).
+#   - Invokes the Claude CLI binary with array-form spawn (no shell).
+#   - Submits the resulting draft WikiPageVersion through the API using a
+#     single-use scoped worker token (separate follow-on issue).
+#   - Has no shell, no package manager, and a read-only root filesystem.
+#   - Is destroyed after the job completes; no long-lived credentials remain.
+#
+# Two-stage build:
+#   Stage 1 (builder): install dependencies and compile the autolearn bundle.
+#   Stage 2 (runtime): bun distroless image — no shell, no package manager.
+#
+# Blueprint constraints enforced here:
+#   WORKER-C-001  No-shell distroless runtime (shell absent in production stage)
+#   WORKER-C-007  Vendor CLI invoked without shell (binary copied directly)
+#   WORKER-C-023  Vendor CLI version pinned; binary copied at build time
+#   WORKER-T-009  No secrets baked into container image
+#
+# Build arguments:
+#   CLAUDE_VERSION — version tag for documentation only (e.g. "1.0.0")
+#
+# The Claude CLI binary must be present in the build context at:
+#   claude-binary/claude
+# CI must download and verify the pinned binary before building this image.
+#
+# Environment variables expected at container startup:
+#   API_BASE_URL        — base URL of the Calypso API server
+#   WORKER_TOKEN        — single-use scoped token (from token minting endpoint)
+#   DEPARTMENT_ID       — bound department scope for this run
+#   CUSTOMER_ID         — bound customer scope for this run
+#   INPUT_PATH          — path to stager-written input directory (default: /input)
+#   CLAUDE_CLI_PATH     — path to the Claude CLI binary (default: /usr/local/bin/claude)
+#   CLAUDE_TIMEOUT_MS   — hard timeout for CLI invocation in milliseconds (default: 300000)
+
+# --- builder stage ---
+FROM oven/bun:1.2@sha256:6ebf306367da43ad75c4d5119563e24de9b66372929ad4fa31546be053a16f74 AS builder
+
+WORKDIR /app
+
+# Copy workspace manifests and lockfile first for layer caching.
+# All workspace member package.json files must be present so bun can resolve
+# the full workspace graph against the frozen lockfile.
+COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/ui/package.json packages/ui/
+
+# Install workspace dependencies with frozen lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
+
+# Copy source files needed for the autolearn bundle.
+# The autolearn worker reuses the apps/worker entry-point with AGENT_TYPE=autolearn.
+COPY apps/worker/ apps/worker/
+COPY packages/core/ packages/core/
+COPY packages/db/ packages/db/
+COPY tsconfig.json ./
+
+# Compile the autolearn entry-point to a single bundle targeting the bun runtime
+RUN bun build apps/worker/src/index.ts \
+      --target bun \
+      --outfile dist/autolearn-worker.js \
+      --external postgres
+
+# --- runtime stage ---
+# Distroless: no shell (/bin/sh absent), no package manager, minimal attack surface.
+# Blueprint: WORKER-C-001 (no-shell-binary-in-image)
+FROM oven/bun:1.2-distroless@sha256:e2c3f36733fa2c2c9c80d89b481d9fc7629558cac2533c776f6285ae1ba6b8fa AS runtime
+
+ARG CLAUDE_VERSION=unknown
+LABEL claude.version="${CLAUDE_VERSION}"
+LABEL calypso.worker-type="autolearn"
+LABEL calypso.ephemeral="true"
+
+# Non-root user — worker runs as UID/GID 1000.
+# The bun distroless image provides a non-root user at UID 1000.
+USER 1000:1000
+
+WORKDIR /app
+
+# Copy compiled autolearn bundle
+COPY --from=builder /app/dist/autolearn-worker.js ./dist/autolearn-worker.js
+
+# Copy node_modules for postgres (external dependency not bundled)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy the Claude CLI binary — must be present in the build context as claude-binary/claude.
+# The CI build step downloads and verifies the pinned binary before building this image.
+# Blueprint: WORKER-C-007 (vendor-cli-array-form-spawn — binary copied directly, no shell)
+# Blueprint: WORKER-C-023 (vendor-cli-version-pinned — binary pinned at build time)
+COPY --chown=1000:1000 claude-binary/claude /usr/local/bin/claude
+
+# Runtime environment defaults
+ENV CLAUDE_CLI_PATH=/usr/local/bin/claude
+# Input directory written by the temp-filesystem stager (mounted as emptyDir in K8s).
+ENV INPUT_PATH=/input
+# Hard timeout: 5 minutes — sufficient for a single-customer wiki diff generation.
+ENV CLAUDE_TIMEOUT_MS=300000
+# Agent type identifies this worker in task queue views and audit logs.
+ENV AGENT_TYPE=autolearn
+
+# Health: no HTTP endpoint — the pod is ephemeral (Job); no liveness probe needed.
+# Completion is signalled by exit code 0 (success) or non-zero (failure → retry policy).
+
+ENTRYPOINT ["bun", "run", "dist/autolearn-worker.js"]
