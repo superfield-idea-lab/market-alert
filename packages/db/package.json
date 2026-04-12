@@ -22,7 +22,8 @@
     "./business-journal": "./business-journal.ts",
     "./approvals": "./approvals.ts",
     "./ingestion-token": "./ingestion-token.ts",
-    "./corpus-chunk-store": "./corpus-chunk-store.ts"
+    "./corpus-chunk-store": "./corpus-chunk-store.ts",
+    "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
