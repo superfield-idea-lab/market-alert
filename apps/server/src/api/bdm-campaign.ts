@@ -13,6 +13,21 @@
  *
  * Authentication: requires a valid JWT session (same as other API routes).
  *
+ * Audit (issue #76): every cross-customer BDM campaign query emits a
+ * hash-chained audit event into the append-only audit store BEFORE the
+ * analytics rows are returned to the caller. The event captures:
+ *   - actor_id  — the authenticated user performing the query
+ *   - entity_type — 'bdm_campaign_query'
+ *   - entity_id   — the queried tenant_id
+ *   - after.asset_manager_id — the tenant_id (cross-customer boundary marker)
+ *   - after.event_type_filter — the optional event_type filter, if provided
+ *   - after.limit  — the effective row limit
+ *   - ts — ISO 8601 timestamp of the query
+ *
+ * The Compliance Officer role (isSuperuser) can query the audit log at
+ * GET /api/audit/verify to inspect the hash-chain integrity and retrieve
+ * individual BDM query events.
+ *
  * Canonical docs:
  *   - docs/implementation-plan-v1.md § Phase 7
  *   - docs/PRD.md §4.7 (Cross-Customer Campaign Summary)
@@ -23,6 +38,7 @@ import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { makeJson } from '../lib/response';
 import { queryBdmCampaignEvents, type SessionEventType } from 'db/analytics-emitter';
+import { emitAuditEvent } from '../policies/audit-service';
 
 /**
  * Handles GET /api/bdm/campaign.
@@ -77,6 +93,24 @@ export async function handleBdmCampaignRequest(
     }
     limit = Math.min(parsed, 500);
   }
+
+  // Emit audit event BEFORE returning data to the caller (issue #76).
+  // If the audit write fails, the query result must not be returned.
+  const queryTs = new Date().toISOString();
+  await emitAuditEvent({
+    actor_id: user.id,
+    action: 'bdm.campaign.query',
+    entity_type: 'bdm_campaign_query',
+    entity_id: tenantId,
+    before: null,
+    after: {
+      asset_manager_id: tenantId,
+      event_type_filter: eventType ?? null,
+      limit,
+    },
+    ip: req.headers.get('X-Forwarded-For') ?? req.headers.get('CF-Connecting-IP') ?? undefined,
+    ts: queryTs,
+  });
 
   const events = await queryBdmCampaignEvents({
     analyticsSql,
