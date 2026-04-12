@@ -14,6 +14,7 @@ COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/embedding/package.json packages/embedding/
 COPY packages/ui/package.json packages/ui/
 
 # Install all workspace dependencies with frozen lockfile for reproducibility
