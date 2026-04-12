@@ -52,6 +52,43 @@ export type AgentType = (typeof AGENT_TYPES)[number];
 export const CUSTOMER_SCOPED_TABLES = ['entities', 'relations'] as const;
 export type CustomerScopedTable = (typeof CUSTOMER_SCOPED_TABLES)[number];
 
+/**
+ * Entity types that a BDM session must NEVER read at the database layer.
+ *
+ * PRD §4.7 — the BDM's database session cannot read customer entities, wiki
+ * entities, ground-truth emails, customer interests, or identity dictionary
+ * entries. All are blocked by RESTRICTIVE RLS policies in BDM sessions
+ * (sessions where `app.current_bdm_department_id` is set).
+ *
+ * The anonymised query path (corpus_chunk, transcript, asset_manager, fund)
+ * is intentionally excluded from this list — BDMs access those freely.
+ *
+ * Issue #73.
+ */
+export const BDM_BLOCKED_ENTITY_TYPES = [
+  'customer',
+  'crm_update',
+  'customer_interest',
+  'email',
+  'wiki_page',
+  'wiki_page_version',
+  'wiki_annotation',
+  'identity_token',
+] as const;
+export type BdmBlockedEntityType = (typeof BDM_BLOCKED_ENTITY_TYPES)[number];
+
+/**
+ * Relation types that a BDM session must NEVER traverse at the database layer.
+ *
+ * PRD §4.7 — relations that link a transcript back to a customer (such as
+ * `has_ground_truth`) are blocked to prevent re-identification via relation
+ * traversal even without reading the customer row directly.
+ *
+ * Issue #73.
+ */
+export const BDM_BLOCKED_RELATION_TYPES = ['has_ground_truth'] as const;
+export type BdmBlockedRelationType = (typeof BDM_BLOCKED_RELATION_TYPES)[number];
+
 export function agentRoleName(agentType: AgentType): string {
   return `agent_${agentType}`;
 }
@@ -533,6 +570,85 @@ CREATE POLICY wiki_page_versions_update_bypass
 `);
 }
 
+/**
+ * Add RESTRICTIVE RLS policies that block BDM sessions from accessing
+ * customer-identifying data.
+ *
+ * A BDM session is identified by the presence of a non-empty
+ * `app.current_bdm_department_id` session variable set by `withRlsContext`.
+ *
+ * Three tables are covered:
+ *
+ * 1. `entities` — BDM_BLOCKED_ENTITY_TYPES rows are invisible in BDM sessions.
+ *    Non-BDM sessions are unaffected (the policy is a no-op when the session
+ *    variable is absent or empty).
+ *
+ * 2. `relations` — `has_ground_truth` and other BDM_BLOCKED_RELATION_TYPES are
+ *    invisible in BDM sessions, preventing re-identification via traversal.
+ *
+ * 3. `wiki_page_versions` — all rows are blocked for BDM sessions. The existing
+ *    `wiki_page_versions_rm_isolation` policy already denies BDM sessions
+ *    (rmCustomerIds is empty), but an explicit RESTRICTIVE policy makes the
+ *    structural block visible in pg_policies for auditing.
+ *
+ * Policy type: RESTRICTIVE FOR SELECT (read blocks only; INSERT/UPDATE/DELETE
+ * paths used by workers and the API are unaffected).
+ *
+ * When a BDM session queries a blocked row the database silently returns zero
+ * rows — the same behaviour as tenant-isolation policies. No error is raised.
+ *
+ * Blueprint: PRD §4.7 (BDM RLS boundary) and PRD §7 (structural DB blocks).
+ * Issue #73.
+ */
+async function configureBdmRls(appAdmin: ReturnType<typeof makePool>): Promise<void> {
+  // ── entities: block customer-identifying types in BDM sessions ─────────────
+  //
+  // RESTRICTIVE FOR SELECT: in a BDM session (bdm_department_id set and
+  // non-empty) the policy denies access to customer/wiki/email/interest/identity
+  // entity types. In non-BDM sessions the left-hand side is false so the policy
+  // passes all rows unconditionally — only the existing tenant-isolation policy
+  // continues to apply.
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS entities_bdm_block ON entities`);
+  await appAdmin.unsafe(`
+CREATE POLICY entities_bdm_block
+  ON entities
+  AS RESTRICTIVE
+  FOR SELECT
+  USING (
+    current_setting('app.current_bdm_department_id', true) = ''
+    OR current_setting('app.current_bdm_department_id', true) IS NULL
+    OR type NOT IN (${BDM_BLOCKED_ENTITY_TYPES.map((t) => `'${t}'`).join(', ')})
+  )
+`);
+
+  // ── relations: block has_ground_truth traversal in BDM sessions ───────────
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS relations_bdm_block ON relations`);
+  await appAdmin.unsafe(`
+CREATE POLICY relations_bdm_block
+  ON relations
+  AS RESTRICTIVE
+  FOR SELECT
+  USING (
+    current_setting('app.current_bdm_department_id', true) = ''
+    OR current_setting('app.current_bdm_department_id', true) IS NULL
+    OR type NOT IN (${BDM_BLOCKED_RELATION_TYPES.map((t) => `'${t}'`).join(', ')})
+  )
+`);
+
+  // ── wiki_page_versions: block all rows for BDM sessions ─────────────────
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS wiki_page_versions_bdm_block ON wiki_page_versions`);
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_bdm_block
+  ON wiki_page_versions
+  AS RESTRICTIVE
+  FOR SELECT
+  USING (
+    current_setting('app.current_bdm_department_id', true) = ''
+    OR current_setting('app.current_bdm_department_id', true) IS NULL
+  )
+`);
+}
+
 async function verifyRole(
   admin: ReturnType<typeof makePool>,
   roleName: string,
@@ -777,6 +893,18 @@ async function verifyInitRemote(
   );
   if (wikiPolicyCheck !== null) failures.push(wikiPolicyCheck);
 
+  // Verify BDM RLS block policies (issue #73)
+  const bdmEntitiesCheck = await verifyRlsPolicy(appAdmin, 'entities', 'entities_bdm_block');
+  if (bdmEntitiesCheck !== null) failures.push(bdmEntitiesCheck);
+  const bdmRelationsCheck = await verifyRlsPolicy(appAdmin, 'relations', 'relations_bdm_block');
+  if (bdmRelationsCheck !== null) failures.push(bdmRelationsCheck);
+  const bdmWikiCheck = await verifyRlsPolicy(
+    appAdmin,
+    'wiki_page_versions',
+    'wiki_page_versions_bdm_block',
+  );
+  if (bdmWikiCheck !== null) failures.push(bdmWikiCheck);
+
   if (failures.length > 0) {
     throw new Error(`Genesis verification failed:\n- ${failures.join('\n- ')}`);
   }
@@ -899,6 +1027,7 @@ REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAME
     }
     await configureAgentWorkerRoles(admin, appAdmin, config);
     await configureCustomerScopedRls(appAdmin);
+    await configureBdmRls(appAdmin);
 
     await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
 
