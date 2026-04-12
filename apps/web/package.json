@@ -10,23 +10,26 @@
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
     "core": "workspace:*",
-    "ui": "workspace:*",
+    "dompurify": "^3.3.3",
     "lucide-react": "^0.577.0",
+    "marked": "^18.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-resizable-panels": "^4.7.2"
+    "react-resizable-panels": "^4.7.2",
+    "ui": "workspace:*"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.2.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
     "@vitest/browser": "^2.0.0",
-    "vite": "^5.1.0",
-    "tailwindcss": "^3.4.1",
-    "postcss": "^8.4.35",
     "autoprefixer": "^10.4.17",
     "playwright": "^1.40.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
     "typescript": "^5.0.0",
+    "vite": "^5.1.0",
     "vitest": "^2.0.0",
     "vitest-browser-react": "^0.0.4"
   }

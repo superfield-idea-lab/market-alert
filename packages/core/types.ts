@@ -85,6 +85,37 @@ export interface TaskProperties {
   tags: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Wiki page version
+// ---------------------------------------------------------------------------
+
+/**
+ * State of a wiki page version.
+ *
+ * AWAITING_REVIEW — produced by the autolearn worker; pending RM approval.
+ * PUBLISHED       — approved for presentation.
+ * REJECTED        — declined by RM.
+ * ARCHIVED        — superseded by a newer published version.
+ */
+export type WikiPageVersionState = 'AWAITING_REVIEW' | 'PUBLISHED' | 'REJECTED' | 'ARCHIVED';
+
+/**
+ * A versioned snapshot of a wiki page as returned by GET /api/wiki/versions/:id.
+ *
+ * `content` is the anonymised markdown body. Citation markers follow the
+ * convention `[^citation-<id>]` so the render component can expose them as
+ * interactive targets.
+ */
+export interface WikiPageVersion {
+  id: string;
+  content: string;
+  state: WikiPageVersionState;
+  wiki_page_id: string | null;
+  tenant_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Policy note: a starter-level task update is still modeled as a mutable entity
 // rewrite. Consequential future workflows should move to a journaled write
 // boundary so state changes can be replayed, compensated, and attributed.
