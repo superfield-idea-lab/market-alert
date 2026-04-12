@@ -24,7 +24,8 @@
     "./ingestion-token": "./ingestion-token.ts",
     "./corpus-chunk-store": "./corpus-chunk-store.ts",
     "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts",
-    "./backup": "./backup.ts"
+    "./backup": "./backup.ts",
+    "./worker-tokens": "./worker-tokens.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

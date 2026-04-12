@@ -381,6 +381,38 @@ BEGIN
 END;
 $$;
 
+-- Scoped single-use worker tokens (issue #36).
+-- Each row represents one minted token tied to a specific pod and task scope.
+-- Tokens are single-use: consumed_at is set on first use, and any further use
+-- is rejected.  pod_terminate invalidates all still-unused tokens for the pod.
+--
+-- pod_id:        Identifies the worker pod (e.g. Kubernetes pod name or UUID).
+-- agent_type:    Agent type this token is scoped to (e.g. "coding").
+-- task_scope:    Opaque task identifier this token authorises (e.g. task_queue id).
+-- jti:           JWT ID embedded in the signed token; matches revoked_tokens on consumption.
+-- expires_at:    Pod-lifetime TTL — tokens cannot outlive the pod's scheduled lifetime.
+-- consumed_at:   Set when the token is first used (single-use enforcement).
+-- invalidated_at: Set when pod terminate fires before the token is consumed.
+-- created_at:    Issuance timestamp for audit.
+CREATE TABLE IF NOT EXISTS worker_tokens (
+  id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  pod_id          TEXT NOT NULL,
+  agent_type      TEXT NOT NULL,
+  task_scope      TEXT NOT NULL,
+  jti             TEXT NOT NULL UNIQUE,
+  expires_at      TIMESTAMP WITH TIME ZONE NOT NULL,
+  consumed_at     TIMESTAMP WITH TIME ZONE,
+  invalidated_at  TIMESTAMP WITH TIME ZONE,
+  created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_tokens_pod_id
+  ON worker_tokens (pod_id)
+  WHERE consumed_at IS NULL AND invalidated_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_worker_tokens_jti
+  ON worker_tokens (jti);
+
 -- Recovery passphrases (AUTH-C-016).
 -- Stores a bcrypt/argon2-equivalent hash of the user's recovery passphrase.
 -- Only one active passphrase per user at a time (the latest replaces older ones).

@@ -46,6 +46,7 @@ import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleWikiVersionsRequest } from './api/wiki-versions';
+import { handleWorkerTokensRequest } from './api/worker-tokens';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -305,6 +306,14 @@ export default {
     if (url.pathname.startsWith('/internal/wiki/')) {
       const wikiRes = await handleWikiVersionsRequest(req, url, appState);
       if (wikiRes) return withTrace(wikiRes);
+    }
+
+    // Internal worker token mint + pod-terminate invalidation (issue #36).
+    // POST /internal/worker/tokens — mint a scoped single-use token.
+    // DELETE /internal/worker/tokens/:podId — invalidate on pod terminate.
+    if (url.pathname.startsWith('/internal/worker/tokens')) {
+      const workerTokenRes = await handleWorkerTokensRequest(req, url, appState);
+      if (workerTokenRes) return withTrace(workerTokenRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd
