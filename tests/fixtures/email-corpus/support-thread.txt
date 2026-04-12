@@ -1,0 +1,37 @@
+From: helpdesk@calypso-kb.internal
+To: robert.lee@pinnacle-inv.com
+Date: Wed, 09 Apr 2026 14:22:00 +0000
+Subject: RE: Account access issue — ticket #8821
+
+Dear Robert Lee,
+
+Thank you for reaching out to Pinnacle Investment Services Ltd.
+We have resolved the access issue with your account (ID: RBL-0042).
+
+Our engineer Sarah Kim has verified that your two-factor authentication
+was temporarily disabled due to a system update on 7 April. It has now
+been re-enabled.
+
+If you need further assistance, please call our dedicated line at
+(800) 555-0174 or reply to this email. You can also reach the
+compliance team directly at compliance@pinnacle-inv.com.
+
+Kind regards,
+Mark Thompson
+Client Services Manager
+Pinnacle Investment Services Ltd
+mark.thompson@pinnacle-inv.com
+Direct: 212-555-0831
+
+---
+
+Original message from Robert Lee <robert.lee@pinnacle-inv.com>
+Sent: Tue, 08 Apr 2026 17:05:00 +0000
+
+Hi,
+
+I cannot log into my account since yesterday evening. My email is
+robert.lee@pinnacle-inv.com and my phone number is 617-555-0293.
+Please help urgently.
+
+Robert Lee

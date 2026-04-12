@@ -1,0 +1,24 @@
+From: onboarding@calypso-kb.internal
+To: nancy.wu@brightfield-ventures.com
+Date: Thu, 10 Apr 2026 08:00:00 +0000
+Subject: Welcome to Calypso KB — your account is ready
+
+Hi Nancy Wu,
+
+Welcome aboard! Your Calypso KB account has been provisioned.
+
+Your assigned relationship manager is James Porter
+(james.porter@calypso-kb.internal, direct: 646-555-0418).
+
+Here are your initial credentials (please change on first login):
+  Username: nancy.wu
+  Temporary password: [see attached secure share]
+
+Your organisation is registered as Brightfield Ventures LLC.
+If any details are incorrect, contact your RM or email
+onboarding@calypso-kb.internal.
+
+We look forward to supporting Brightfield Ventures LLC.
+
+Best,
+The Calypso KB Onboarding Team

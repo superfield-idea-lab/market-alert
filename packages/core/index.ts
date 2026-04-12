@@ -7,4 +7,5 @@ export * from './kms';
 export * from './encryption';
 export * from './scrub-pii';
 export * from './secrets';
+export * from './pii-tokeniser';
 export const coreHelper = () => true;
