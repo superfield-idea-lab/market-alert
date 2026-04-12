@@ -47,6 +47,7 @@ import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
+import { handleInternalRelationsRequest } from './api/internal-relations';
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
@@ -418,6 +419,13 @@ export default {
     if (url.pathname.startsWith('/internal/wiki/')) {
       const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
       if (internalWikiRes) return withTrace(internalWikiRes);
+    }
+
+    // Internal worker relation write endpoint — Bearer wiki-write token auth (issue #72).
+    // POST /internal/relations — autolearn worker writes discussed_in relations.
+    if (url.pathname === '/internal/relations') {
+      const internalRelRes = await handleInternalRelationsRequest(req, url, appState);
+      if (internalRelRes) return withTrace(internalRelRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd

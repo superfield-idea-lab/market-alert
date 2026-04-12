@@ -103,6 +103,23 @@ export interface AutolearnPayload {
 }
 
 /**
+ * An entity identifier observed in a transcript for `discussed_in` tagging.
+ *
+ * The agent emits one entry per AssetManager or Fund entity it identifies in
+ * the transcript corpus. Only the entity `id` (as stored in the `entities`
+ * table) is required; the `type` discriminator is included to let the
+ * relation-write endpoint verify the entity is of an expected kind.
+ *
+ * Phase 7 queries group campaign interactions by these tagged entities.
+ */
+export interface DiscussedInRef {
+  /** Entity id from the `entities` table (e.g. "asset_manager-<uuid>"). */
+  entity_id: string;
+  /** Entity type — must be "asset_manager" or "fund". */
+  entity_type: 'asset_manager' | 'fund';
+}
+
+/**
  * Expected result shape returned by the Claude CLI for `autolearn_wiki_draft`
  * tasks.
  */
@@ -113,6 +130,17 @@ export interface AutolearnResult {
   status: 'completed' | 'failed';
   /** Echoed customer_ref from the payload for correlation. */
   customer_ref: string;
+  /**
+   * AssetManager and Fund entities observed in the transcript corpus.
+   *
+   * When present and non-empty the worker must write `discussed_in` relations
+   * for each entry via POST /internal/relations. Omitted or empty means no
+   * tagging was possible (entity not found, ambiguous match, etc.).
+   *
+   * Phase 7 BDM campaign analysis depends on these relations existing in the
+   * graph. See issue #72.
+   */
+  discussed_in?: DiscussedInRef[];
   /** Whether the result was produced by the dev stub (local dev only). */
   stub?: boolean;
   /** Additional vendor-specific fields forwarded as-is. */
@@ -139,12 +167,23 @@ Synthesise an updated wiki markdown document that:
 - Preserves accurate existing content
 - Removes outdated claims
 
+Additionally, identify any AssetManager or Fund entities mentioned or discussed in the transcript corpus.
+For each entity you can match against the provided entity list, emit a "discussed_in" entry with its entity_id and entity_type.
+Only emit entities that appear in the provided entity list — do not invent entity ids.
+If no entities are found or no entity list is provided, omit the "discussed_in" field.
+
 Return a JSON object with:
 {
   "wiki_version_ref": "<opaque reference assigned by the staging layer>",
   "status": "completed",
-  "customer_ref": "<echoed from input>"
+  "customer_ref": "<echoed from input>",
+  "discussed_in": [
+    { "entity_id": "<id from entity list>", "entity_type": "asset_manager" },
+    { "entity_id": "<id from entity list>", "entity_type": "fund" }
+  ]
 }
+
+The "discussed_in" field is optional — omit it when no matching entities are found.
 
 Perform read-only analysis of source files only. Write only to stdout.`;
 
