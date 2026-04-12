@@ -47,6 +47,7 @@ jobs:
           AUDIT_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
           ANALYTICS_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
           JWT_SECRET: test-secret-for-pwa-ci
+          TEST_MODE: 'true'
         run: bunx playwright test --config tests/pwa/playwright.config.mts
       - name: Upload Playwright report
         if: failure()

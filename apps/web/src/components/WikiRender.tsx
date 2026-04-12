@@ -33,14 +33,18 @@
  * the citation marker. Non-superusers see the excerpt only; superusers also
  * see the resolved sender/speaker name.
  *
- * ## Citation click
+ * ## Citation click / tap
  *
- * Clicks on citation markers also invoke the optional `onCitationClick`
- * callback for callers that want to handle citations differently.
+ * Clicks and touch taps on citation markers also invoke the optional
+ * `onCitationClick` callback for callers that want to handle citations
+ * differently. A delegated `touchend` listener handles touch devices so
+ * the interaction works on the mobile PWA surface without the synthetic
+ * click delay.
  *
  * References:
  * - docs/implementation-plan-v1.md §Phase 4 — Wiki web UX
  * - @see https://github.com/superfield-ai/superfield-kb-demo/issues/49
+ * - @see https://github.com/superfield-ai/superfield-kb-demo/issues/51
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -66,7 +70,7 @@ export interface WikiRenderProps {
    */
   customerId?: string;
   /**
-   * Optional callback invoked when a citation marker is clicked.
+   * Optional callback invoked when a citation marker is clicked or tapped.
    *
    * @param citationId - The raw citation identifier, e.g. `"abc123"`.
    */
@@ -171,10 +175,21 @@ export function WikiRender({
     setHoverState({ status: 'idle' });
   }, []);
 
-  // Attach delegated mouseover and click listeners for citation markers.
+  // Attach delegated mouseover, click, and touch listeners for citation markers.
+  // Touch events are handled separately so that tap interactions on mobile
+  // PWA surfaces work without relying on the synthesised click event delay.
+  // touchend calls preventDefault() to suppress the subsequent synthetic click
+  // and avoid double-firing the callback on hybrid devices.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    function getCitationId(target: EventTarget | null): string | undefined {
+      if (!target) return undefined;
+      const citation = (target as HTMLElement).closest('sup.wiki-citation');
+      if (!citation) return undefined;
+      return (citation as HTMLElement).dataset.citationId;
+    }
 
     function handleMouseOver(event: MouseEvent) {
       const target = event.target as HTMLElement;
@@ -187,20 +202,29 @@ export function WikiRender({
     }
 
     function handleClick(event: MouseEvent) {
-      const target = event.target as HTMLElement;
-      const citation = target.closest('sup.wiki-citation');
-      if (!citation) return;
-      const citationId = (citation as HTMLElement).dataset.citationId;
+      const citationId = getCitationId(event.target);
       if (citationId && onCitationClick) {
         onCitationClick(citationId);
       }
     }
 
+    function handleTouchEnd(event: TouchEvent) {
+      const citationId = getCitationId(event.target);
+      if (citationId) {
+        event.preventDefault();
+        if (onCitationClick) {
+          onCitationClick(citationId);
+        }
+      }
+    }
+
     container.addEventListener('mouseover', handleMouseOver);
     container.addEventListener('click', handleClick);
+    container.addEventListener('touchend', handleTouchEnd, { passive: false });
     return () => {
       container.removeEventListener('mouseover', handleMouseOver);
       container.removeEventListener('click', handleClick);
+      container.removeEventListener('touchend', handleTouchEnd);
     };
   }, [fetchCitation, onCitationClick]);
 

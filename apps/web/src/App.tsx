@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Settings, Plus, User, LayoutDashboard, Smartphone, Shield } from 'lucide-react';
+import { Settings, Plus, User, LayoutDashboard, Smartphone, Shield, BookOpen } from 'lucide-react';
 import { TaskListView } from './components/TaskListView';
 import { PwaDemoPage } from './pages/pwa-demo';
 import { AdminDashboard } from './pages/admin-dashboard';
 import { MobileInstallPage } from './pages/mobile-install';
 import { SettingsPage } from './pages/settings';
+import { WikiViewPage } from './pages/wiki-view';
 import { usePlatform } from './hooks/use-platform';
 import { isDismissalActive, DISMISSED_KEY } from './components/pwa/install-prompt';
 
@@ -52,7 +53,11 @@ function App() {
   const { user, logout, loading } = useAuth();
 
   // Core Layout State
-  const [activeView, setActiveView] = useState<'board' | 'settings' | 'pwa' | 'admin'>('board');
+  const [activeView, setActiveView] = useState<'board' | 'settings' | 'pwa' | 'admin' | 'wiki'>(
+    'board',
+  );
+  // Default customer ID for wiki view — shows most-recently-viewed or a placeholder.
+  const [wikiCustomerId] = useState<string>('demo-customer');
 
   if (loading) {
     return (
@@ -94,6 +99,14 @@ function App() {
               title="PWA Demo"
             >
               <Smartphone size={20} strokeWidth={2.5} />
+            </button>
+            <button
+              onClick={() => setActiveView('wiki')}
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'wiki' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+              title="Wiki"
+              data-testid="nav-wiki"
+            >
+              <BookOpen size={20} strokeWidth={2.5} />
             </button>
             {user.isSuperadmin && (
               <button
@@ -145,6 +158,7 @@ function App() {
           <div className="flex-1 overflow-hidden overflow-y-auto">
             {activeView === 'board' && <TaskListView />}
             {activeView === 'pwa' && <PwaDemoPage />}
+            {activeView === 'wiki' && <WikiViewPage customerId={wikiCustomerId} />}
             {activeView === 'admin' && user.isSuperadmin && <AdminDashboard />}
             {activeView === 'admin' && !user.isSuperadmin && (
               <div className="p-8 text-zinc-400 text-sm">

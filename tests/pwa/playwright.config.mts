@@ -22,7 +22,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'bun run dev',
+    command: process.env.CI ? 'bun run db:migrate && bun run scripts/dev-start.ts' : 'bun run dev',
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
