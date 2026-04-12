@@ -800,3 +800,61 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ============================================================================
+-- Annotation threads (issue #63) — inline anchored thread storage
+-- ============================================================================
+--
+-- Stores annotation threads created by RMs on wiki page versions.
+-- Each thread is anchored to a text passage via a character-offset anchor
+-- (start_offset, end_offset) and a quoted_text excerpt for re-anchoring
+-- after minor edits (fuzzy match).
+--
+-- wiki_version_id: FK to wiki_page_versions.id — scope threads to a version.
+-- anchor_text:     The selected text excerpt at thread creation time.
+--                  Used for fuzzy re-anchoring when the version's content changes.
+-- start_offset:    Character offset of the selection start in the version content.
+-- end_offset:      Character offset of the selection end in the version content.
+-- body:            Initial comment text.
+-- created_by:      User ID of the RM who opened the thread.
+-- resolved:        True when the thread has been marked resolved.
+-- resolved_by:     User ID of the actor who resolved it.
+-- resolved_at:     Timestamp of resolution.
+--
+-- Replies are stored in annotation_replies (separate table for clean pagination).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS annotation_threads (
+  id               TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  wiki_version_id  TEXT NOT NULL REFERENCES wiki_page_versions(id) ON DELETE CASCADE,
+  anchor_text      TEXT NOT NULL,
+  start_offset     INTEGER NOT NULL,
+  end_offset       INTEGER NOT NULL,
+  body             TEXT NOT NULL,
+  created_by       TEXT NOT NULL,
+  resolved         BOOLEAN NOT NULL DEFAULT false,
+  resolved_by      TEXT,
+  resolved_at      TIMESTAMP WITH TIME ZONE,
+  created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotation_threads_wiki_version_id
+  ON annotation_threads (wiki_version_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_threads_created_by
+  ON annotation_threads (created_by);
+
+-- Replies to annotation threads.
+-- Each reply belongs to exactly one thread.
+CREATE TABLE IF NOT EXISTS annotation_replies (
+  id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  thread_id  TEXT NOT NULL REFERENCES annotation_threads(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotation_replies_thread_id
+  ON annotation_replies (thread_id);
+
+INSERT INTO _schema_version (migration) VALUES ('annotation-threads-001')
+  ON CONFLICT (migration) DO NOTHING;

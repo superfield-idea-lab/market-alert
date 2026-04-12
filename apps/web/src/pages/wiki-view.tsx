@@ -29,6 +29,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { PendingDraftsBadge } from '../components/PendingDraftsBadge';
+import { WikiRender } from '../components/WikiRender';
+import { AnnotationSidebar } from '../components/AnnotationThread';
+import type { NewThreadAnchor, AnnotationThread } from '../components/AnnotationThread';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -258,6 +261,8 @@ export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElem
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingAnchor, setPendingAnchor] = useState<NewThreadAnchor | null>(null);
+  const [threads, setThreads] = useState<AnnotationThread[]>([]);
 
   // Fetch version list on mount or when customerId changes.
   useEffect(() => {
@@ -340,19 +345,54 @@ export function WikiViewPage({ customerId }: WikiViewPageProps): React.ReactElem
       </aside>
 
       {/* Content area */}
-      <main className="flex-1 overflow-y-auto bg-white">
-        {selectedVersion ? (
-          <WikiMarkdownRenderer
-            content={selectedVersion.content}
-            customerId={customerId}
-            versionId={selectedVersion.id}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-zinc-400 text-sm">
-            {versions.length === 0
-              ? 'No versions found for this customer.'
-              : 'Select a version to view its content.'}
-          </div>
+      <main className="flex-1 flex overflow-hidden bg-white">
+        {/* Wiki render area */}
+        <div className="flex-1 overflow-y-auto">
+          {selectedVersion ? (
+            <WikiRender
+              version={{
+                id: selectedVersion.id,
+                content: selectedVersion.content,
+                state: selectedVersion.published ? 'PUBLISHED' : 'AWAITING_REVIEW',
+                wiki_page_id: null,
+                tenant_id: null,
+                created_at: selectedVersion.created_at,
+                updated_at: selectedVersion.created_at,
+              }}
+              customerId={customerId}
+              className="p-4"
+              onTextSelected={setPendingAnchor}
+              threads={threads}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-zinc-400 text-sm">
+              {versions.length === 0
+                ? 'No versions found for this customer.'
+                : 'Select a version to view its content.'}
+            </div>
+          )}
+        </div>
+
+        {/* Annotation sidebar — only shown when a version is selected */}
+        {selectedVersion && (
+          <aside
+            data-testid="annotation-sidebar-panel"
+            className="w-64 shrink-0 border-l border-zinc-200 bg-zinc-50 overflow-y-auto"
+          >
+            <div className="px-3 py-2.5 border-b border-zinc-200">
+              <h2 className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
+                Comments
+              </h2>
+            </div>
+            <AnnotationSidebar
+              customerId={customerId}
+              versionId={selectedVersion.id}
+              content={selectedVersion.content}
+              pendingAnchor={pendingAnchor}
+              onPendingAnchorCleared={() => setPendingAnchor(null)}
+              onThreadsChange={setThreads}
+            />
+          </aside>
         )}
       </main>
     </div>

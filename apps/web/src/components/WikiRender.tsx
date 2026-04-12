@@ -56,6 +56,7 @@ import {
   type CitationHoverState,
   type CitationResolution,
 } from './CitationHoverPopover';
+import type { NewThreadAnchor, AnnotationThread } from './AnnotationThread';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -83,6 +84,17 @@ export interface WikiRenderProps {
   onCitationsReady?: (citations: CitationMarker[]) => void;
   /** Optional extra CSS class names for the outer `<article>` element. */
   className?: string;
+  /**
+   * Optional callback invoked when the user selects text, providing the
+   * selection anchor data needed to open a new annotation thread form.
+   * When omitted, text selection does not trigger any annotation UI.
+   */
+  onTextSelected?: (anchor: NewThreadAnchor) => void;
+  /**
+   * Current annotation threads for the rendered version.
+   * When provided, anchor highlights are rendered over the text.
+   */
+  threads?: AnnotationThread[];
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +116,8 @@ export function WikiRender({
   onCitationClick,
   onCitationsReady,
   className,
+  onTextSelected,
+  threads,
 }: WikiRenderProps): React.ReactElement {
   const containerRef = useRef<HTMLElement>(null);
 
@@ -174,6 +188,70 @@ export function WikiRender({
   const closePopover = useCallback(() => {
     setHoverState({ status: 'idle' });
   }, []);
+
+  // ── Text-selection → annotation anchor ───────────────────────────────────
+  // When the user lifts the mouse inside the article, check whether there is a
+  // non-empty selection that falls inside the container.  If so, invoke
+  // onTextSelected with the anchor data so the parent can open the new-thread
+  // form.  Character offsets are computed against the raw version content so
+  // they remain stable for storage and fuzzy re-anchoring.
+  useEffect(() => {
+    if (!onTextSelected) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    function handleMouseUp() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+
+      const range = sel.getRangeAt(0);
+      const selectedText = sel.toString().trim();
+      if (!selectedText) return;
+
+      // Confirm the selection is inside our article.
+      if (!container!.contains(range.commonAncestorContainer)) return;
+
+      // Compute character offsets within the raw content string by counting
+      // the text content of nodes up to the selection boundaries.
+      // This is an approximation: we walk the rendered text nodes in document
+      // order and accumulate lengths until we reach the start/end containers.
+      function computeOffset(root: HTMLElement, targetNode: Node, targetOffset: number): number {
+        let total = 0;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node: Node | null = walker.nextNode();
+        while (node) {
+          if (node === targetNode) {
+            return total + targetOffset;
+          }
+          total += (node.textContent ?? '').length;
+          node = walker.nextNode();
+        }
+        return total + targetOffset;
+      }
+
+      const startOffset = computeOffset(container!, range.startContainer, range.startOffset);
+      const endOffset = computeOffset(container!, range.endContainer, range.endOffset);
+
+      if (endOffset <= startOffset) return;
+
+      const rect = range.getBoundingClientRect();
+      onTextSelected!({
+        text: selectedText,
+        startOffset,
+        endOffset,
+        rect,
+      });
+    }
+
+    container.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      container.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [onTextSelected]);
+
+  // Suppress unused-variable warning when threads prop is not yet consumed
+  // by a visual highlight layer (that is a future enhancement beyond this issue).
+  void threads;
 
   // Attach delegated mouseover, click, and touch listeners for citation markers.
   // Touch events are handled separately so that tap interactions on mobile

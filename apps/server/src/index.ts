@@ -57,6 +57,7 @@ import {
 } from './api/transcript-ingestion';
 import { handleTranscriptionRequest } from './api/transcription';
 import { handleAnnotationsRequest } from './api/annotations';
+import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -323,6 +324,17 @@ export default {
     if (url.pathname.startsWith('/api/wiki')) {
       const wikiRes = await handleWikiRequest(req, url, appState);
       if (wikiRes) return withTrace(wikiRes);
+    }
+
+    // Annotation threads — inline anchored comment threads on wiki page versions (issue #63).
+    // GET    /api/wiki/pages/:cId/versions/:vId/annotations            — list threads
+    // POST   /api/wiki/pages/:cId/versions/:vId/annotations            — create thread
+    // POST   /api/wiki/pages/:cId/versions/:vId/annotations/:tId/replies — post reply
+    // PATCH  /api/wiki/pages/:cId/versions/:vId/annotations/:tId      — resolve/unresolve
+    // Must be checked BEFORE the generic /api/wiki/pages handler.
+    if (url.pathname.includes('/annotations')) {
+      const annotationRes = await handleAnnotationThreadsRequest(req, url, appState);
+      if (annotationRes) return withTrace(annotationRes);
     }
 
     // Read-only wiki page view + version picker + citation hover (issue #45).
