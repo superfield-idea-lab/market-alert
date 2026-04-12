@@ -16,6 +16,7 @@
     "core": "workspace:*",
     "croner": "^10.0.1",
     "db": "workspace:*",
+    "embedding": "workspace:*",
     "rss-parser": "^3.13.0"
   }
 }

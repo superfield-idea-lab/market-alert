@@ -605,7 +605,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_votes_approver_id
   ON approval_votes (approver_id);
 
 -- ---------------------------------------------------------------------------
--- Wiki page versions (issue #39) — autolearn draft output
+-- Wiki page versions (issue #39, #44) — autolearn draft output
 --
 -- Stores versioned drafts of wiki pages written by the autolearn worker.
 -- All worker-written rows land in 'draft' state.  Publication (moving to
@@ -640,6 +640,41 @@ CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_dept_customer
   ON wiki_page_versions (dept, customer);
 CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_state
   ON wiki_page_versions (state);
+
+-- ============================================================================
+-- wiki_page_versions embedding column (issue #44, PRD §7)
+-- ============================================================================
+-- Guarded by pgvector availability — mirrors the corpus_chunks pattern.
+--
+-- When the vector extension IS available this block:
+--   - Adds a vector(768) embedding column to wiki_page_versions
+--   - Creates an HNSW index for draft similarity search by the autolearn worker
+--
+-- PRD §7 compensating controls (same as corpus_chunks):
+--   1. Audit:         every similarity query emits an audit event before data flows.
+--   2. Rate limit:    per-tenant query rate enforced in the application layer.
+--   3. No public API: the embedding column is never serialised into any API response.
+--   4. Tenant scoping: (dept, customer) columns used as tenant key for all queries.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    EXECUTE $exec$
+      ALTER TABLE wiki_page_versions
+        ADD COLUMN IF NOT EXISTS embedding vector(768)
+    $exec$;
+
+    EXECUTE $exec$
+      CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_embedding_hnsw
+          ON wiki_page_versions
+          USING hnsw (embedding vector_cosine_ops)
+          WITH (m = 16, ef_construction = 64)
+    $exec$;
+
+    INSERT INTO _schema_version (migration) VALUES ('wiki-version-embed-001')
+      ON CONFLICT (migration) DO NOTHING;
+  END IF;
+END;
+$$;
 
 -- ============================================================================
 -- Autolearn jobs — PRD §4.3 state machine (issue #42)

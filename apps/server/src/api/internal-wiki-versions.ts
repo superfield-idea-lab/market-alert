@@ -14,8 +14,11 @@
  *   all writes go through this API layer.
  * - An audit event is emitted for every accepted write, before the DB write
  *   commits.
+ * - After draft creation, the content is embedded via the Phase 2 embedding
+ *   abstraction and the vector stored in the same row (issue #44, PRD §7).
+ *   The embedding column is never serialised into any API response.
  *
- * Issue: #39
+ * Issues: #39, #44
  */
 
 import type { AppState } from '../index';
@@ -23,6 +26,7 @@ import { getCorsHeaders } from './auth';
 import { verifyWorkerToken } from '../auth/worker-token';
 import { emitAuditEvent } from '../policies/audit-service';
 import { makeJson } from '../lib/response';
+import { getEmbeddingService } from 'embedding';
 
 /** Fields required in the POST body. */
 interface WikiVersionPayload {
@@ -124,6 +128,29 @@ export async function handleInternalWikiVersionsRequest(
   `;
 
   const version = rows[0];
+
+  // ── Embed the draft content and store the vector (issue #44, PRD §7) ─────
+  // Embeddings reuse the Phase 2 abstraction (getEmbeddingService).
+  // The embedding column is only stored — it is never serialised in the
+  // response body (compensating control 3: no public API exposure).
+  // Embedding failure is non-fatal: the draft is already persisted and the
+  // worker can retry or the next autolearn run will pick up the content.
+  try {
+    const embeddingSvc = getEmbeddingService();
+    const [vector] = await embeddingSvc.embed([content]);
+    if (vector && vector.length > 0) {
+      const vectorLiteral = `[${vector.join(',')}]`;
+      await sql`
+        UPDATE wiki_page_versions
+        SET embedding = ${vectorLiteral}::vector
+        WHERE id = ${version.id}
+      `;
+    }
+  } catch (embedErr) {
+    // Log but do not fail the request — draft row is already committed.
+    console.error('[wiki-versions] embedding failed for version', version.id, embedErr);
+  }
+
   return json(
     {
       id: version.id,
@@ -134,6 +161,7 @@ export async function handleInternalWikiVersionsRequest(
       created_by: tokenPayload.sub,
       source_task: source_task ?? null,
       created_at: version.created_at,
+      // embedding is intentionally omitted — PRD §7 compensating control 3
     },
     201,
   );
