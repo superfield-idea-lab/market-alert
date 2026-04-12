@@ -45,6 +45,7 @@ import {
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
+import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import { handleInternalRelationsRequest } from './api/internal-relations';
@@ -412,6 +413,14 @@ export default {
     if (url.pathname.startsWith('/api/bdm/')) {
       const bdmRes = await handleBdmCampaignRequest(req, url, appState);
       if (bdmRes) return withTrace(bdmRes);
+    }
+
+    // Campaign analysis — BDM picker + anonymised chunk query (issue #74).
+    // GET /api/campaign/entities?type=asset_manager|fund
+    // GET /api/campaign/chunks?entity_id=<id>
+    if (url.pathname.startsWith('/api/campaign')) {
+      const campaignRes = await handleCampaignAnalysisRequest(req, url, appState);
+      if (campaignRes) return withTrace(campaignRes);
     }
 
     // Internal worker token mint + pod-terminate invalidation (issue #36).
