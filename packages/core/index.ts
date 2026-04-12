@@ -8,4 +8,5 @@ export * from './encryption';
 export * from './scrub-pii';
 export * from './secrets';
 export * from './pii-tokeniser';
+export * from './chunker';
 export const coreHelper = () => true;

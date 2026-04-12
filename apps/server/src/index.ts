@@ -44,6 +44,7 @@ import {
 } from './api/test-session';
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
+import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -66,6 +67,11 @@ try {
 // and persist each to entity_types via an idempotent INSERT … ON CONFLICT DO NOTHING.
 // Must run after migrate() so the entity_types table exists.
 await registerPhase1EntityTypesWithDb(sql);
+
+// Register the CorpusChunk entity type for Phase 2 chunking.
+await registerCorpusChunkEntityType().catch((err) =>
+  console.error('[corpus-chunk] Entity type registration failed:', err),
+);
 
 // Purge any already-expired revocation rows left from a previous run, then
 // schedule the recurring 24-hour cleanup. The timer is unref'd so it does not
@@ -286,6 +292,11 @@ export default {
     if (url.pathname.startsWith('/internal/ingestion')) {
       const ingestionRes = await handleIngestionRequest(req, url, appState);
       if (ingestionRes) return withTrace(ingestionRes);
+    }
+
+    if (url.pathname.startsWith('/api/corpus-chunks')) {
+      const corpusRes = await handleCorpusChunksRequest(req, url, appState);
+      if (corpusRes) return withTrace(corpusRes);
     }
 
     // Serve static assets — path is relative to this file, not process cwd

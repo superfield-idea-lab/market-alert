@@ -9,6 +9,7 @@
  *  - secrets.test.ts             — packages/core/secrets abstraction layer (issue #11)
  *  - fixture-recorder.test.ts    — golden fixture recorder + MSW handler factory (issue #98)
  *  - linkerd-manifests.test.ts   — Linkerd mTLS manifest structure validation (issue #88)
+ *  - chunker.test.ts             — sentence-boundary max-tokens chunker (issue #29)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -17,6 +18,11 @@ import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      core: resolve(import.meta.dirname, '../../packages/core/index.ts'),
+    },
+  },
   test: {
     name: 'scaffold',
     include: [
@@ -24,6 +30,7 @@ export default defineConfig({
       'secrets.test.ts',
       'fixture-recorder.test.ts',
       'linkerd-manifests.test.ts',
+      'chunker.test.ts',
     ],
     root: resolve(import.meta.dirname),
   },

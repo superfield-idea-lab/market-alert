@@ -8,7 +8,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "core": ["./packages/core/index.ts"],
+      "db": ["./packages/db/index.ts"],
+      "db/*": ["./packages/db/*.ts"]
+    }
   },
   "exclude": ["node_modules", "apps/web/tests/component", "apps/web/src/sw.ts", "studio"]
 }
