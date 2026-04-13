@@ -5,6 +5,7 @@ export interface User {
   username: string;
   isSuperadmin?: boolean;
   isCrmAdmin?: boolean;
+  isComplianceOfficer?: boolean;
 }
 
 interface AuthContextType {

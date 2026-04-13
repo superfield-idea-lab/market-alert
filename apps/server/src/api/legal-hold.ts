@@ -253,6 +253,11 @@ export async function handleLegalHoldRequest(
   // -------------------------------------------------------------------------
   const holdMatch = url.pathname.match(/^\/api\/legal-holds\/([^/]+)$/);
   if (req.method === 'GET' && holdMatch) {
+    const actorRole = await resolveActorRole(sql, user.id);
+    if (!isSuperuser(user.id) && actorRole !== 'compliance_officer') {
+      return json({ error: 'Forbidden: compliance_officer role required' }, 403);
+    }
+
     const holdId = holdMatch[1];
     const hold = await getLegalHold(sql, holdId);
     if (!hold) return json({ error: 'Not found' }, 404);
@@ -310,6 +315,11 @@ export async function handleLegalHoldRequest(
   // GET /api/legal-holds
   // -------------------------------------------------------------------------
   if (req.method === 'GET' && url.pathname === '/api/legal-holds') {
+    const actorRole = await resolveActorRole(sql, user.id);
+    if (!isSuperuser(user.id) && actorRole !== 'compliance_officer') {
+      return json({ error: 'Forbidden: compliance_officer role required' }, 403);
+    }
+
     const tenantId = url.searchParams.get('tenantId') ?? undefined;
     const statusParam = url.searchParams.get('status') ?? undefined;
     const limitParam = url.searchParams.get('limit');

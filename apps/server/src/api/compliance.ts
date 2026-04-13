@@ -38,6 +38,16 @@ import {
 } from 'db/retention-engine';
 import { buildEDiscoveryBundle, EDiscoveryInsufficientRoleError } from 'db/e-discovery';
 
+async function resolveActorRole(sql: AppState['sql'], userId: string): Promise<string | null> {
+  const actorRows = await sql<{ properties: { role?: string } }[]>`
+    SELECT properties
+    FROM entities
+    WHERE id = ${userId} AND type = 'user'
+    LIMIT 1
+  `;
+  return actorRows[0]?.properties?.role ?? null;
+}
+
 export async function handleComplianceRequest(
   req: Request,
   url: URL,
@@ -56,6 +66,10 @@ export async function handleComplianceRequest(
   if (req.method === 'GET' && url.pathname === '/api/compliance/retention-policies') {
     const user = await getAuthenticatedUser(req);
     if (!user) return json({ error: 'Unauthorized' }, 401);
+    const actorRole = await resolveActorRole(sql, user.id);
+    if (!isSuperuser(user.id) && actorRole !== 'compliance_officer') {
+      return json({ error: 'Forbidden: compliance_officer role required' }, 403);
+    }
 
     const policies = await listRetentionPolicies(sql);
     return json({ policies });
@@ -214,6 +228,47 @@ export async function handleComplianceRequest(
     }
 
     return json(bundle, 200);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/compliance/audit
+  // ---------------------------------------------------------------------------
+
+  if (req.method === 'GET' && url.pathname === '/api/compliance/audit') {
+    const user = await getAuthenticatedUser(req);
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+
+    const actorRole = await resolveActorRole(sql, user.id);
+    if (!isSuperuser(user.id) && actorRole !== 'compliance_officer') {
+      return json({ error: 'Forbidden: compliance_officer role required' }, 403);
+    }
+
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? '50') || 50, 1), 200);
+    const offset = Math.max(Number(url.searchParams.get('offset') ?? '0') || 0, 0);
+    const action = url.searchParams.get('action');
+    const actor = url.searchParams.get('actor');
+
+    const rows = await appState.auditSql<
+      {
+        id: string;
+        actor_id: string;
+        action: string;
+        entity_type: string;
+        entity_id: string;
+        before: Record<string, unknown> | null;
+        after: Record<string, unknown> | null;
+        ts: string;
+      }[]
+    >`
+      SELECT id, actor_id, action, entity_type, entity_id, before, after, ts::text AS ts
+      FROM audit_events
+      WHERE (${action}::text IS NULL OR action = ${action})
+        AND (${actor}::text IS NULL OR actor_id = ${actor})
+      ORDER BY ts DESC, id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    return json({ events: rows, limit, offset });
   }
 
   return null;

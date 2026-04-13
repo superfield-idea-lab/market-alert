@@ -14,6 +14,7 @@ const ROLE_NAMES = {
   app: 'app_rw',
   audit: 'audit_w',
   analytics: 'analytics_w',
+  compliance: 'compliance_officer',
   /** IdentityDictionary service role — read/write on kb_dictionary only. */
   dictionary: 'dict_rw',
 } as const;
@@ -103,6 +104,7 @@ export interface InitRemoteConfig {
     app: string;
     audit: string;
     analytics: string;
+    complianceOfficer: string;
     /** IdentityDictionary service role password. */
     dictionary: string;
     /** Per-type agent role passwords keyed by agent type (e.g. coding, analysis) */
@@ -175,6 +177,7 @@ export function loadInitRemoteConfig(env: NodeJS.ProcessEnv = process.env): Init
       app: env.APP_RW_PASSWORD!,
       audit: env.AUDIT_W_PASSWORD!,
       analytics: env.ANALYTICS_W_PASSWORD!,
+      complianceOfficer: env.COMPLIANCE_OFFICER_PASSWORD ?? env.APP_RW_PASSWORD!,
       dictionary: env.DICT_RW_PASSWORD!,
       agents,
     },
@@ -669,6 +672,66 @@ CREATE POLICY wiki_page_versions_bdm_block
 `);
 }
 
+/**
+ * Configure the Compliance Officer role.
+ *
+ * The role can read compliance surfaces (audit, legal holds, retention
+ * metadata) but customer-content tables are blocked by RESTRICTIVE RLS.
+ *
+ * The role is a shared login-less privilege group that integration tests can
+ * assume with SET ROLE when they need to prove the database boundary.
+ */
+async function configureComplianceOfficerRole(
+  appAdmin: ReturnType<typeof makePool>,
+  auditAdmin: ReturnType<typeof makePool>,
+): Promise<void> {
+  await appAdmin.unsafe(`
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${ROLE_NAMES.compliance}') THEN
+    CREATE ROLE ${quoteIdentifier(ROLE_NAMES.compliance)} NOLOGIN;
+  END IF;
+END
+$$;
+`);
+
+  await appAdmin.unsafe(`
+GRANT ${quoteIdentifier(ROLE_NAMES.compliance)} TO ${quoteIdentifier(ROLE_NAMES.app)};
+GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.compliance)};
+GRANT SELECT ON TABLE
+  entities,
+  relations,
+  wiki_page_versions,
+  legal_holds,
+  legal_hold_removal_requests,
+  tenant_retention_policies,
+  tenant_retention_policy_assignments,
+  retention_policies,
+  retention_policy_entity_overrides
+TO ${quoteIdentifier(ROLE_NAMES.compliance)};
+`);
+
+  await auditAdmin.unsafe(`
+GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.compliance)};
+GRANT SELECT ON TABLE audit_events TO ${quoteIdentifier(ROLE_NAMES.compliance)};
+`);
+
+  const complianceBlockedTables = ['entities', 'relations', 'wiki_page_versions'] as const;
+  for (const tableName of complianceBlockedTables) {
+    await appAdmin.unsafe(
+      `DROP POLICY IF EXISTS ${quoteIdentifier(`${tableName}_compliance_block`)} ON ${quoteIdentifier(tableName)}`,
+    );
+    await appAdmin.unsafe(`
+CREATE POLICY ${quoteIdentifier(`${tableName}_compliance_block`)}
+  ON ${quoteIdentifier(tableName)}
+  AS RESTRICTIVE
+  FOR SELECT
+  TO ${quoteIdentifier(ROLE_NAMES.compliance)}
+  USING (false)
+`);
+  }
+}
+
 async function verifyRole(
   admin: ReturnType<typeof makePool>,
   roleName: string,
@@ -901,6 +964,27 @@ async function verifyInitRemote(
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'SELECT'),
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'UPDATE'),
     verifyTableGrant(dictAdmin, 'identity_tokens', ROLE_NAMES.dictionary, 'DELETE'),
+    verifyRole(admin, ROLE_NAMES.compliance),
+    verifyTableGrant(appAdmin, 'entities', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(appAdmin, 'relations', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(appAdmin, 'wiki_page_versions', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(appAdmin, 'legal_holds', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(appAdmin, 'legal_hold_removal_requests', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(appAdmin, 'tenant_retention_policies', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(
+      appAdmin,
+      'tenant_retention_policy_assignments',
+      ROLE_NAMES.compliance,
+      'SELECT',
+    ),
+    verifyTableGrant(appAdmin, 'retention_policies', ROLE_NAMES.compliance, 'SELECT'),
+    verifyTableGrant(
+      appAdmin,
+      'retention_policy_entity_overrides',
+      ROLE_NAMES.compliance,
+      'SELECT',
+    ),
+    verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.compliance, 'SELECT'),
   ]);
 
   const failures = checks.filter((value): value is string => value !== null);
@@ -936,6 +1020,17 @@ async function verifyInitRemote(
     'wiki_page_versions_bdm_block',
   );
   if (bdmWikiCheck !== null) failures.push(bdmWikiCheck);
+
+  // Verify Compliance Officer RLS blocks on customer content
+  const compliancePolicies = [
+    ['entities', 'entities_compliance_block'],
+    ['relations', 'relations_compliance_block'],
+    ['wiki_page_versions', 'wiki_page_versions_compliance_block'],
+  ] as const;
+  for (const [table, policy] of compliancePolicies) {
+    const policyCheck = await verifyRlsPolicy(appAdmin, table, policy);
+    if (policyCheck !== null) failures.push(policyCheck);
+  }
 
   if (failures.length > 0) {
     throw new Error(`Genesis verification failed:\n- ${failures.join('\n- ')}`);
@@ -1060,6 +1155,7 @@ REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAME
     await configureAgentWorkerRoles(admin, appAdmin, config);
     await configureCustomerScopedRls(appAdmin);
     await configureBdmRls(appAdmin);
+    await configureComplianceOfficerRole(appAdmin, auditAdmin);
 
     await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
 

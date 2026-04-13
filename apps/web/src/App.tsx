@@ -81,7 +81,8 @@ function App() {
     return <Login />;
   }
 
-  const canAccessAdmin = user.isSuperadmin === true || user.isCrmAdmin === true;
+  const canAccessAdmin =
+    user.isSuperadmin === true || user.isCrmAdmin === true || user.isComplianceOfficer === true;
 
   return (
     <div className="flex h-screen w-full bg-zinc-50 font-sans overflow-hidden text-zinc-900">

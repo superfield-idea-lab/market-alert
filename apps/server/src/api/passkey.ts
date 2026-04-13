@@ -336,6 +336,7 @@ export async function handlePasskeyRequest(
       const access = await getUserAccessFlags(userId, sql).catch(() => ({
         isSuperadmin: false,
         isCrmAdmin: false,
+        isComplianceOfficer: false,
       }));
       const regRes = new Response(
         JSON.stringify({
@@ -346,6 +347,7 @@ export async function handlePasskeyRequest(
             username,
             isSuperadmin: access.isSuperadmin,
             isCrmAdmin: access.isCrmAdmin,
+            isComplianceOfficer: access.isComplianceOfficer,
           },
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
@@ -587,6 +589,7 @@ export async function handlePasskeyRequest(
       const access = await getUserAccessFlags(cred.user_id, sql).catch(() => ({
         isSuperadmin: false,
         isCrmAdmin: false,
+        isComplianceOfficer: false,
       }));
       const loginRes = new Response(
         JSON.stringify({
@@ -595,6 +598,7 @@ export async function handlePasskeyRequest(
             username: cred.username,
             isSuperadmin: access.isSuperadmin,
             isCrmAdmin: access.isCrmAdmin,
+            isComplianceOfficer: access.isComplianceOfficer,
           },
         }),
         {

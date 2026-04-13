@@ -12,12 +12,13 @@ other tiers.
 
 ## Databases and Roles
 
-| Database        | Role          | Privileges                                           | Key Domain                          |
-| --------------- | ------------- | ---------------------------------------------------- | ----------------------------------- |
-| `kb_app`        | `app_rw`      | SELECT, INSERT, UPDATE, DELETE on all                | `auth-key`, `crm-key`, `corpus-key` |
-| `kb_audit`      | `audit_w`     | INSERT, SELECT on `audit_log`; UPDATE(`status`) only | `audit-key`                         |
-| `kb_analytics`  | `analytics_w` | INSERT, SELECT on analytics tables                   | (none — Phase 7)                    |
-| `kb_dictionary` | `dict_rw`     | SELECT, INSERT, UPDATE, DELETE on `identity_tokens`  | `identity-key`                      |
+| Database        | Role                 | Privileges                                                       | Key Domain                          |
+| --------------- | -------------------- | ---------------------------------------------------------------- | ----------------------------------- |
+| `kb_app`        | `app_rw`             | SELECT, INSERT, UPDATE, DELETE on all                            | `auth-key`, `crm-key`, `corpus-key` |
+| `kb_audit`      | `audit_w`            | INSERT, SELECT on `audit_log`; UPDATE(`status`) only             | `audit-key`                         |
+| `kb_analytics`  | `analytics_w`        | INSERT, SELECT on analytics tables                               | (none — Phase 7)                    |
+| `kb_dictionary` | `dict_rw`            | SELECT, INSERT, UPDATE, DELETE on `identity_tokens`              | `identity-key`                      |
+| `kb_app`        | `compliance_officer` | SELECT on compliance tables; RESTRICTIVE RLS on customer content | n/a                                 |
 
 ## Connection Pools
 

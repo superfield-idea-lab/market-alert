@@ -163,6 +163,7 @@ export async function handleAuthRequest(
     const access = await getUserAccessFlags(user.id, appState.sql).catch(() => ({
       isSuperadmin: isSuperuser(user.id),
       isCrmAdmin: false,
+      isComplianceOfficer: false,
       role: null,
     }));
     return new Response(
@@ -171,6 +172,7 @@ export async function handleAuthRequest(
           ...user,
           isSuperadmin: access.isSuperadmin,
           isCrmAdmin: access.isCrmAdmin,
+          isComplianceOfficer: access.isComplianceOfficer,
         },
       }),
       {
