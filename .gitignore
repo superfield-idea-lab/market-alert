@@ -47,4 +47,5 @@ coverage/
 
 # Kubernetes secrets (never commit real credentials)
 k8s/secrets.yaml
+.k3d-kubeconfig
 .gemini/

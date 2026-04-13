@@ -10,6 +10,13 @@ environment.
   - `bun run scripts/dev-k3d.ts`
   - `bun run db:migrate`
   - `bun run scripts/dev-start.ts`
+- `bun run demo` provisions or reuses a k3d cluster, bootstraps the in-cluster
+  database, builds the current local release image, deploys it, waits for
+  `/health/live`, and then offers an interactive rebuild/redeploy loop.
+- `bun run demo:status` prints whether the demo cluster exists.
+- `bun run demo:delete` tears down the demo cluster.
+- `CALYPSO_DEMO_DB_PORT=<port> bun run demo` overrides the host-side Postgres
+  load balancer port when `5432` is already occupied.
 - `bun run dev:cluster` runs only the k3d bootstrap step.
 - `bun run dev:cluster:status` prints whether the local k3d cluster exists.
 - `bun run dev:cluster:delete` tears down the local k3d cluster.
@@ -56,6 +63,26 @@ If `5174` is occupied, the script searches upward for the first free port and lo
 fallback port it selected.
 
 ## Demo vs Production
+
+## Bun Demo Runtime
+
+`scripts/demo.ts` is the cluster-backed Bun demo entry point for the latest local
+application code. Its lifecycle is distinct from `bun run dev`:
+
+1. Check whether a k3d cluster named `calypso-demo` already exists.
+2. Create the cluster if missing and write kubeconfig to `.k3d-kubeconfig`.
+   The host-side Postgres mapping defaults to `5432` and can be overridden with
+   `CALYPSO_DEMO_DB_PORT`.
+3. Apply `k8s/dev/dev-secrets.yaml` and `k8s/dev/postgres.yaml`.
+4. Wait for `statefulset/calypso-dev-postgres` to roll out.
+5. Run `packages/db/init-remote.ts` against the host-mapped Postgres instance.
+6. Build `Dockerfile.release` from the current workspace and import the image into k3d.
+7. Render demo secrets plus `k8s/app.yaml`, apply them, and wait for `deployment/calypso-app`.
+8. Port-forward `deployment/calypso-app` to the local demo port and wait for `/health/live`.
+9. In an interactive terminal, prompt for Enter-to-redeploy or `q` to quit.
+
+`bun run demo --status` and `bun run demo --delete` only inspect or tear down the
+demo cluster. They do not rebuild the image or apply manifests.
 
 The local demo flow is k3d-based and uses the `k8s/dev/*` manifests:
 

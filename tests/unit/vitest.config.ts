@@ -30,6 +30,7 @@ export default defineConfig({
     include: [
       'scaffold.test.ts',
       'secrets.test.ts',
+      'demo-runtime.test.ts',
       'fixture-recorder.test.ts',
       'linkerd-manifests.test.ts',
       'chunker.test.ts',
