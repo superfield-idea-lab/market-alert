@@ -63,8 +63,7 @@ jobs:
   kms-aws-staging:
     name: AWS KMS staging — round-trip + key rotation
     runs-on: ubuntu-latest
-    # Only run when AWS credentials are available
-    if: ${{ vars.AWS_KMS_KEY_ID != '' || secrets.AWS_KMS_KEY_ID != '' }}
+    if: ${{ vars.AWS_KMS_KEY_ID != '' }}
     environment: staging
     steps:
       - uses: actions/checkout@v4
@@ -95,8 +94,7 @@ jobs:
   kms-vault-staging:
     name: Vault Transit staging — round-trip + key rotation
     runs-on: ubuntu-latest
-    # Only run when Vault credentials are available
-    if: ${{ vars.VAULT_ADDR != '' || secrets.VAULT_ADDR != '' }}
+    if: ${{ vars.VAULT_ADDR != '' }}
     environment: staging
     steps:
       - uses: actions/checkout@v4

@@ -1,8 +1,8 @@
 /**
  * @file api/compliance
  *
- * Compliance Officer API — retention policy management (issue #79) and
- * e-discovery export bundle (issue #84).
+ * Compliance Officer API — retention policy management (issue #79),
+ * e-discovery export bundle (issue #84), and SOC 2 evidence package (issue #92).
  *
  * GET  /api/compliance/retention-policies
  *   List all named retention policies in the catalogue with their entity-type
@@ -21,8 +21,17 @@
  *   Emits an e_discovery.export audit event.
  *   Returns the structured bundle as JSON.
  *
+ * GET /api/compliance/soc2-evidence
+ *   Assemble and return the SOC 2 Type II evidence package for the current
+ *   attestation period.
+ *   Query params:
+ *     periodStart — ISO-8601 start of attestation period (default: 12 months ago)
+ *     periodEnd   — ISO-8601 end of attestation period (default: now)
+ *   Auth: compliance_officer role or superuser.
+ *   Returns the structured evidence package as JSON.
+ *
  * Canonical docs: docs/PRD.md §7a, docs/implementation-plan-v1.md Phase 8
- * Related issues: #79, #84
+ * Related issues: #79, #84, #92
  */
 
 import type { AppState } from '../index';
@@ -37,7 +46,7 @@ import {
   UnknownRetentionPolicyError,
 } from 'db/retention-engine';
 import { buildEDiscoveryBundle, EDiscoveryInsufficientRoleError } from 'db/e-discovery';
-import { buildSoc2EvidenceBundle } from 'db/soc2-evidence';
+import { assembleSoc2EvidencePackage } from 'db/soc2-evidence';
 
 async function resolveActorRole(sql: AppState['sql'], userId: string): Promise<string | null> {
   const actorRows = await sql<{ properties: { role?: string } }[]>`
@@ -232,10 +241,10 @@ export async function handleComplianceRequest(
   }
 
   // ---------------------------------------------------------------------------
-  // GET /api/compliance/evidence
+  // GET /api/compliance/soc2-evidence
   // ---------------------------------------------------------------------------
 
-  if (req.method === 'GET' && url.pathname === '/api/compliance/evidence') {
+  if (req.method === 'GET' && url.pathname === '/api/compliance/soc2-evidence') {
     const user = await getAuthenticatedUser(req);
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
@@ -244,13 +253,31 @@ export async function handleComplianceRequest(
       return json({ error: 'Forbidden: compliance_officer role required' }, 403);
     }
 
-    const bundle = await buildSoc2EvidenceBundle(sql, {
-      actorId: user.id,
-      repoRoot: process.cwd(),
-      deploymentAuditPath: process.env.SOC2_DEPLOYMENT_AUDIT_PATH,
+    // Default attestation period: last 12 months.
+    const defaultEnd = new Date();
+    const defaultStart = new Date(defaultEnd);
+    defaultStart.setFullYear(defaultStart.getFullYear() - 1);
+
+    const periodStartParam = url.searchParams.get('periodStart');
+    const periodEndParam = url.searchParams.get('periodEnd');
+
+    const attestationPeriodStart = periodStartParam ?? defaultStart.toISOString();
+    const attestationPeriodEnd = periodEndParam ?? defaultEnd.toISOString();
+
+    // Validate ISO-8601 dates if provided.
+    if (periodStartParam && isNaN(new Date(periodStartParam).getTime())) {
+      return json({ error: 'periodStart must be a valid ISO-8601 timestamp' }, 400);
+    }
+    if (periodEndParam && isNaN(new Date(periodEndParam).getTime())) {
+      return json({ error: 'periodEnd must be a valid ISO-8601 timestamp' }, 400);
+    }
+
+    const evidencePackage = await assembleSoc2EvidencePackage(sql, appState.auditSql, {
+      attestationPeriodStart,
+      attestationPeriodEnd,
     });
 
-    return json(bundle, 200);
+    return json(evidencePackage, 200);
   }
 
   // ---------------------------------------------------------------------------
