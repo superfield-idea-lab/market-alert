@@ -37,6 +37,7 @@ import {
   UnknownRetentionPolicyError,
 } from 'db/retention-engine';
 import { buildEDiscoveryBundle, EDiscoveryInsufficientRoleError } from 'db/e-discovery';
+import { buildSoc2EvidenceBundle } from 'db/soc2-evidence';
 
 async function resolveActorRole(sql: AppState['sql'], userId: string): Promise<string | null> {
   const actorRows = await sql<{ properties: { role?: string } }[]>`
@@ -226,6 +227,28 @@ export async function handleComplianceRequest(
       }
       throw err;
     }
+
+    return json(bundle, 200);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/compliance/evidence
+  // ---------------------------------------------------------------------------
+
+  if (req.method === 'GET' && url.pathname === '/api/compliance/evidence') {
+    const user = await getAuthenticatedUser(req);
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+
+    const actorRole = await resolveActorRole(sql, user.id);
+    if (!isSuperuser(user.id) && actorRole !== 'compliance_officer') {
+      return json({ error: 'Forbidden: compliance_officer role required' }, 403);
+    }
+
+    const bundle = await buildSoc2EvidenceBundle(sql, {
+      actorId: user.id,
+      repoRoot: process.cwd(),
+      deploymentAuditPath: process.env.SOC2_DEPLOYMENT_AUDIT_PATH,
+    });
 
     return json(bundle, 200);
   }

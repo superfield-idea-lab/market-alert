@@ -15,6 +15,7 @@ import { registerDlqMonitorJob } from './jobs/dlq-monitor';
 import { registerFeatureFlagSchedulerJob } from './jobs/feature-flag-scheduler';
 import { registerAutolearnGardeningJob } from './jobs/autolearn-gardening';
 import { registerRetentionSchedulerJob } from './jobs/retention-scheduler';
+import { registerSoc2EvidenceCaptureJob } from './jobs/soc2-evidence-capture';
 
 let scheduler: CronScheduler | null = null;
 
@@ -39,6 +40,7 @@ export function startCronScheduler(): CronScheduler {
   registerFeatureFlagSchedulerJob(scheduler);
   registerAutolearnGardeningJob(scheduler);
   registerRetentionSchedulerJob(scheduler);
+  registerSoc2EvidenceCaptureJob(scheduler);
 
   scheduler.start();
   return scheduler;

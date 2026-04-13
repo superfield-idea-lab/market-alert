@@ -464,6 +464,17 @@ CREATE INDEX IF NOT EXISTS idx_business_journal_entity_id
 CREATE INDEX IF NOT EXISTS idx_business_journal_created_at
   ON business_journal (created_at);
 
+CREATE TABLE IF NOT EXISTS soc2_evidence_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artifact_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  captured_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_soc2_evidence_snapshots_type_captured_at
+  ON soc2_evidence_snapshots (artifact_type, captured_at DESC);
+
 -- Tenant retention policies (issue #33, Phase 2).
 -- Stores the default retention_class and legal_hold values for each tenant.
 -- Ingestion workers MUST look up this row before writing an Email or CorpusChunk.

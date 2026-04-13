@@ -25,6 +25,7 @@
     "./corpus-chunk-store": "./corpus-chunk-store.ts",
     "./email-ingestion-state-machine": "./email-ingestion-state-machine.ts",
     "./backup": "./backup.ts",
+    "./soc2-evidence": "./soc2-evidence.ts",
     "./worker-tokens": "./worker-tokens.ts",
     "./tenant-policies": "./tenant-policies.ts",
     "./tenant-config": "./tenant-config.ts",

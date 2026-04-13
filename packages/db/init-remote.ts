@@ -707,7 +707,8 @@ GRANT SELECT ON TABLE
   tenant_retention_policies,
   tenant_retention_policy_assignments,
   retention_policies,
-  retention_policy_entity_overrides
+  retention_policy_entity_overrides,
+  soc2_evidence_snapshots
 TO ${quoteIdentifier(ROLE_NAMES.compliance)};
 `);
 
@@ -984,6 +985,7 @@ async function verifyInitRemote(
       ROLE_NAMES.compliance,
       'SELECT',
     ),
+    verifyTableGrant(appAdmin, 'soc2_evidence_snapshots', ROLE_NAMES.compliance, 'SELECT'),
     verifyTableGrant(auditAdmin, 'audit_events', ROLE_NAMES.compliance, 'SELECT'),
   ]);
 
