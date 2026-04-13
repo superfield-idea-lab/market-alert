@@ -36,6 +36,7 @@
     "./hallucination-escalation": "./hallucination-escalation.ts",
     "./analytics-emitter": "./analytics-emitter.ts",
     "./retention-engine": "./retention-engine.ts",
+    "./retention-scheduler": "./retention-scheduler.ts",
     "./worm-mode": "./worm-mode.ts"
   },
   "peerDependencies": {

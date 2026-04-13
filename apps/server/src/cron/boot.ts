@@ -14,6 +14,7 @@ import { registerCodeCleanupJob } from './jobs/code-cleanup';
 import { registerDlqMonitorJob } from './jobs/dlq-monitor';
 import { registerFeatureFlagSchedulerJob } from './jobs/feature-flag-scheduler';
 import { registerAutolearnGardeningJob } from './jobs/autolearn-gardening';
+import { registerRetentionSchedulerJob } from './jobs/retention-scheduler';
 
 let scheduler: CronScheduler | null = null;
 
@@ -37,6 +38,7 @@ export function startCronScheduler(): CronScheduler {
   registerDlqMonitorJob(scheduler);
   registerFeatureFlagSchedulerJob(scheduler);
   registerAutolearnGardeningJob(scheduler);
+  registerRetentionSchedulerJob(scheduler);
 
   scheduler.start();
   return scheduler;
