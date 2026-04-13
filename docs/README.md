@@ -13,3 +13,4 @@ Product and engineering documentation for the autolearning knowledge base.
 - [Security architecture](./technical/security.md) — encryption, RLS, vector embedding risk, worker credential lifecycle
 - [Wiki editing architecture](./technical/md-file-editing.md) — how Claude CLI edits wiki content, Postgres schema, serving to PWA
 - [Database architecture](./technical/db-architecture.md) — schema, roles, RLS, encryption, vectors, task queue, migrations
+- [Running demo mode](./running-demo-mode.md) — k3d bootstrap, dev server startup, and local-vs-production lifecycle boundaries

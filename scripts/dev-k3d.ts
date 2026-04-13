@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * dev-k3d — Creates (or reuses) a local k3d cluster, builds and loads dev
- * images, applies the k8s/dev manifests, and waits for Postgres to be healthy.
+ * dev-k3d — Creates (or reuses) a local k3d cluster, applies the k8s/dev
+ * manifests, and waits for Postgres to be healthy.
  *
  * ENV-D-002: dev/CI/prod use the same container topology (k3d, not Docker Compose).
  * ENV-C-016: pnpm db:migrate is run as a separate step after the cluster is up,
