@@ -310,16 +310,11 @@ describe('runRetentionScheduler — TP-1 (eligibility and legal-hold)', () => {
   });
 
   test('scheduler does not delete an entity with no retention_class', async () => {
-    await sql`
-      INSERT INTO entity_types (type, schema, sensitive)
-      VALUES ('task', '{}', ARRAY[]::TEXT[])
-      ON CONFLICT (type) DO NOTHING
-    `;
-
+    // Use github_link — a PRD-aligned type seeded by schema.sql with no retention class.
     const entityId = `sched-no-class-${Date.now()}`;
     await sql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${entityId}, 'task', '{"name":"ephemeral"}')
+      VALUES (${entityId}, 'github_link', '{"url":"https://github.com/example/repo"}')
     `;
 
     await runRetentionScheduler(sql, undefined, 1000);

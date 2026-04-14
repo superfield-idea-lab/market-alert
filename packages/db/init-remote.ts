@@ -39,7 +39,9 @@ const AGENT_BASE_ROLE = 'agent_worker';
  * entities table — writes are forced through POST /internal/ingestion/email.
  * Blueprint: WORKER-P-001 (read-only-database-access), issue #28.
  */
-export const AGENT_TYPES = ['coding', 'analysis', 'code_cleanup', 'email_ingest'] as const;
+// Template-only agent types (coding, analysis, code_cleanup) removed in issue #214.
+// Only PRD-required worker agents are provisioned here.
+export const AGENT_TYPES = ['email_ingest'] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 /**
@@ -156,7 +158,7 @@ export function loadInitRemoteConfig(env: NodeJS.ProcessEnv = process.env): Init
     'DICT_RW_PASSWORD',
   ] as const;
 
-  // Agent type passwords: AGENT_<TYPE>_PASSWORD (e.g. AGENT_CODING_PASSWORD)
+  // Agent type passwords: AGENT_<TYPE>_PASSWORD (e.g. AGENT_EMAIL_INGEST_PASSWORD)
   const agentPasswordKeys = AGENT_TYPES.map((t) => `AGENT_${t.toUpperCase()}_PASSWORD` as string);
 
   const missing = [

@@ -3,7 +3,7 @@ import { loadAgentDbConfig } from '../../src/db';
 
 describe('loadAgentDbConfig', () => {
   it('throws when AGENT_DATABASE_URL is missing', () => {
-    expect(() => loadAgentDbConfig({ AGENT_TYPE: 'coding' } as NodeJS.ProcessEnv)).toThrow(
+    expect(() => loadAgentDbConfig({ AGENT_TYPE: 'email_ingest' } as NodeJS.ProcessEnv)).toThrow(
       'Missing required environment variables',
     );
   });
@@ -11,19 +11,19 @@ describe('loadAgentDbConfig', () => {
   it('throws when AGENT_TYPE is missing', () => {
     expect(() =>
       loadAgentDbConfig({
-        AGENT_DATABASE_URL: 'postgres://agent_coding:pw@localhost/calypso_app',
+        AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
       } as NodeJS.ProcessEnv),
     ).toThrow('Missing required environment variables');
   });
 
   it('returns config when all required vars are present', () => {
     const config = loadAgentDbConfig({
-      AGENT_DATABASE_URL: 'postgres://agent_coding:pw@localhost/calypso_app',
-      AGENT_TYPE: 'coding',
+      AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
+      AGENT_TYPE: 'email_ingest',
     } as NodeJS.ProcessEnv);
     expect(config).toEqual({
-      agentDatabaseUrl: 'postgres://agent_coding:pw@localhost/calypso_app',
-      agentType: 'coding',
+      agentDatabaseUrl: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
+      agentType: 'email_ingest',
     });
   });
 });

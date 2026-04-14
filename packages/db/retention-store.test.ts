@@ -48,8 +48,7 @@ beforeAll(async () => {
     INSERT INTO entity_types (type, schema, sensitive)
     VALUES
       ('email',        '{}', ARRAY['subject','body','headers']),
-      ('corpus_chunk', '{}', ARRAY['content']),
-      ('task',         '{}', ARRAY[]::TEXT[])
+      ('corpus_chunk', '{}', ARRAY['content'])
     ON CONFLICT (type) DO NOTHING
   `;
 
@@ -256,21 +255,21 @@ describe('retention field immutability', () => {
   });
 
   test('entities without retention fields set can still be updated normally', async () => {
-    // A regular entity (type=task) that never had retention fields set
+    // A PRD entity (type=github_link) that never had retention fields set
     // should not be blocked by the trigger.
-    const taskId = `task-no-retention-${Date.now()}`;
+    const entityId = `github-link-no-retention-${Date.now()}`;
 
     await sql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${taskId}, 'task', '{"name":"test task"}')
+      VALUES (${entityId}, 'github_link', '{"url":"https://github.com/example/repo"}')
     `;
 
-    // Updating name (a non-retention property via the properties column) must succeed
+    // Updating properties (a non-retention column) must succeed
     await expect(
-      sql`UPDATE entities SET properties = '{"name":"updated"}' WHERE id = ${taskId}`,
+      sql`UPDATE entities SET properties = '{"url":"https://github.com/example/updated"}' WHERE id = ${entityId}`,
     ).resolves.toBeDefined();
 
     // Cleanup
-    await sql`DELETE FROM entities WHERE id = ${taskId}`;
+    await sql`DELETE FROM entities WHERE id = ${entityId}`;
   });
 });

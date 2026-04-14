@@ -52,7 +52,7 @@ describe('init-remote helpers', () => {
     ).toThrow('DICT_RW_PASSWORD');
   });
 
-  it('requires AGENT_CODING_PASSWORD and all other agent passwords', () => {
+  it('requires AGENT_EMAIL_INGEST_PASSWORD', () => {
     expect(() =>
       loadInitRemoteConfig({
         ADMIN_DATABASE_URL: 'postgres://admin:secret@example.com/postgres',
@@ -62,7 +62,7 @@ describe('init-remote helpers', () => {
         DICT_RW_PASSWORD: 'dict_pw',
         // Deliberately omit agent passwords
       } as NodeJS.ProcessEnv),
-    ).toThrow('AGENT_CODING_PASSWORD');
+    ).toThrow('AGENT_EMAIL_INGEST_PASSWORD');
   });
 
   it('applies default database names when optional env vars are absent', () => {
@@ -73,9 +73,6 @@ describe('init-remote helpers', () => {
         AUDIT_W_PASSWORD: 'audit_pw',
         ANALYTICS_W_PASSWORD: 'analytics_pw',
         DICT_RW_PASSWORD: 'dict_pw',
-        AGENT_CODING_PASSWORD: 'coding_pw',
-        AGENT_ANALYSIS_PASSWORD: 'analysis_pw',
-        AGENT_CODE_CLEANUP_PASSWORD: 'code_cleanup_pw',
         AGENT_EMAIL_INGEST_PASSWORD: 'email_ingest_pw',
       } as NodeJS.ProcessEnv),
     ).toEqual({
@@ -84,11 +81,9 @@ describe('init-remote helpers', () => {
         app: 'app_pw',
         audit: 'audit_pw',
         analytics: 'analytics_pw',
+        complianceOfficer: 'app_pw',
         dictionary: 'dict_pw',
         agents: {
-          coding: 'coding_pw',
-          analysis: 'analysis_pw',
-          code_cleanup: 'code_cleanup_pw',
           email_ingest: 'email_ingest_pw',
         },
       },
@@ -101,17 +96,11 @@ describe('init-remote helpers', () => {
     });
   });
 
-  it('derives per-type agent role names from agent type', () => {
-    expect(agentRoleName('coding')).toBe('agent_coding');
-    expect(agentRoleName('analysis')).toBe('agent_analysis');
-    expect(agentRoleName('code_cleanup')).toBe('agent_code_cleanup');
+  it('derives per-type agent role name from agent type', () => {
     expect(agentRoleName('email_ingest')).toBe('agent_email_ingest');
   });
 
-  it('derives per-type view names from agent type', () => {
-    expect(agentViewName('coding')).toBe('task_queue_view_coding');
-    expect(agentViewName('analysis')).toBe('task_queue_view_analysis');
-    expect(agentViewName('code_cleanup')).toBe('task_queue_view_code_cleanup');
+  it('derives per-type view name from agent type', () => {
     expect(agentViewName('email_ingest')).toBe('task_queue_view_email_ingest');
   });
 });

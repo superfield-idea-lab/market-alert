@@ -45,9 +45,6 @@ const TEST_PASSWORDS = {
   audit: 'audit_test_pw',
   analytics: 'analytics_test_pw',
   dictionary: 'dict_test_pw',
-  coding: 'coding_test_pw',
-  analysis: 'analysis_test_pw',
-  code_cleanup: 'code_cleanup_test_pw',
   email_ingest: 'email_ingest_test_pw',
 };
 
@@ -73,9 +70,6 @@ beforeAll(async () => {
     AUDIT_W_PASSWORD: TEST_PASSWORDS.audit,
     ANALYTICS_W_PASSWORD: TEST_PASSWORDS.analytics,
     DICT_RW_PASSWORD: TEST_PASSWORDS.dictionary,
-    AGENT_CODING_PASSWORD: TEST_PASSWORDS.coding,
-    AGENT_ANALYSIS_PASSWORD: TEST_PASSWORDS.analysis,
-    AGENT_CODE_CLEANUP_PASSWORD: TEST_PASSWORDS.code_cleanup,
     AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 
@@ -231,14 +225,14 @@ describe('audit-before-read semantics (AC-1 / TP-1)', () => {
     // Insert entity into app database
     await appAdminSql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${entityId}, 'task', '{"name": "sensitive-task"}')
+      VALUES (${entityId}, 'user', '{"name": "sensitive-user"}')
     `;
 
     // Audit event BEFORE the read
     const auditRow = await emitAuditEvent(auditWSql, {
       actor_id: 'user-read-actor',
-      action: 'task.read',
-      entity_type: 'task',
+      action: 'user.read',
+      entity_type: 'user',
       entity_id: entityId,
       before: null,
       after: null,
@@ -253,12 +247,12 @@ describe('audit-before-read semantics (AC-1 / TP-1)', () => {
       SELECT id, properties FROM entities WHERE id = ${entityId}
     `;
     expect(rows).toHaveLength(1);
-    expect(rows[0].properties).toMatchObject({ name: 'sensitive-task' });
+    expect(rows[0].properties).toMatchObject({ name: 'sensitive-user' });
 
     // Audit record must exist BEFORE the read result reaches the caller
     const auditCheck = await auditAdminSql<{ id: string }[]>`
       SELECT id FROM audit_events
-      WHERE entity_id = ${entityId} AND action = 'task.read'
+      WHERE entity_id = ${entityId} AND action = 'user.read'
     `;
     expect(auditCheck).toHaveLength(1);
     expect(auditCheck[0].id).toBe(auditRow.id);
@@ -279,7 +273,7 @@ describe('forced audit write failure denies read (AC-2 / TP-2)', () => {
     // Insert entity into app database
     await appAdminSql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${entityId}, 'task', '{"name": "blocked-task"}')
+      VALUES (${entityId}, 'user', '{"name": "blocked-user"}')
     `;
 
     // Simulate audit write failure by attempting to insert a row with a missing
@@ -291,7 +285,7 @@ describe('forced audit write failure denies read (AC-2 / TP-2)', () => {
       await auditWSql.unsafe(
         `
         INSERT INTO audit_events (actor_id, action, entity_id, before, after, ts, prev_hash, hash)
-        VALUES ('actor', 'task.read', $1, NULL, NULL, NOW(), '${GENESIS_HASH}', 'aabbcc')
+        VALUES ('actor', 'user.read', $1, NULL, NULL, NOW(), '${GENESIS_HASH}', 'aabbcc')
       `,
         [entityId],
       );
@@ -309,7 +303,7 @@ describe('forced audit write failure denies read (AC-2 / TP-2)', () => {
     // No audit row was written for this entity
     const orphanAuditRows = await auditAdminSql<{ id: string }[]>`
       SELECT id FROM audit_events
-      WHERE entity_id = ${entityId} AND action = 'task.read'
+      WHERE entity_id = ${entityId} AND action = 'user.read'
     `;
     expect(orphanAuditRows).toHaveLength(0);
 
@@ -329,7 +323,7 @@ describe('audit_w privilege enforcement (AC-3 / TP-3)', () => {
       emitAuditEvent(auditWSql, {
         actor_id: 'test-actor',
         action: 'test.insert',
-        entity_type: 'task',
+        entity_type: 'user',
         entity_id: 'test-entity-insert',
         before: null,
         after: null,
@@ -343,7 +337,7 @@ describe('audit_w privilege enforcement (AC-3 / TP-3)', () => {
     await emitAuditEvent(auditAdminSql, {
       actor_id: 'test-actor',
       action: 'test.update-attempt',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: 'test-entity-update',
       before: null,
       after: null,
@@ -363,7 +357,7 @@ describe('audit_w privilege enforcement (AC-3 / TP-3)', () => {
     await emitAuditEvent(auditAdminSql, {
       actor_id: 'test-actor',
       action: 'test.delete-attempt',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: 'test-entity-delete',
       before: null,
       after: null,
@@ -393,7 +387,7 @@ describe('chain-verification detects tampering (AC-4 / TP-4)', () => {
     const row1 = await emitAuditEvent(auditAdminSql, {
       actor_id: 'chain-actor',
       action: 'chain.event.1',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: tag,
       before: null,
       after: { step: 1 },
@@ -403,7 +397,7 @@ describe('chain-verification detects tampering (AC-4 / TP-4)', () => {
     await emitAuditEvent(auditAdminSql, {
       actor_id: 'chain-actor',
       action: 'chain.event.2',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: tag,
       before: { step: 1 },
       after: { step: 2 },
@@ -425,7 +419,7 @@ describe('chain-verification detects tampering (AC-4 / TP-4)', () => {
     const hash1 = await computeAuditHash(GENESIS_HASH, {
       actor_id: 'tamper-actor',
       action: 'tamper.event.1',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: tag,
       before: null,
       after: null,
@@ -437,14 +431,14 @@ describe('chain-verification detects tampering (AC-4 / TP-4)', () => {
          (actor_id, action, entity_type, entity_id, before, after, ts, prev_hash, hash)
        VALUES ($1, $2, $3, $4, NULL, NULL, $5::timestamptz, $6, $7)
        RETURNING id, hash`,
-      ['tamper-actor', 'tamper.event.1', 'task', tag, ts1, GENESIS_HASH, hash1],
+      ['tamper-actor', 'tamper.event.1', 'user', tag, ts1, GENESIS_HASH, hash1],
     )) as unknown as { id: string; hash: string }[];
 
     const ts2 = new Date(Date.now() + 20).toISOString();
     const hash2 = await computeAuditHash(hash1, {
       actor_id: 'tamper-actor',
       action: 'tamper.event.2',
-      entity_type: 'task',
+      entity_type: 'user',
       entity_id: tag,
       before: null,
       after: null,
@@ -455,7 +449,7 @@ describe('chain-verification detects tampering (AC-4 / TP-4)', () => {
       `INSERT INTO audit_events
          (actor_id, action, entity_type, entity_id, before, after, ts, prev_hash, hash)
        VALUES ($1, $2, $3, $4, NULL, NULL, $5::timestamptz, $6, $7)`,
-      ['tamper-actor', 'tamper.event.2', 'task', tag, ts2, hash1, hash2],
+      ['tamper-actor', 'tamper.event.2', 'user', tag, ts2, hash1, hash2],
     );
 
     // Tamper: overwrite the hash of row1 with a garbage value using admin privileges

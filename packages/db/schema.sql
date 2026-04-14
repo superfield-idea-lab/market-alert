@@ -35,14 +35,11 @@ CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_id);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id);
 CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type);
 
--- Seed required entity types
+-- Seed PRD-required entity types only.
+-- Template-only types (task, tag, channel, message) removed in issue #214.
 INSERT INTO entity_types (type, schema) VALUES
   ('user',        '{}'),
-  ('task',        '{}'),
-  ('tag',         '{}'),
-  ('github_link', '{}'),
-  ('channel',     '{}'),
-  ('message',     '{}')
+  ('github_link', '{}')
 ON CONFLICT (type) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS revoked_tokens (
@@ -99,69 +96,8 @@ CREATE INDEX IF NOT EXISTS idx_task_queue_idempotency
 -- init-remote.ts (requires table ownership — the admin user owns the table).
 -- Per-type RLS policies are also applied there after agent roles are created.
 
--- Per-type filtered views: expose only non-sensitive columns to each agent type.
--- Sensitive columns excluded: delegated_token, created_by, result, error_message.
-CREATE OR REPLACE VIEW task_queue_view_coding AS
-    SELECT
-        id,
-        agent_type,
-        job_type,
-        status,
-        payload,
-        correlation_id,
-        claimed_by,
-        claimed_at,
-        claim_expires_at,
-        attempt,
-        max_attempts,
-        next_retry_at,
-        priority,
-        created_at,
-        updated_at
-    FROM task_queue
-    WHERE agent_type = 'coding';
-
-CREATE OR REPLACE VIEW task_queue_view_analysis AS
-    SELECT
-        id,
-        agent_type,
-        job_type,
-        status,
-        payload,
-        correlation_id,
-        claimed_by,
-        claimed_at,
-        claim_expires_at,
-        attempt,
-        max_attempts,
-        next_retry_at,
-        priority,
-        created_at,
-        updated_at
-    FROM task_queue
-    WHERE agent_type = 'analysis';
-
-CREATE OR REPLACE VIEW task_queue_view_code_cleanup AS
-    SELECT
-        id,
-        agent_type,
-        job_type,
-        status,
-        payload,
-        correlation_id,
-        claimed_by,
-        claimed_at,
-        claim_expires_at,
-        attempt,
-        max_attempts,
-        next_retry_at,
-        priority,
-        created_at,
-        updated_at
-    FROM task_queue
-    WHERE agent_type = 'code_cleanup';
-
 -- KB-demo worker-phase views (issue #95, TQ-D-001).
+-- Template-only views (coding, analysis, code_cleanup) removed in issue #214.
 -- Sensitive columns excluded: delegated_token, created_by, result, error_message.
 
 CREATE OR REPLACE VIEW task_queue_view_email_ingest AS

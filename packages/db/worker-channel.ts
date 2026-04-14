@@ -42,7 +42,7 @@ export interface WorkerChannelCredentials {
   /**
    * Queue-facing credential (PostgreSQL connection string).
    *
-   * - Agent-type-specific role (e.g. agent_coding).
+   * - Agent-type-specific role (e.g. agent_email_ingest).
    * - SELECT-only on task_queue_view_<agentType>.
    * - No INSERT/UPDATE/DELETE on any table.
    * - No write authority to the API or any other system.

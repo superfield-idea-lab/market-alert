@@ -5,11 +5,14 @@
 -- for dev they are bootstrapped directly via postgres init scripts so the
 -- worker container can authenticate without a full remote-init run.
 --
--- The agent_coding role gets:
+-- Template-only roles (agent_coding, agent_analysis, agent_code_cleanup)
+-- were removed in issue #214.  Only PRD-required worker agents are provisioned.
+--
+-- The agent_email_ingest role gets:
 --   - LOGIN with a known dev password
 --   - CONNECT on calypso_app
 --   - USAGE on public schema
---   - SELECT on task_queue_view_coding only (no INSERT/UPDATE/DELETE)
+--   - SELECT on task_queue_view_email_ingest only (no INSERT/UPDATE/DELETE)
 --
 -- RLS is NOT configured here because schema.sql (run by migrate()) creates
 -- the views with WHERE agent_type = '...' filters that already restrict rows.
@@ -26,40 +29,16 @@ BEGIN
 END
 $$;
 
--- Per-type coding agent role
+-- Per-type email_ingest agent role
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_coding') THEN
-    CREATE ROLE agent_coding WITH LOGIN PASSWORD 'agent_coding_dev_password' IN ROLE agent_worker;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_email_ingest') THEN
+    CREATE ROLE agent_email_ingest WITH LOGIN PASSWORD 'agent_email_ingest_dev_password' IN ROLE agent_worker;
   ELSE
-    ALTER ROLE agent_coding WITH LOGIN PASSWORD 'agent_coding_dev_password';
+    ALTER ROLE agent_email_ingest WITH LOGIN PASSWORD 'agent_email_ingest_dev_password';
   END IF;
 END
 $$;
 
--- Per-type analysis agent role
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_analysis') THEN
-    CREATE ROLE agent_analysis WITH LOGIN PASSWORD 'agent_analysis_dev_password' IN ROLE agent_worker;
-  ELSE
-    ALTER ROLE agent_analysis WITH LOGIN PASSWORD 'agent_analysis_dev_password';
-  END IF;
-END
-$$;
-
--- Per-type code_cleanup agent role
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'agent_code_cleanup') THEN
-    CREATE ROLE agent_code_cleanup WITH LOGIN PASSWORD 'agent_code_cleanup_dev_password' IN ROLE agent_worker;
-  ELSE
-    ALTER ROLE agent_code_cleanup WITH LOGIN PASSWORD 'agent_code_cleanup_dev_password';
-  END IF;
-END
-$$;
-
--- Grant CONNECT on the app database to all agent roles
-GRANT CONNECT ON DATABASE calypso_app TO agent_coding;
-GRANT CONNECT ON DATABASE calypso_app TO agent_analysis;
-GRANT CONNECT ON DATABASE calypso_app TO agent_code_cleanup;
+-- Grant CONNECT on the app database to the email_ingest agent role
+GRANT CONNECT ON DATABASE calypso_app TO agent_email_ingest;

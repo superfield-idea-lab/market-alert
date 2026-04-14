@@ -54,9 +54,6 @@ const KUBECONFIG_PATH = join(MODULE_DIR, '..', '.k3d-kubeconfig');
 const REPO_ROOT = join(MODULE_DIR, '..');
 
 const DEMO_DB_PASSWORDS = {
-  agentAnalysis: 'agent-analysis-password',
-  agentCodeCleanup: 'agent-code-cleanup-password',
-  agentCoding: 'agent-coding-password',
   agentEmailIngest: 'agent-email-ingest-password',
   analytics: 'analytics_w_password',
   app: 'app_rw_password',
@@ -316,9 +313,6 @@ function renderDemoAppManifest(imageRef: string): string {
 async function bootstrapDatabase(config: DemoConfig): Promise<void> {
   const env = {
     ADMIN_DATABASE_URL: `postgres://calypso:calypso@localhost:${config.dbPort}/postgres`,
-    AGENT_ANALYSIS_PASSWORD: DEMO_DB_PASSWORDS.agentAnalysis,
-    AGENT_CODE_CLEANUP_PASSWORD: DEMO_DB_PASSWORDS.agentCodeCleanup,
-    AGENT_CODING_PASSWORD: DEMO_DB_PASSWORDS.agentCoding,
     AGENT_EMAIL_INGEST_PASSWORD: DEMO_DB_PASSWORDS.agentEmailIngest,
     ANALYTICS_W_PASSWORD: DEMO_DB_PASSWORDS.analytics,
     APP_RW_PASSWORD: DEMO_DB_PASSWORDS.app,

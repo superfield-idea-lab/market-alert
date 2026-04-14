@@ -58,7 +58,7 @@ let auditSql: ReturnType<typeof postgres>;
 const config: GovernanceConfig = {
   retention: {
     user: { retentionDays: 365 },
-    task: { retentionDays: null },
+    github_link: { retentionDays: null },
   },
   pseudonymSalt: 'test-salt-for-unit-testing',
 };
@@ -187,10 +187,10 @@ describe('checkRetentionPolicy', () => {
   });
 
   test('returns expired=false when retentionDays is null (keep indefinitely)', () => {
-    // Tasks have retentionDays: null → never expire
+    // github_link has retentionDays: null → never expire
     const veryOldDate = new Date(Date.now() - 10_000 * 24 * 60 * 60 * 1000);
     const result = checkRetentionPolicy({
-      entityType: 'task',
+      entityType: 'github_link',
       recordTimestamp: veryOldDate,
       config,
     });
@@ -202,7 +202,7 @@ describe('checkRetentionPolicy', () => {
   test('returns expired=false for entity types not in retention config', () => {
     const oldDate = new Date(Date.now() - 1000 * 24 * 60 * 60 * 1000);
     const result = checkRetentionPolicy({
-      entityType: 'tag', // not in config
+      entityType: 'corpus_chunk', // not in config
       recordTimestamp: oldDate,
       config,
     });
@@ -319,10 +319,10 @@ describe('generateComplianceReport', () => {
       expect.arrayContaining(['email', 'phone', 'display_name']),
     );
 
-    // 'task' entry should have retentionDays: null (keep indefinitely)
-    const taskEntry = report.entries.find((e) => e.entityType === 'task');
-    expect(taskEntry).toBeDefined();
-    expect(taskEntry!.retentionDays).toBeNull();
+    // 'github_link' entry should have retentionDays: null (keep indefinitely)
+    const githubLinkEntry = report.entries.find((e) => e.entityType === 'github_link');
+    expect(githubLinkEntry).toBeDefined();
+    expect(githubLinkEntry!.retentionDays).toBeNull();
 
     // Clean up
     await sql`DELETE FROM entities WHERE id = ${userId}`;
@@ -408,9 +408,9 @@ describe('handleDataSubjectRequest (erasure)', () => {
 
 describe('handleDataSubjectRequest (export)', () => {
   test('returns a complete data package for the subject including relations', async () => {
-    // Insert a user entity and a related task
+    // Insert a user entity and a related github_link
     const subjectId = `user-export-test-${Date.now()}`;
-    const taskId = `task-export-test-${Date.now()}`;
+    const linkedEntityId = `github-link-export-test-${Date.now()}`;
     const relationId = `rel-export-test-${Date.now()}`;
 
     await sql`
@@ -425,15 +425,15 @@ describe('handleDataSubjectRequest (export)', () => {
     await sql`
       INSERT INTO entities (id, type, properties)
       VALUES (
-        ${taskId},
-        'task',
-        ${sql.json({ name: 'Eve task', owner: 'eve' })}
+        ${linkedEntityId},
+        'github_link',
+        ${sql.json({ url: 'https://github.com/eve/repo' })}
       )
     `;
 
     await sql`
       INSERT INTO relations (id, source_id, target_id, type)
-      VALUES (${relationId}, ${subjectId}, ${taskId}, 'owns')
+      VALUES (${relationId}, ${subjectId}, ${linkedEntityId}, 'owns')
     `;
 
     const result = await handleDataSubjectRequest(
@@ -456,7 +456,7 @@ describe('handleDataSubjectRequest (export)', () => {
       expect(ownedRelation).toBeDefined();
       expect(ownedRelation!.type).toBe('owns');
       expect(ownedRelation!.sourceId).toBe(subjectId);
-      expect(ownedRelation!.targetId).toBe(taskId);
+      expect(ownedRelation!.targetId).toBe(linkedEntityId);
     }
 
     // Export must not modify the entity
@@ -467,7 +467,7 @@ describe('handleDataSubjectRequest (export)', () => {
 
     // Clean up
     await sql`DELETE FROM relations WHERE id = ${relationId}`;
-    await sql`DELETE FROM entities WHERE id = ${taskId}`;
+    await sql`DELETE FROM entities WHERE id = ${linkedEntityId}`;
     await sql`DELETE FROM entities WHERE id = ${subjectId}`;
   });
 });

@@ -496,12 +496,6 @@ describe('WORM does not block non-ground-truth entities', () => {
     wormTenantId = `tenant-worm-nort-${Date.now()}`;
 
     await sql`
-      INSERT INTO entity_types (type, schema, sensitive)
-      VALUES ('task', '{}', ARRAY[]::TEXT[])
-      ON CONFLICT (type) DO NOTHING
-    `;
-
-    await sql`
       INSERT INTO tenant_retention_policies (tenant_id, retention_class, legal_hold_default)
       VALUES (${wormTenantId}, ${MIFID_POLICY}, false)
       ON CONFLICT (tenant_id) DO UPDATE SET retention_class = EXCLUDED.retention_class
@@ -517,17 +511,17 @@ describe('WORM does not block non-ground-truth entities', () => {
   });
 
   test('UPDATE on an entity without retention_class is not blocked by WORM', async () => {
-    const entityId = `task-no-retention-worm-${Date.now()}`;
+    const entityId = `github-link-no-retention-worm-${Date.now()}`;
 
-    // Insert a task entity with no retention_class (not a ground-truth entity).
+    // Insert a github_link entity with no retention_class (not a ground-truth entity).
     await sql`
       INSERT INTO entities (id, type, properties, tenant_id)
-      VALUES (${entityId}, 'task', '{"name":"a task"}', ${wormTenantId})
+      VALUES (${entityId}, 'github_link', '{"url":"https://github.com/example/repo"}', ${wormTenantId})
     `;
 
     // UPDATE must succeed — no retention_class means WORM trigger passes through.
     await expect(
-      sql`UPDATE entities SET properties = '{"name":"updated task"}' WHERE id = ${entityId}`,
+      sql`UPDATE entities SET properties = '{"url":"https://github.com/example/updated"}' WHERE id = ${entityId}`,
     ).resolves.toBeDefined();
 
     // Cleanup.
@@ -535,15 +529,15 @@ describe('WORM does not block non-ground-truth entities', () => {
   });
 
   test('UPDATE on an entity without tenant_id is not blocked by WORM', async () => {
-    const entityId = `task-no-tenant-worm-${Date.now()}`;
+    const entityId = `github-link-no-tenant-worm-${Date.now()}`;
 
     await sql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${entityId}, 'task', '{"name":"global task"}')
+      VALUES (${entityId}, 'github_link', '{"url":"https://github.com/example/global"}')
     `;
 
     await expect(
-      sql`UPDATE entities SET properties = '{"name":"updated global task"}' WHERE id = ${entityId}`,
+      sql`UPDATE entities SET properties = '{"url":"https://github.com/example/updated-global"}' WHERE id = ${entityId}`,
     ).resolves.toBeDefined();
 
     await sql`DELETE FROM entities WHERE id = ${entityId}`;

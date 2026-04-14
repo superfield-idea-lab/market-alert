@@ -201,9 +201,6 @@ jobs:
           APP_RW_PASSWORD: app_rw_password
           AUDIT_W_PASSWORD: audit_w_password
           ANALYTICS_W_PASSWORD: analytics_w_password
-          AGENT_CODING_PASSWORD: agent_coding_password
-          AGENT_ANALYSIS_PASSWORD: agent_analysis_password
-          AGENT_CODE_CLEANUP_PASSWORD: agent_code_cleanup_password
           AGENT_EMAIL_INGEST_PASSWORD: agent_email_ingest_password
 
       - name: Start app container

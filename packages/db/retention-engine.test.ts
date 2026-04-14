@@ -299,22 +299,16 @@ describe('retention floor deletion block — AC-2, AC-3, TP-1', () => {
   });
 
   test('entities with no retention_class are not affected by the trigger', async () => {
-    // Insert an entity type that doesn't require retention metadata.
-    await sql`
-      INSERT INTO entity_types (type, schema, sensitive)
-      VALUES ('task', '{}', ARRAY[]::TEXT[])
-      ON CONFLICT (type) DO NOTHING
-    `;
-
-    const taskId = `task-no-retention-${Date.now()}`;
+    // Use github_link — a PRD-aligned type seeded by schema.sql with no retention class.
+    const entityId = `github-link-no-retention-${Date.now()}`;
 
     await sql`
       INSERT INTO entities (id, type, properties)
-      VALUES (${taskId}, 'task', '{"name":"ephemeral task"}')
+      VALUES (${entityId}, 'github_link', '{"url":"https://github.com/example/repo"}')
     `;
 
     // DELETE must succeed — no retention_class, no floor check.
-    await expect(sql`DELETE FROM entities WHERE id = ${taskId}`).resolves.toBeDefined();
+    await expect(sql`DELETE FROM entities WHERE id = ${entityId}`).resolves.toBeDefined();
   });
 });
 

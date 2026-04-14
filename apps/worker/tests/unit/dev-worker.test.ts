@@ -27,13 +27,13 @@ describe('docker-compose worker service', () => {
     expect(composeText).toContain('Dockerfile.worker.dev');
   });
 
-  test('worker service sets AGENT_DATABASE_URL with agent_coding role', () => {
-    expect(composeText).toContain('agent_coding');
+  test('worker service sets AGENT_DATABASE_URL with agent_email_ingest role', () => {
+    expect(composeText).toContain('agent_email_ingest');
     expect(composeText).toContain('AGENT_DATABASE_URL');
   });
 
-  test('worker service sets AGENT_TYPE to coding', () => {
-    expect(composeText).toContain("AGENT_TYPE: 'coding'");
+  test('worker service sets AGENT_TYPE to email_ingest', () => {
+    expect(composeText).toContain("AGENT_TYPE: 'email_ingest'");
   });
 
   test('worker service sets API_BASE_URL pointing to app service', () => {
@@ -113,17 +113,13 @@ describe('dev-postgres-init agent roles SQL', () => {
     expect(sqlText).toContain('agent_worker');
   });
 
-  test('SQL creates agent_coding role with LOGIN', () => {
-    expect(sqlText).toContain('agent_coding');
+  test('SQL creates agent_email_ingest role with LOGIN', () => {
+    expect(sqlText).toContain('agent_email_ingest');
     expect(sqlText).toContain('LOGIN');
   });
 
-  test('SQL creates agent_analysis role', () => {
-    expect(sqlText).toContain('agent_analysis');
-  });
-
-  test('SQL grants CONNECT on calypso_app to agent_coding', () => {
-    expect(sqlText).toContain('GRANT CONNECT ON DATABASE calypso_app TO agent_coding');
+  test('SQL grants CONNECT on calypso_app to agent_email_ingest', () => {
+    expect(sqlText).toContain('GRANT CONNECT ON DATABASE calypso_app TO agent_email_ingest');
   });
 
   test('SQL script is idempotent (uses IF NOT EXISTS guards)', () => {

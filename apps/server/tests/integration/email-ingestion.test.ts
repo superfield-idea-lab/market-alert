@@ -47,9 +47,6 @@ const TEST_PASSWORDS = {
   audit: 'audit_test_pw',
   analytics: 'analytics_test_pw',
   dictionary: 'dict_test_pw',
-  coding: 'coding_test_pw',
-  analysis: 'analysis_test_pw',
-  code_cleanup: 'code_cleanup_test_pw',
   email_ingest: 'email_ingest_test_pw',
 };
 
@@ -105,9 +102,6 @@ beforeAll(async () => {
     AUDIT_W_PASSWORD: TEST_PASSWORDS.audit,
     ANALYTICS_W_PASSWORD: TEST_PASSWORDS.analytics,
     DICT_RW_PASSWORD: TEST_PASSWORDS.dictionary,
-    AGENT_CODING_PASSWORD: TEST_PASSWORDS.coding,
-    AGENT_ANALYSIS_PASSWORD: TEST_PASSWORDS.analysis,
-    AGENT_CODE_CLEANUP_PASSWORD: TEST_PASSWORDS.code_cleanup,
     AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 

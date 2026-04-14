@@ -13,7 +13,7 @@
 ##   - The worker uses a stub Codex binary (scripts/dev-codex-stub) that
 ##     returns mock results without a real Codex subscription.
 ##   - Worker credentials are seeded automatically at startup.
-##   - The agent_coding DB role is created by scripts/dev-postgres-init/.
+##   - The agent_email_ingest DB role is created by scripts/dev-postgres-init/.
 ##   - Set ENCRYPTION_MASTER_KEY to a consistent 64-char hex value across
 ##     restarts so seeded credentials can be decrypted.  The default dev key
 ##     is safe for local use only — never use it in production.
@@ -31,7 +31,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Init scripts run once on first container start (before application migration).
-      # Creates the agent_coding / agent_analysis roles with LOGIN passwords.
+      # Creates the agent_email_ingest role with LOGIN password.
       - ./scripts/dev-postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U app_rw -d calypso_app']
@@ -74,9 +74,9 @@ services:
       app:
         condition: service_started
     environment:
-      # Queue credential — read-only agent_coding role (created by postgres init script).
-      AGENT_DATABASE_URL: 'postgres://agent_coding:agent_coding_dev_password@postgres:5432/calypso_app'
-      AGENT_TYPE: 'coding'
+      # Queue credential — read-only agent_email_ingest role (created by postgres init script).
+      AGENT_DATABASE_URL: 'postgres://agent_email_ingest:agent_email_ingest_dev_password@postgres:5432/calypso_app'
+      AGENT_TYPE: 'email_ingest'
       # Write channel — delegated tokens submitted to the local app server.
       API_BASE_URL: 'http://app:31415'
       # Privileged URL used by the entrypoint to apply view grants after migration.
