@@ -1,12 +1,17 @@
 /**
  * @file pwa-demo.tsx
  *
- * PWA capabilities demo page.  Renders a responsive grid of demo cards, each
- * showcasing a different browser API available to Progressive Web Apps.
+ * Mobile RM surface for meeting recording and transcript management.
  *
- * This page acts as the host for all downstream PWA feature cards (storage,
- * camera, microphone, notifications, install prompt, and platform matrix).
- * Each card is imported here once it is implemented.
+ * This page renders the PRD-required RM product flows for mobile field use:
+ *
+ *   1. MeetingRecordingFlow — record a customer meeting on-device, transcribe
+ *      locally with whisper.cpp WASM (or Web Speech API fallback), review the
+ *      transcript, then upload only the text to the server.
+ *
+ *   2. TranscriptReviewFlow — threshold-based routing for longer recordings:
+ *      short recordings go via the edge path; recordings at or above the
+ *      threshold are enqueued for the cluster-internal transcription worker.
  *
  * Design tokens from packages/ui/tokens.css are used for surface, text,
  * border, and brand colors so the route's visual quality matches the design
@@ -14,28 +19,23 @@
  *
  * Canonical docs
  * ---------------
- * - PWA overview: https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps
- * - Design tokens: packages/ui/tokens.css
+ * - PRD: docs/prd.md
+ * - Transcription: apps/web/src/lib/transcription.ts
+ * - Meeting recording: apps/web/src/components/pwa/demos/meeting-recording-demo.tsx
+ * - Long-recording routing: apps/web/src/components/pwa/demos/transcription-demo.tsx
  */
 
 import React from 'react';
 import { usePlatform } from '../hooks/use-platform';
-import { NotificationDemoCard } from '../components/pwa/demos/notification-demo';
-import { StorageDemoCard } from '../components/pwa/demos/storage-demo';
-import { CameraDemoCard } from '../components/pwa/demos/camera-demo';
-import { MicDemoCard } from '../components/pwa/demos/mic-demo';
 import { MeetingRecordingDemoCard } from '../components/pwa/demos/meeting-recording-demo';
 import { TranscriptionDemoCard } from '../components/pwa/demos/transcription-demo';
-import { AudioRecorder } from '../components/pwa/audio-recorder';
-import { DemoCard } from '../components/pwa/demo-card';
-import { Mic2 } from 'lucide-react';
 
 /**
- * Top-level PWA demo page.  Renders a platform info summary header and a
- * grid of demo cards showcasing PWA capabilities available on this device.
+ * Mobile RM recording surface.
  *
- * Inline styles reference design token CSS custom properties so the page
- * uses the design system's visual language without hard-coding raw values.
+ * Renders a platform info summary header and a grid of product-aligned RM flows
+ * for meeting recording and transcript handling. Generic browser capability demo
+ * cards have been removed from this surface — only PRD-required flows are shown.
  */
 export function PwaDemoPage() {
   const platform = usePlatform();
@@ -69,10 +69,10 @@ export function PwaDemoPage() {
               color: 'var(--color-text-primary)',
             }}
           >
-            PWA Demo
+            Mobile Recording
           </h1>
           <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-            Explore Progressive Web App capabilities available on this device.
+            Record customer meetings and upload transcripts from the field.
           </p>
         </div>
 
@@ -118,47 +118,12 @@ export function PwaDemoPage() {
           </span>
         </div>
 
-        {/* Demo card grid */}
+        {/* Product RM flow cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <NotificationDemoCard />
-          <StorageDemoCard />
-          <CameraDemoCard />
-          <MicDemoCard />
           <MeetingRecordingDemoCard />
-          <AudioRecorderCard />
           <TranscriptionDemoCard />
         </div>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AudioRecorderCard — wraps AudioRecorder in a DemoCard shell
-// ---------------------------------------------------------------------------
-
-/**
- * PWA demo card that hosts the background-preserving AudioRecorder component.
- * Displays feature-availability and permission state via DemoCard before
- * delegating to the AudioRecorder when the microphone is accessible.
- */
-function AudioRecorderCard() {
-  const { supports } = usePlatform();
-  const featureAvailable = supports.mediaRecorder && supports.getUserMedia;
-
-  return (
-    <DemoCard
-      title="Audio Recorder (background-preserve)"
-      description="Record audio with state preserved across app backgrounding and screen lock"
-      icon={<Mic2 size={18} />}
-      featureAvailable={featureAvailable}
-      platformNotes={
-        !featureAvailable
-          ? 'MediaRecorder or getUserMedia not available on this platform.'
-          : undefined
-      }
-    >
-      <AudioRecorder />
-    </DemoCard>
   );
 }

@@ -93,7 +93,7 @@ function App() {
             <button
               onClick={() => setActiveView('pwa')}
               className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'pwa' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-              title="PWA Demo"
+              title="Mobile Recording"
             >
               <Smartphone size={20} strokeWidth={2.5} />
             </button>
