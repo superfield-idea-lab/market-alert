@@ -20,6 +20,7 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
+import postgres from 'postgres';
 
 const PORT = 31427;
 const BASE = `http://localhost:${PORT}`;
@@ -29,6 +30,7 @@ const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
 let server: Subprocess;
+let sql: ReturnType<typeof postgres>;
 let authCookie = '';
 let superuserCookie = '';
 let superuserId = '';
@@ -43,6 +45,7 @@ let apiKeyRaw = ''; // raw API key for Bearer tests
 
 beforeAll(async () => {
   pg = await startPostgres();
+  sql = postgres(pg.url, { max: 5, idle_timeout: 10 });
 
   // Start with placeholder SUPERUSER_ID to create users, then restart with real one.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
@@ -85,22 +88,21 @@ beforeAll(async () => {
   });
   await waitForServer(BASE);
 
-  // Seed a source entity (tag type) so we have a valid source_id.
-  // We use the superuser session to POST an arbitrary entity directly.
+  // Seed a source entity directly via SQL so we have a valid source_id.
+  // The /api/tasks CRUD handler was removed in issue #210 (template cleanup).
   // The chunker only requires that the source entity exists — it does not
-  // enforce that the source is of type 'email'.
-  const seedRes = await fetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: authCookie,
-      'X-CSRF-Token': regular.csrfToken,
-    },
-    body: JSON.stringify({ name: 'corpus-chunk-source-email' }),
-  });
-  expect(seedRes.status).toBe(201);
-  const seedBody = await seedRes.json();
-  emailEntityId = seedBody.id;
+  // enforce a specific entity type.
+  // email is registered by registerPhase1EntityTypesWithDb on server start,
+  // but we ensure it exists here in case the server hasn't finished booting.
+  await sql.unsafe(`
+    INSERT INTO entity_types (type, schema) VALUES ('email', '{}')
+    ON CONFLICT (type) DO NOTHING
+  `);
+  emailEntityId = `email-${Date.now()}`;
+  await sql.unsafe(`
+    INSERT INTO entities (id, type, properties, tenant_id)
+    VALUES ('${emailEntityId}', 'email', '{"name":"corpus-chunk-source-email"}', null)
+  `);
 
   // Create an API key for Bearer token tests
   const keyRes = await fetch(`${BASE}/api/admin/keys`, {
@@ -115,6 +117,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.kill();
+  await sql?.end();
   await pg?.stop();
 });
 

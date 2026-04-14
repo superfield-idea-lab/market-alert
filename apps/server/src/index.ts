@@ -20,7 +20,6 @@ import { cleanupExpiredRevocations, startRevocationCleanup } from 'db/revocation
 import { scrubPii } from 'core';
 import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
 import { handlePasskeyRequest } from './api/passkey';
-import { handleTasksRequest } from './api/tasks';
 import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/task-queue';
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
@@ -275,13 +274,10 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/tasks')) {
-      // Delegated-token result submission route must be checked before the
-      // cookie-auth tasks route so workers can submit without a user session.
+      // Delegated-token result submission route — workers submit results here.
+      // The generic task CRUD handler (handleTasksRequest) was removed in issue #210.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
       if (resultRes) return withTrace(resultRes);
-
-      const tasksRes = await handleTasksRequest(req, url, appState);
-      if (tasksRes) return withTrace(tasksRes);
     }
 
     if (url.pathname.startsWith('/api/tasks-queue')) {

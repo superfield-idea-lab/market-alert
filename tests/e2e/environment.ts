@@ -123,7 +123,7 @@ async function waitForServer(port = SERVER_PORT): Promise<void> {
   const base = `http://localhost:${port}`;
   while (Date.now() < deadline) {
     try {
-      await fetch(`${base}/api/tasks`);
+      await fetch(`${base}/health/live`);
       return;
     } catch {
       await Bun.sleep(300);
