@@ -8,6 +8,11 @@
  *   bun run demo
  *   bun run demo --status
  *   bun run demo --delete
+ *
+ * Each `bun run demo` invocation creates a uniquely-named k3d cluster with
+ * randomised host ports so multiple demos can run concurrently on one host
+ * without port collisions.  Set CALYPSO_DEMO_CLUSTER to reuse a specific
+ * existing cluster by name.
  */
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,20 +42,18 @@ export interface DemoPlanStep {
 interface RunOptions {
   cwd?: string;
   env?: Record<string, string>;
+  kubeconfigPath: string;
   phase: string;
 }
 
-const CLUSTER_NAME = 'calypso-demo';
+const CLUSTER_PREFIX = 'calypso-demo';
 const NAMESPACE = 'default';
 const IMAGE_REPO = 'calypso-demo-app';
 const DB_HOST = 'calypso-dev-postgres';
-const DEFAULT_DB_PORT = Number(process.env.CALYPSO_DEMO_DB_PORT ?? 5432);
-const DEFAULT_PORT = Number(process.env.CALYPSO_DEMO_PORT ?? 58080);
 const MODULE_DIR =
   typeof import.meta.dir === 'string'
     ? import.meta.dir
     : fileURLToPath(new URL('.', import.meta.url));
-const KUBECONFIG_PATH = join(MODULE_DIR, '..', '.k3d-kubeconfig');
 const REPO_ROOT = join(MODULE_DIR, '..');
 
 const DEMO_DB_PASSWORDS = {
@@ -64,6 +67,20 @@ const DEMO_DB_PASSWORDS = {
   superuserPassword: 'demo-admin-password',
 } as const;
 
+// ---------------------------------------------------------------------------
+// Port / name helpers
+// ---------------------------------------------------------------------------
+
+/** Pick a random port in the IANA ephemeral range (49152–65535). */
+function randomPort(): number {
+  return Math.floor(Math.random() * (65535 - 49152 + 1)) + 49152;
+}
+
+/** Generate a unique cluster name with a short random suffix. */
+function randomClusterName(): string {
+  return `${CLUSTER_PREFIX}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function yamlValue(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -72,22 +89,47 @@ function nowTag(): string {
   return `demo-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
+function clusterKubeconfigPath(clusterName: string): string {
+  return join(REPO_ROOT, `.k3d-kubeconfig-${clusterName}`);
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
 export function demoConfig(
-  input: Partial<Pick<DemoConfig, 'dbPort' | 'interactive' | 'imageTag' | 'port'>> = {},
+  input: Partial<Pick<DemoConfig, 'dbPort' | 'interactive' | 'imageTag' | 'port'>> & {
+    clusterName?: string;
+  } = {},
 ): DemoConfig {
+  const clusterName = input.clusterName ?? process.env.CALYPSO_DEMO_CLUSTER ?? randomClusterName();
+
+  // dbPort is randomised so concurrent demos don't collide on the k3d
+  // loadbalancer host binding.  port (the kubectl port-forward endpoint) is
+  // kept at a stable default so reverse-tunnel setups can target a known port;
+  // override via CALYPSO_DEMO_PORT when needed.
+  const dbPort =
+    input.dbPort ??
+    (process.env.CALYPSO_DEMO_DB_PORT ? Number(process.env.CALYPSO_DEMO_DB_PORT) : randomPort());
+  const port = input.port ?? Number(process.env.CALYPSO_DEMO_PORT ?? 58080);
+
   return {
-    clusterName: CLUSTER_NAME,
+    clusterName,
     dbHost: DB_HOST,
-    dbPort: input.dbPort ?? DEFAULT_DB_PORT,
+    dbPort,
     imageRepo: IMAGE_REPO,
     imageTag: input.imageTag ?? nowTag(),
     interactive: input.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY),
-    kubeconfigPath: KUBECONFIG_PATH,
+    kubeconfigPath: clusterKubeconfigPath(clusterName),
     namespace: NAMESPACE,
-    port: input.port ?? DEFAULT_PORT,
+    port,
     repoRoot: REPO_ROOT,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Plan / secrets
+// ---------------------------------------------------------------------------
 
 export function buildDemoPlan(config: DemoConfig): DemoPlanStep[] {
   const imageRef = `${config.imageRepo}:${config.imageTag}`;
@@ -187,6 +229,10 @@ export function buildDemoSecretManifests(_config: DemoConfig): string {
   ].join('\n---\n');
 }
 
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
+
 function summarizeFailure(stderr: string): string {
   return stderr
     .split('\n')
@@ -220,6 +266,10 @@ export function describeCommandFailure(phase: string, command: string[], stderr 
 export function describeProbeFailure(phase: string, url: string, error: unknown): string {
   return `${phase} failed while probing \`${url}\`: ${error instanceof Error ? error.message : String(error)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Process helpers
+// ---------------------------------------------------------------------------
 
 async function streamAndCapture(
   stream: ReadableStream<Uint8Array> | null | undefined,
@@ -257,7 +307,7 @@ async function run(command: string[], opts: RunOptions): Promise<void> {
     env: {
       ...process.env,
       ...opts.env,
-      KUBECONFIG: KUBECONFIG_PATH,
+      KUBECONFIG: opts.kubeconfigPath,
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -274,32 +324,50 @@ async function run(command: string[], opts: RunOptions): Promise<void> {
   }
 }
 
-function capture(command: string[]): string {
-  const result = Bun.spawnSync(command, {
-    cwd: REPO_ROOT,
-    env: { ...process.env, KUBECONFIG: KUBECONFIG_PATH },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  return new TextDecoder().decode(result.stdout).trim();
-}
+// ---------------------------------------------------------------------------
+// Cluster helpers
+// ---------------------------------------------------------------------------
 
-function clusterExists(config: DemoConfig): boolean {
+/** Return the names of all running k3d clusters that start with CLUSTER_PREFIX. */
+function listDemoClusters(): string[] {
   try {
-    const payload = capture(['k3d', 'cluster', 'list', '-o', 'json']);
-    const clusters = JSON.parse(payload) as Array<{ name?: string }>;
-    return clusters.some((cluster) => cluster.name === config.clusterName);
+    const result = Bun.spawnSync(['k3d', 'cluster', 'list', '-o', 'json'], {
+      cwd: REPO_ROOT,
+      env: process.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const clusters = JSON.parse(new TextDecoder().decode(result.stdout)) as Array<{
+      name?: string;
+    }>;
+    return clusters.map((c) => c.name ?? '').filter((name) => name.startsWith(CLUSTER_PREFIX));
   } catch {
-    return false;
+    return [];
   }
 }
 
-async function applyTempManifest(filename: string, contents: string): Promise<void> {
+function clusterExists(config: DemoConfig): boolean {
+  return listDemoClusters().includes(config.clusterName);
+}
+
+// ---------------------------------------------------------------------------
+// Demo steps
+// ---------------------------------------------------------------------------
+
+async function applyTempManifest(
+  filename: string,
+  contents: string,
+  kubeconfigPath: string,
+): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'calypso-demo-'));
   const filePath = join(dir, filename);
   try {
     writeFileSync(filePath, contents, 'utf-8');
-    await run(['kubectl', 'apply', '-f', filePath], { cwd: REPO_ROOT, phase: 'deploy' });
+    await run(['kubectl', 'apply', '-f', filePath], {
+      cwd: REPO_ROOT,
+      kubeconfigPath,
+      phase: 'deploy',
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -322,6 +390,7 @@ async function bootstrapDatabase(config: DemoConfig): Promise<void> {
   await run(['bun', 'run', 'packages/db/init-remote.ts'], {
     cwd: REPO_ROOT,
     env,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'database bootstrap',
   });
 }
@@ -330,10 +399,12 @@ async function buildDemoImage(config: DemoConfig): Promise<string> {
   const imageRef = `${config.imageRepo}:${config.imageTag}`;
   await run(['docker', 'build', '-f', 'Dockerfile.release', '-t', imageRef, '.'], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'image build',
   });
   await run(['k3d', 'image', 'import', '-c', config.clusterName, imageRef], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'image import',
   });
   return imageRef;
@@ -343,9 +414,11 @@ async function deployDemoImage(config: DemoConfig, imageRef: string): Promise<vo
   await applyTempManifest(
     'demo-runtime.yaml',
     [buildDemoSecretManifests(config), renderDemoAppManifest(imageRef)].join('\n---\n'),
+    config.kubeconfigPath,
   );
   await run(['kubectl', 'rollout', 'status', 'deployment/calypso-app', '--timeout=180s'], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'deploy',
   });
 }
@@ -375,7 +448,7 @@ function startPortForward(config: DemoConfig) {
     ['kubectl', 'port-forward', 'deployment/calypso-app', `${config.port}:31415`],
     {
       cwd: REPO_ROOT,
-      env: { ...process.env, KUBECONFIG: KUBECONFIG_PATH },
+      env: { ...process.env, KUBECONFIG: config.kubeconfigPath },
       stdout: 'inherit',
       stderr: 'inherit',
     },
@@ -427,35 +500,58 @@ async function runInteractiveLoop(config: DemoConfig): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const statusOnly = args.includes('--status');
   const shouldDelete = args.includes('--delete');
-  const config = demoConfig();
 
   if (statusOnly) {
-    console.log(
-      `k3d cluster '${config.clusterName}': ${clusterExists(config) ? 'running' : 'not found'}`,
-    );
+    const clusters = listDemoClusters();
+    if (clusters.length === 0) {
+      console.log('No running demo clusters found.');
+    } else {
+      console.log('Running demo clusters:');
+      for (const name of clusters) {
+        console.log(`  ${name}`);
+      }
+    }
     return;
   }
 
   if (shouldDelete) {
-    if (!clusterExists(config)) {
-      console.log(`k3d cluster '${config.clusterName}' does not exist — nothing to delete.`);
+    // If CALYPSO_DEMO_CLUSTER is set, delete only that cluster; otherwise
+    // delete every calypso-demo-* cluster found on this host.
+    const targeted = process.env.CALYPSO_DEMO_CLUSTER;
+    const toDelete = targeted ? [targeted] : listDemoClusters();
+
+    if (toDelete.length === 0) {
+      console.log('No demo clusters found — nothing to delete.');
       return;
     }
-    await run(['k3d', 'cluster', 'delete', config.clusterName], {
-      cwd: REPO_ROOT,
-      phase: 'cluster teardown',
-    });
+
+    for (const name of toDelete) {
+      console.log(`[k3d] Deleting cluster '${name}'.`);
+      await run(['k3d', 'cluster', 'delete', name], {
+        cwd: REPO_ROOT,
+        kubeconfigPath: clusterKubeconfigPath(name),
+        phase: 'cluster teardown',
+      });
+    }
     return;
   }
+
+  const config = demoConfig();
 
   if (clusterExists(config)) {
     console.log(`\n[k3d] Reusing cluster '${config.clusterName}'.`);
   } else {
-    console.log(`\n[k3d] Creating cluster '${config.clusterName}'.`);
+    console.log(
+      `\n[k3d] Creating cluster '${config.clusterName}' (db-port=${config.dbPort}, app-port=${config.port}).`,
+    );
     await run(
       [
         'k3d',
@@ -466,28 +562,32 @@ async function main(): Promise<void> {
         `${config.dbPort}:5432@loadbalancer`,
         '--wait',
       ],
-      { cwd: REPO_ROOT, phase: 'cluster bootstrap' },
+      { cwd: REPO_ROOT, kubeconfigPath: config.kubeconfigPath, phase: 'cluster bootstrap' },
     );
   }
 
   await run(['k3d', 'kubeconfig', 'write', config.clusterName, '--output', config.kubeconfigPath], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'cluster bootstrap',
   });
 
   console.log('[demo] Applying dev Postgres manifests.');
   await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml')], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'database bootstrap',
   });
   await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'postgres.yaml')], {
     cwd: REPO_ROOT,
+    kubeconfigPath: config.kubeconfigPath,
     phase: 'database bootstrap',
   });
   await run(
     ['kubectl', 'rollout', 'status', 'statefulset/calypso-dev-postgres', '--timeout=120s'],
     {
       cwd: REPO_ROOT,
+      kubeconfigPath: config.kubeconfigPath,
       phase: 'database bootstrap',
     },
   );
@@ -500,6 +600,9 @@ async function main(): Promise<void> {
 
   console.log('[demo] Applying the app runtime manifest.');
   await deployDemoImage(config, imageRef);
+
+  console.log(`[demo] Cluster: ${config.clusterName}`);
+  console.log(`[demo] To delete: CALYPSO_DEMO_CLUSTER=${config.clusterName} bun run demo --delete`);
 
   const portForward = startPortForward(config);
   try {
