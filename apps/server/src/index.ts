@@ -30,9 +30,6 @@ import { handleApprovalsRequest } from './api/approvals';
 import { isSuperuser } from './lib/response';
 import { handleUsersRequest } from './api/users';
 import { seedSuperuser } from './seed/superuser';
-import { seedDemoPersonas } from './seed/demo-personas';
-import { seedDemoData } from './seed/demo-data';
-import { startDemoHealthCheck } from './cron/demo-health-check';
 import { startTaskQueueListener } from './task-queue-listener';
 import { getJwks } from './auth/jwt';
 import { handleHealthRequest } from './api/health';
@@ -113,21 +110,6 @@ startCronScheduler();
 
 // Seed the initial superuser if none exists yet.
 await seedSuperuser({ sql }).catch((err) => console.error('[seed] Superuser seeding failed:', err));
-
-// Seed demo personas when DEMO_MODE=true is set.
-await seedDemoPersonas({ sql }).catch((err) =>
-  console.error('[demo] Demo persona seeding failed:', err),
-);
-
-// Seed demo sample data (entities, relations, task queue) when DEMO_MODE=true.
-await seedDemoData({ sql }).catch((err) =>
-  console.error('[demo] Demo sample data seeding failed:', err),
-);
-
-// Start the demo health-check cron job when DEMO_MODE=true is set.
-// Runs every 2 minutes and enqueues a task into task_queue with
-// agent_type=cron so the admin monitor shows continuous activity.
-startDemoHealthCheck({ sql });
 
 // Start the task-queue LISTEN/NOTIFY → WebSocket bridge so the admin monitor
 // receives real-time task status changes without polling.
