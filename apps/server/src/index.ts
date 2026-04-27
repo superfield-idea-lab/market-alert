@@ -61,6 +61,7 @@ import { handleBdmCampaignRequest } from './api/bdm-campaign';
 import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLegalHoldRequest } from './api/legal-hold';
+import { handleLabelClearanceRequest } from './api/label-clearance';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -442,6 +443,24 @@ export default {
     if (url.pathname.startsWith('/api/compliance')) {
       const complianceRes = await handleComplianceRequest(req, url, appState);
       if (complianceRes) return withTrace(complianceRes);
+    }
+
+    // Label-based clearance controls and per-label content-key encryption (issue #225).
+    // POST   /api/labels — create clearance label (superuser only)
+    // GET    /api/labels — list labels (superuser only)
+    // POST   /api/labels/:name/content-key — create/rotate per-label KMS key (superuser only)
+    // POST   /api/labels/:name/grants — grant label to user (superuser only)
+    // DELETE /api/labels/:name/grants/:userId — revoke label grant (superuser only)
+    // GET    /api/labels/:name/grants — list label grant holders (superuser only)
+    // GET    /api/users/:userId/labels — list user's label grants
+    // POST   /api/labels/:name/ground-truth — write labeled encrypted record (superuser only)
+    // GET    /api/labels/:name/ground-truth/:entityId — read + decrypt (label holder or superuser)
+    if (
+      url.pathname.startsWith('/api/labels') ||
+      url.pathname.match(/^\/api\/users\/[^/]+\/labels/)
+    ) {
+      const labelRes = await handleLabelClearanceRequest(req, url, appState);
+      if (labelRes) return withTrace(labelRes);
     }
 
     // Phase 8 legal hold endpoints (issue #82).

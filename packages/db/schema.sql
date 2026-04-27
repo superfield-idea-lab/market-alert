@@ -1161,3 +1161,103 @@ CREATE INDEX IF NOT EXISTS idx_lhrr_status
 
 INSERT INTO _schema_version (migration) VALUES ('legal-hold-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Label-based clearance controls and per-label content-key encryption (issue #225)
+--
+-- Layering model:
+--   Outer boundary: tenant_id / customer RLS (existing, unchanged).
+--   Inner boundary: access_labels — an additional per-record label gate.
+--
+-- Tables:
+--
+--   access_labels — catalogue of named clearance labels.
+--     name:        Unique slug identifying the label (e.g. "confidential", "restricted").
+--     description: Human-readable description.
+--     tenant_id:   NULL = global; non-null = tenant-scoped label.
+--     created_by:  User ID of the admin who created the label.
+--     wrapped_content_key: KMS-wrapped DEK for encrypting content classified under
+--                          this label.  Base64-encoded ciphertext blob.
+--                          NULL until a content key is created for the label.
+--
+--   user_labels — many-to-many: which users hold which labels.
+--     user_id:     FK to entities(id) — must be a 'user' entity.
+--     label_name:  FK to access_labels(name).
+--     tenant_id:   Must match the access_labels.tenant_id (or both NULL) to prevent
+--                  cross-tenant label grants.
+--     granted_by:  User ID of the admin who granted this label.
+--     granted_at:  When the grant was made.
+--
+--   labeled_ground_truth — labeled sensitive records (the primary protected path).
+--     entity_id:    FK to entities(id) — the entity this record annotates.
+--     label_name:   The clearance label required to read this record.
+--     tenant_id:    Copied from entities.tenant_id at write time for RLS scoping.
+--     encrypted_content: AES-256-GCM ciphertext encrypted with the label DEK.
+--                        Format: enc:v1:<base64-iv>:<base64-ciphertext>.
+--     created_by:   User or system actor that created this labeled record.
+--
+-- Constraints:
+--   - A label name is unique within a tenant (UNIQUE NULLS NOT DISTINCT (tenant_id, name)).
+--   - A user may hold a label at most once (UNIQUE user_id, label_name).
+--   - labeled_ground_truth allows one labeled record per (entity_id, label_name) pair.
+--
+-- Canonical docs: docs/implementation-plan-v1.md Phase 9 — label clearance
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS access_labels (
+  name          TEXT NOT NULL,
+  description   TEXT NOT NULL DEFAULT '',
+  tenant_id     TEXT,
+  created_by    TEXT NOT NULL,
+  wrapped_content_key TEXT,
+  created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT access_labels_tenant_name_uniq UNIQUE NULLS NOT DISTINCT (tenant_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_labels_tenant_id
+  ON access_labels (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_access_labels_name
+  ON access_labels (name);
+
+-- user_labels: grant table — which users hold which labels.
+CREATE TABLE IF NOT EXISTS user_labels (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  user_id     TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  label_name  TEXT NOT NULL,
+  tenant_id   TEXT,
+  granted_by  TEXT NOT NULL,
+  granted_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT user_labels_user_label_tenant_uniq UNIQUE NULLS NOT DISTINCT (user_id, label_name, tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_labels_user_id
+  ON user_labels (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_labels_label_name
+  ON user_labels (label_name);
+CREATE INDEX IF NOT EXISTS idx_user_labels_tenant_id
+  ON user_labels (tenant_id);
+
+-- labeled_ground_truth: stores encrypted sensitive content classified under a label.
+-- The outer RLS boundary (tenant_id) is preserved; the label is the inner boundary.
+-- Content is encrypted with a per-label DEK (unwrapped from wrapped_content_key).
+CREATE TABLE IF NOT EXISTS labeled_ground_truth (
+  id                TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  entity_id         TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  label_name        TEXT NOT NULL,
+  tenant_id         TEXT,
+  encrypted_content TEXT NOT NULL,
+  created_by        TEXT NOT NULL,
+  created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (entity_id, label_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_labeled_ground_truth_entity_id
+  ON labeled_ground_truth (entity_id);
+CREATE INDEX IF NOT EXISTS idx_labeled_ground_truth_label_name
+  ON labeled_ground_truth (label_name);
+CREATE INDEX IF NOT EXISTS idx_labeled_ground_truth_tenant_id
+  ON labeled_ground_truth (tenant_id);
+
+INSERT INTO _schema_version (migration) VALUES ('label-clearance-001')
+  ON CONFLICT (migration) DO NOTHING;
