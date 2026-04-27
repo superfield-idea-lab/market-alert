@@ -7,9 +7,6 @@
 #
 # Production deploys require reviewer approval via GitHub Environment protection.
 # Operators can deploy an older tag or re-deploy (rollback) without a new release.
-#
-# See docs/host-init-script.md for the full deployment runbook, including
-# GitHub Environment setup, SSH tunnel troubleshooting, and secret configuration.
 
 name: Deploy
 

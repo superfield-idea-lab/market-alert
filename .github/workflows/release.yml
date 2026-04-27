@@ -10,8 +10,6 @@
 #   - Production deploys to require reviewer approval (GitHub Environment rules)
 #   - Rollback to an earlier image tag without creating a new release
 #   - Re-deployment of the same tag for config-only changes
-#
-# See docs/host-init-script.md for the full deployment runbook.
 
 name: Release
 

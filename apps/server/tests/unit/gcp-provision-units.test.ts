@@ -14,7 +14,6 @@ import {
   ensureRequiredServices,
   ensureSubnetwork,
   ensureVm,
-  ensureVmTalos,
 } from '../../../../scripts/gcp/provision';
 
 import { createFixtureServer } from '../helpers/msw-fixture-server';
@@ -219,23 +218,6 @@ describe('Provision resource functions (MSW fixture replay)', () => {
         }),
       ),
     ).rejects.toThrow('No external IP found on VM');
-  });
-
-  test('ensureVmTalos returns IP for already-running VM', async () => {
-    const ip = await withFixtures('vm-exists-running', () =>
-      ensureVmTalos({
-        projectId: 'test-project',
-        zone: 'us-central1-a',
-        vmName: 'test-vm',
-        vmMachineType: 'e2-standard-4',
-        vmDiskSizeGb: 50,
-        vmDiskType: 'pd-balanced',
-        talosImage: 'projects/test-project/global/images/talos-v1-8-0',
-        subnetworkSelfLink: 'https://sub/self',
-        targetTag: 'tag',
-      }),
-    );
-    expect(ip).toBe('34.1.2.3');
   });
 
   test('ensureAlloyDb creates cluster and instance, returns IP', async () => {
