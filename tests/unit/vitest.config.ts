@@ -12,6 +12,7 @@
  *  - chunker.test.ts                     — sentence-boundary max-tokens chunker (issue #29)
  *  - autolearn-pod-spec.test.ts          — distroless pod spec manifest assertions (issue #35)
  *  - autolearn-network-policy.test.ts    — autolearn worker NetworkPolicy validation (issue #102)
+ *  - cookie-config.test.ts               — auth cookie SameSite=Strict decision record (issue #228)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -36,6 +37,7 @@ export default defineConfig({
       'chunker.test.ts',
       'autolearn-pod-spec.test.ts',
       'autolearn-network-policy.test.ts',
+      'cookie-config.test.ts',
     ],
     root: resolve(import.meta.dirname),
   },

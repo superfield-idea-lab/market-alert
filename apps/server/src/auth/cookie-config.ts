@@ -1,9 +1,26 @@
 /**
  * Environment-aware auth cookie configuration.
  *
- * Session cookies are always issued HttpOnly and SameSite=Strict — the required
- * posture for passkey-only authentication per the Phase 1 security foundation
- * requirements (issue #14, AUTH blueprint).
+ * Session cookies are always issued HttpOnly and SameSite=Strict — the correct
+ * posture for this application's authentication model and deployment pattern.
+ *
+ * SameSite=Strict (intentional — issue #228 security decision record):
+ *   SameSite=Lax allows cookies on top-level cross-site GET navigations, which
+ *   is necessary for OAuth/SSO redirect flows (where an external IdP lands the
+ *   user back on an authenticated page). Finance-kb uses passkey-only FIDO2
+ *   authentication with no OAuth callbacks, no SAML SSO, and no external redirect
+ *   flows. All authentication ceremonies are same-origin (POST to /api/auth/passkey/*).
+ *   Users navigate directly to the SPA. SameSite=Strict is therefore the correct
+ *   posture and does not break any in-use browser flow.
+ *
+ *   The template repo (calypso-blueprint) uses SameSite=Lax to accommodate
+ *   OAuth/SSO patterns that finance-kb deliberately does not implement.
+ *
+ *   CSRF posture: finance-kb also enforces double-submit CSRF protection
+ *   (__Host-csrf-token, X-CSRF-Token header check in auth/csrf.ts) on all
+ *   state-mutating routes. That protection is independent of SameSite and
+ *   remains sufficient regardless of this setting. If a future release adds
+ *   OAuth/SSO, revisit both this setting and the CSRF controls together.
  *
  * When SECURE_COOKIES=true the cookie uses the __Host- prefix and the Secure
  * flag — the correct posture for HTTPS deployments.
@@ -37,8 +54,8 @@ export function getAuthCookieName(): string {
  * HTTPS mode: `__Host-superfield_auth=<token>; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800`
  * Dev mode:   `superfield_auth=<token>; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`
  *
- * SameSite=Strict is used in both modes to enforce strict session cookie posture
- * as required by the Phase 1 security foundation (issue #14, AUTH blueprint).
+ * SameSite=Strict is used in both modes. See the module-level comment for the
+ * full security decision record (issue #228, issue #14, AUTH blueprint).
  */
 export function authCookieHeader(token: string): string {
   if (isSecureCookies()) {
