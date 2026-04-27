@@ -76,7 +76,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
     vi.spyOn(responseModule, 'isSuperuser').mockReturnValue(false);
 
     const appState = makeAppState();
-    const req = makeRequest('GET', '/api/admin/users', undefined, 'calypso_auth=fake');
+    const req = makeRequest('GET', '/api/admin/users', undefined, 'superfield_auth=fake');
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
     expect(result?.status).toBe(403);
@@ -108,7 +108,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
 
     const appState = makeAppState(userRows, [{ count: '2' }]);
 
-    const req = makeRequest('GET', '/api/admin/users', undefined, 'calypso_auth=fake');
+    const req = makeRequest('GET', '/api/admin/users', undefined, 'superfield_auth=fake');
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
     expect(result?.status).toBe(200);
@@ -144,7 +144,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
 
     const appState = makeAppState([matchingUser], [{ count: '1' }]);
 
-    const req = makeRequest('GET', '/api/admin/users?q=alice', undefined, 'calypso_auth=fake');
+    const req = makeRequest('GET', '/api/admin/users?q=alice', undefined, 'superfield_auth=fake');
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
     expect(result?.status).toBe(200);
@@ -183,7 +183,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
 
     const appState = makeAppState(userRows, [{ count: '2' }]);
 
-    const req = makeRequest('GET', '/api/admin/users?q=', undefined, 'calypso_auth=fake');
+    const req = makeRequest('GET', '/api/admin/users?q=', undefined, 'superfield_auth=fake');
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
     expect(result?.status).toBe(200);
@@ -215,7 +215,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
       'GET',
       '/api/admin/users?q=alice&role=superuser',
       undefined,
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -250,7 +250,7 @@ describe('Admin Users API — GET /api/admin/users', () => {
       'GET',
       '/api/admin/users?role=superuser',
       undefined,
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -291,7 +291,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       'PATCH',
       '/api/admin/users/target-id',
       { role: 'admin' },
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -308,7 +308,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
     vi.spyOn(responseModule, 'isSuperuser').mockReturnValue(true);
 
     const appState = makeAppState();
-    const req = makeRequest('PATCH', '/api/admin/users/target-id', {}, 'calypso_auth=fake');
+    const req = makeRequest('PATCH', '/api/admin/users/target-id', {}, 'superfield_auth=fake');
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
     expect(result?.status).toBe(400);
@@ -328,7 +328,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       'PATCH',
       '/api/admin/users/nonexistent',
       { role: 'admin' },
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -374,7 +374,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       'PATCH',
       '/api/admin/users/target-id',
       { role: 'admin' },
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -435,7 +435,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       'PATCH',
       '/api/admin/users/target-id',
       { active: false },
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);
@@ -493,7 +493,7 @@ describe('Admin Users API — PATCH /api/admin/users/:id', () => {
       'PATCH',
       '/api/admin/users/target-id',
       { active: true },
-      'calypso_auth=fake',
+      'superfield_auth=fake',
     );
     const url = new URL(req.url);
     const result = await handleAdminRequest(req, url, appState);

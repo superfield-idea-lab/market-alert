@@ -1,8 +1,8 @@
 {
   "request": {
     "body": {
-      "network": "projects/914441959143/global/networks/calypso-demo",
-      "reservedPeeringRanges": ["calypso-demo-psa"]
+      "network": "projects/914441959143/global/networks/superfield-demo",
+      "reservedPeeringRanges": ["superfield-demo-psa"]
     },
     "method": "POST",
     "url": "https://servicenetworking.googleapis.com/v1/services/servicenetworking.googleapis.com/connections"

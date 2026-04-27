@@ -49,7 +49,7 @@ import { emitAuditEvent } from '../policies/audit-service';
 import { getUserAccessFlags } from '../lib/access';
 
 // The Relying Party name (display only, not security-critical).
-const RP_NAME = process.env.RP_NAME ?? 'Calypso';
+const RP_NAME = process.env.RP_NAME ?? 'Superfield';
 
 // Default fallback values when no request headers or env vars are available.
 const DEFAULT_RP_ID = 'localhost';

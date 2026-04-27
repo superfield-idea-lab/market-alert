@@ -66,8 +66,8 @@ beforeAll(async () => {
     AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 
-  const appUrl = makeRoleUrl(pg.url, 'calypso_app', 'app_rw', TEST_PASSWORDS.app);
-  const auditUrl = makeRoleUrl(pg.url, 'calypso_audit', 'audit_w', TEST_PASSWORDS.audit);
+  const appUrl = makeRoleUrl(pg.url, 'superfield_app', 'app_rw', TEST_PASSWORDS.app);
+  const auditUrl = makeRoleUrl(pg.url, 'superfield_audit', 'audit_w', TEST_PASSWORDS.audit);
 
   sql = postgres(appUrl, { max: 3 });
   auditSql = postgres(auditUrl, { max: 3 });

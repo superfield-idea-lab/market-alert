@@ -266,16 +266,16 @@ test('NetworkPolicy for transcription worker blocks external egress (spec check)
 
   // Must define a NetworkPolicy for the transcription worker
   expect(manifest).toContain('kind: NetworkPolicy');
-  expect(manifest).toContain('calypso-worker-transcription-egress');
+  expect(manifest).toContain('superfield-worker-transcription-egress');
 
   // Must restrict pod selector to the transcription worker
-  expect(manifest).toContain('app: calypso-worker-transcription');
+  expect(manifest).toContain('app: superfield-worker-transcription');
 
   // Must declare Egress policy type
   expect(manifest).toContain('Egress');
 
-  // Must allow egress to the API gateway (calypso-app) only
-  expect(manifest).toContain('app: calypso-app');
+  // Must allow egress to the API gateway (superfield-app) only
+  expect(manifest).toContain('app: superfield-app');
 
   // Must allow DNS (port 53)
   expect(manifest).toContain('port: 53');

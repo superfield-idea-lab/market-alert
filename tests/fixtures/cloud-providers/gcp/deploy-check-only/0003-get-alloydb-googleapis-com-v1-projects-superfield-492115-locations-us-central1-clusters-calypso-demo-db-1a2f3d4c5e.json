@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "url": "https://alloydb.googleapis.com/v1/projects/superfield-492115/locations/us-central1/clusters/calypso-demo-db"
+    "url": "https://alloydb.googleapis.com/v1/projects/superfield-492115/locations/us-central1/clusters/superfield-demo-db"
   },
   "response": {
     "body": {

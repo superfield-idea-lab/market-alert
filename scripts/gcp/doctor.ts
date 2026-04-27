@@ -99,7 +99,7 @@ Usage:
 
 Credential sources, in resolution order:
   1. GCP_ACCESS_TOKEN
-  2. GCP_OAUTH_TOKEN_FILE (default: ~/.config/calypso/gcp-oauth-token.json)
+  2. GCP_OAUTH_TOKEN_FILE (default: ~/.config/superfield/gcp-oauth-token.json)
   3. GCP_SERVICE_ACCOUNT_JSON
   4. GOOGLE_APPLICATION_CREDENTIALS
   5. GCP_SERVICE_ACCOUNT_FILE
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   }
 
   const projectId = resolveRequiredOption(args, 'project', ['GCP_PROJECT_ID'], 'GCP project');
-  const modeValue = resolveOption(args, 'mode', ['CALYPSO_GCP_DOCTOR_MODE'], 'provision');
+  const modeValue = resolveOption(args, 'mode', ['SUPERFIELD_GCP_DOCTOR_MODE'], 'provision');
   if (modeValue !== 'provision' && modeValue !== 'deploy') {
     throw new Error(`--mode must be "provision" or "deploy", got "${modeValue}"`);
   }

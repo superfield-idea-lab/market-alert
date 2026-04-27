@@ -1,0 +1,1751 @@
+meta:
+  domain: PROCESS
+  title: Process Blueprint
+  version: 1
+  requires: []
+  vision: |
+    Software development is a state machine. Each unit of work transforms the project from one
+    known state to a known next state. In human-driven development, the state machine runs on
+    tribal knowledge, standup meetings, and ticket boards — none of which an AI agent can attend.
+    When an agent starts a session, it has no memory of what happened yesterday, no sense of what
+    is blocked, and no intuition about what matters most. Without an explicit, machine-readable
+    process, the agent either waits for a human to tell it what to do next (defeating the purpose
+    of autonomous development) or guesses (producing work that may be irrelevant, redundant, or
+    out of order).
+
+    A correct process for agent-driven development makes the state machine explicit. Product
+    requirements and implementation plans live in GitHub Issues, not in repository files. The
+    product owner maintains an Implementation Plan issue that links to feature issues. Each feature
+    issue tracks motivation, acceptance criteria, test scenarios, and completion stage. Every commit
+    moves work forward through the issue tracker, and the issue descriptions encode the instructions
+    for the next action. In Calypso, that loop is governed by Calypso itself: a YAML workflow
+    definition declares states, transitions, roles, and gates, and the Calypso CLI orchestrates
+    agents against that machine. The agent becomes self-advancing under policy control — a human
+    can walk away for hours and return to find meaningful, ordered progress.
+
+    Calypso CLI is not the coding agent. It is the process authority. It owns state transitions,
+    validates gates, schedules narrow role-specific agents, and records structured outcomes. Git
+    and GitHub are part of the control surface, not incidental integrations. The primary interactive
+    operator surface is the local CLI and TUI; a browser operator surface may exist, but the
+    process model does not depend on one.
+
+    The cost of ignoring this blueprint is an agent that produces impressive-looking code in random
+    order, skipping foundational work to build visible features, leaving gaps that compound until
+    the project requires a human to manually re-plan and re-prioritize. The process is not overhead
+    — it is the mechanism that converts an agent from a sophisticated autocomplete into a reliable
+    development partner.
+
+rules:
+  # ── Threats ──────────────────────────────────────────────────────────────────
+
+  - number: PROCESS-T-001
+    hash: c66f31f99932
+    name: no-prior-context
+    type: threat
+    description: >
+      Agent starts a session with no context about prior work. Continuity must
+      be protected so the agent resumes exactly where the last session left off.
+    links:
+      - {target: c93476ff124b, rel: depends_on}
+      - {target: 7adecf113ceb, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-002
+    hash: 8f6e7b3a1ff9
+    name: premature-feature-work
+    type: threat
+    description: >
+      Agent builds features before foundational infrastructure exists. Build
+      order must be protected so scaffolding, CI, and test stubs precede
+      feature work.
+    links:
+      - {target: f67b4697ac23, rel: depends_on}
+      - {target: 3d643a9a5413, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-003
+    hash: 7e4846b171b8
+    name: requirements-change-mid-development
+    type: threat
+    description: >
+      Product requirements change mid-development. The plan must accommodate
+      changes without losing track of completed work.
+    links:
+      - {target: 22de09615f92, rel: depends_on}
+      - {target: ce4b1e4f537f, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-004
+    hash: a37eb4c4e40f
+    name: priority-inversion
+    type: threat
+    description: >
+      Agent works on low-priority tasks while critical work is blocked. The
+      implementation plan must encode priority and ordering.
+    links:
+      - {target: 22de09615f92, rel: depends_on}
+      - {target: ce4b1e4f537f, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-005
+    hash: b91051b5cbdd
+    name: conflicting-parallel-plans
+    type: threat
+    description: >
+      Multiple agents work on the same project with conflicting plans. One
+      Calypso state machine must govern advancement; agents do not invent
+      parallel plans.
+    links:
+      - {target: 5ad85d2660cc, rel: depends_on}
+      - {target: d1479e8e74df, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-006
+    hash: 317d3bdac57a
+    name: stale-plan-after-commit
+    type: threat
+    description: >
+      Agent completes work but does not update the plan. The plan must reflect
+      reality at every commit.
+    links:
+      - {target: 22de09615f92, rel: depends_on}
+      - {target: 2110600d43f2, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-007
+    hash: f517de24772c
+    name: human-override-ignored
+    type: threat
+    description: >
+      Human overrides the agent's next task. The next-prompt file is
+      human-editable and the agent must respect overrides.
+    links:
+      - {target: c93476ff124b, rel: depends_on}
+      - {target: 7adecf113ceb, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-008
+    hash: 94f48f83cfcb
+    name: session-crash-data-loss
+    type: threat
+    description: >
+      Agent session crashes mid-task. Git commits are the unit of durable
+      progress; uncommitted work is forfeit.
+    links:
+      - {target: 00a96cb15cc4, rel: depends_on}
+      - {target: ab00fd72fad4, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-009
+    hash: 88f41cbb90a5
+    name: ambiguous-requirements
+    type: threat
+    description: >
+      Requirements are ambiguous or incomplete. The PRD interview must extract
+      concrete, testable requirements.
+    links:
+      - {target: 86131854ce87, rel: depends_on}
+      - {target: 036dcf4739fc, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-010
+    hash: 25b0c6b0529d
+    name: self-attestation
+    type: threat
+    description: >
+      A producing agent marks its own work complete without review. State
+      advancement requires the configured validation transition, not
+      self-attestation.
+    links:
+      - {target: 5ad85d2660cc, rel: depends_on}
+      - {target: 0cb0c7f4709f, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-011
+    hash: 501fa0288e4a
+    name: gate-skipping
+    type: threat
+    description: >
+      Gates are skipped because an agent believes the work is correct. The CLI
+      must evaluate declared gates before entering the next state.
+    links:
+      - {target: 6fab3fb9c823, rel: depends_on}
+      - {target: 309a8b908fc1, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-T-012
+    hash: "a1f3c8e24b91"
+    name: merge-without-required-checks
+    type: threat
+    description: >
+      A PR is merged to main before all required CI checks pass. Without
+      enforced branch protection rulesets, no bypass actor restriction, and
+      a PR checklist gate, broken or incomplete code can enter the main
+      branch and be deployed.
+    links:
+      - {target: 7d2a9f1e50c3, rel: depends_on}
+      - {target: 501fa0288e4a, rel: depends_on}
+    deprecated: false
+
+  # ── Principles ───────────────────────────────────────────────────────────────
+
+  - number: PROCESS-P-001
+    hash: 00a96cb15cc4
+    name: commit-is-unit-of-progress
+    type: principle
+    description: >
+      Every meaningful state change is captured in a git commit. Between
+      commits, work is speculative and lossy. The agent's goal is to reach the
+      next committable state as quickly as possible. Small, frequent commits
+      create fine-grained history that is easy to review, revert, and resume.
+    links:
+      - {target: 94f48f83cfcb, rel: mitigates}
+      - {target: ab00fd72fad4, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-P-002
+    hash: 22de09615f92
+    name: plans-are-living-documents
+    type: principle
+    description: >
+      An implementation plan written once and never updated is fiction within
+      days. The plan is updated at every commit: new tasks are discovered and
+      added, completed tasks are checked off, ordering is adjusted based on
+      implementation learnings. The plan is the agent's working memory across
+      sessions.
+    links:
+      - {target: 7e4846b171b8, rel: mitigates}
+      - {target: 317d3bdac57a, rel: mitigates}
+      - {target: e856a0333bca, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-P-003
+    hash: 5ad85d2660cc
+    name: state-machine-authorizes-progression
+    type: principle
+    description: >
+      Agents do not decide unilaterally that work is complete, reviewed, or
+      ready for the next phase. Calypso provides a YAML state machine defining
+      states, allowed transitions, assigned agent roles, validation roles, and
+      deterministic gates. The CLI evaluates that machine and advances work
+      only when declared transition conditions pass.
+    links:
+      - {target: b91051b5cbdd, rel: mitigates}
+      - {target: 25b0c6b0529d, rel: mitigates}
+      - {target: d1479e8e74df, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-P-004
+    hash: c93476ff124b
+    name: next-action-always-explicit
+    type: principle
+    description: >
+      An agent should never need to decide what to do next by analyzing the
+      entire codebase from scratch. The next-prompt file contains a single,
+      self-contained instruction for the very next action. It is written by
+      the agent at the end of each commit. A human can override it at any time.
+    links:
+      - {target: c66f31f99932, rel: mitigates}
+      - {target: f517de24772c, rel: mitigates}
+      - {target: 7adecf113ceb, rel: refines}
+      - {target: baf471cbca13, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-P-005
+    hash: d3cf920a8f05
+    name: agents-are-narrow-specialists
+    type: principle
+    description: >
+      Agents operate with narrow context and perform small tasks. A producing
+      agent solves one constrained step. A checking agent validates that output
+      against explicit criteria. The state machine decides whether work
+      advances, loops for correction, or escalates. Broad free-form agent
+      autonomy is replaced by specialized roles and explicit transitions.
+    links:
+      - {target: 0cb0c7f4709f, rel: refines}
+      - {target: 309eabc8623a, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-P-006
+    hash: 86131854ce87
+    name: requirements-extracted-not-assumed
+    type: principle
+    description: >
+      The agent does not guess what the product should do. It generates
+      structured interview questions, collects answers from the Product Owner,
+      and writes a canonical PRD with testable acceptance criteria. The PRD is
+      the contract: if it is not in the PRD, the agent does not build it.
+    links:
+      - {target: 88f41cbb90a5, rel: mitigates}
+      - {target: 036dcf4739fc, rel: refines}
+      - {target: 9fa4fad8a2c3, rel: mitigates}
+      - {target: cbc24fa6797a, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-P-007
+    hash: f67b4697ac23
+    name: infrastructure-enforces-sequencing
+    type: principle
+    description: >
+      An agent cannot begin feature work while foundational infrastructure is
+      incomplete. Repository, CI, test stubs, and deployment must be
+      operational before the first feature commit. A checklist of concrete,
+      verifiable conditions governs this gate.
+    links:
+      - {target: 8f6e7b3a1ff9, rel: mitigates}
+      - {target: 3d643a9a5413, rel: refines}
+      - {target: a9a86673862d, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-P-008
+    hash: 6fab3fb9c823
+    name: deterministic-gates-first-class
+    type: principle
+    description: >
+      Every important transition has explicit gates: tests pass, required
+      documents exist, review step completed, environment prepared. These
+      gates are deterministic checks controlled by the Calypso state machine
+      and executed by the CLI. If a gate is not machine-checkable, it is not
+      yet a reliable transition condition.
+    links:
+      - {target: 501fa0288e4a, rel: mitigates}
+      - {target: 309a8b908fc1, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-P-009
+    hash: "7d2a9f1e50c3"
+    name: main-is-always-deployable
+    type: principle
+    description: >
+      Every commit on main has passed all nine required CI checks: build,
+      lint, format, unit, integration, e2e, coverage (≥99% line threshold),
+      checklist, and depends-on. No bypass actors are permitted — not even admins. The
+      branch protection ruleset is applied to the repository immediately after
+      first push and is never relaxed. Violations are not corrected after the
+      fact; they are prevented at the gate.
+    links:
+      - {target: a1f3c8e24b91, rel: mitigates}
+      - {target: 6fab3fb9c823, rel: refines}
+      - {target: b4e71d903a28, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-P-010
+    hash: "c7e4b2d18f39"
+    name: user-grounded-intake
+    type: principle
+    description: >
+      Every feature request must identify at least one named user role and
+      provide at least one user story per role before it advances to
+      architecture evaluation. Features specified without user context produce
+      implementations that serve the implementer's assumptions rather than
+      actual user needs.
+    links:
+      - {target: 036dcf4739fc, rel: refines}   # PROCESS-D-008 structured-requirements-interview
+    deprecated: false
+
+  # ── Design Patterns ─────────────────────────────────────────────────────────
+
+  - number: PROCESS-D-001
+    hash: ce4b1e4f537f
+    name: three-document-planning-loop
+    type: design_pattern
+    description: >
+      Maintain three planning artifacts with distinct scopes and storage: a
+      Product Requirements Document (what to build, human-owned, committed to
+      the repository), an Implementation Plan (all tasks with ordering and
+      completion state, agent-owned, maintained as a GitHub Issue), and a Next
+      Prompt (single next action, agent-owned, written as a local untracked
+      file for session recovery). The PRD constrains the plan; the plan
+      generates the next prompt. Information flows down; overrides flow up.
+    problem: |
+      An agent needs to know what the product should do, what work remains, and what to do right
+      now. These are three different questions with different owners and different update
+      frequencies. Maintaining all of them as committed repository files creates merge conflicts,
+      state drift, and requires synchronization at commit time. Not all planning artifacts belong
+      in version control.
+    solution: |
+      Store each artifact where it belongs:
+      - PRD: committed to the repository at docs/prd.md. Human-owned. Version-controlled because
+        it is the product contract that every agent and reviewer must be able to inspect.
+      - Implementation Plan: a GitHub Issue. Agent-owned, updated by the agent after each task.
+        Lives where pull requests live, making task tracking and PR context visible in the same
+        system. An Implementation Plan Issue links to feature issues, each with Motivation,
+        Features, Test Plan, and Stage sections.
+      - Next Prompt: a local untracked file (next-prompt.md, gitignored or otherwise not
+        committed). Agent-owned, written at the end of each work session. Exists purely for
+        recovery when an agent loses session context — it is not a team artifact and must not
+        enter version control.
+    tradeoffs: |
+      Moving the implementation plan to GitHub Issues means the agent uses gh to update it instead
+      of editing a file. The next-prompt file being untracked means it cannot be recovered from
+      git history if lost — but it is a transient artifact by design; the implementation plan
+      issue provides the durable state. Pre-commit hooks must not gate on either the plan issue or
+      the next-prompt file.
+    links:
+      - {target: 22de09615f92, rel: refines}
+      - {target: c93476ff124b, rel: refines}
+      - {target: 7adecf113ceb, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-002
+    hash: 7adecf113ceb
+    name: self-advancing-state-machine
+    type: design_pattern
+    description: >
+      Each commit writes the next-prompt file as its final action. The next
+      session reads this file first. Commit N writes instructions for commit
+      N+1, creating a self-advancing chain. The agent can execute multiple
+      commits in a single session without human input between them. A human
+      can break the chain by editing the next-prompt file.
+    problem: |
+      Agent sessions are discontinuous. Each session starts cold, with no memory of the previous
+      session. Without explicit continuation, the agent must re-derive the project state from
+      scratch — which is slow, error-prone, and may produce different conclusions each time.
+    solution: |
+      Each commit writes the next-prompt file as its final action. The next session reads this
+      file as its first action. The result is a chain: commit N writes the instructions for commit
+      N+1, which writes the instructions for commit N+2. The agent can execute multiple commits in
+      a single session without waiting for human input between them. A human can break the chain at
+      any time by editing the next-prompt file.
+    tradeoffs: |
+      If the agent writes a poor next-prompt (too vague, wrong priority), the next session starts
+      on the wrong foot. Mitigated by the implementation plan, which provides broader context. If
+      both are wrong, the human intervenes by editing one or both.
+    links:
+      - {target: c93476ff124b, rel: refines}
+      - {target: ce4b1e4f537f, rel: refines}
+      - {target: baf471cbca13, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-D-003
+    hash: d1479e8e74df
+    name: calypso-yaml-workflow-definition
+    type: design_pattern
+    description: >
+      Calypso provides a YAML file declaring the workflow state machine. Each
+      state defines the responsible agent role, accepted inputs, required
+      outputs, allowed next states, validation requirements, and deterministic
+      gates. The default feature workflow includes states: new, prd-review,
+      architecture-plan, scaffold-tdd, architecture-review, implementation,
+      waiting-for-human, qa-validation, ready-for-review, release-ready, done,
+      blocked, aborted. The feature-unit invariant requires one feature equals
+      one branch, one worktree, and one PR.
+    problem: |
+      A prose description of workflow order is too weak for multi-agent orchestration. Different
+      agents will interpret the same written process differently and invent incompatible branching
+      behavior.
+    solution: |
+      Calypso provides a YAML file that declares the workflow state machine. Each state defines the
+      responsible agent role, accepted inputs, required outputs, allowed next states, validation
+      requirements, and deterministic gates. The YAML is the process authority. Agents read it; the
+      Calypso CLI enforces it. The feature-unit invariant (one feature = one branch = one worktree
+      = one PR) is required evidence before work can advance.
+    tradeoffs: |
+      Authoring a correct state machine is more upfront work than writing a loose checklist. That
+      cost is acceptable because ambiguous workflow logic is what creates hidden coordination
+      failures in autonomous systems.
+    links:
+      - {target: 5ad85d2660cc, rel: refines}
+      - {target: 0cb0c7f4709f, rel: refines}
+      - {target: 309a8b908fc1, rel: refines}
+      - {target: 0586a33b4412, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-004
+    hash: 0cb0c7f4709f
+    name: producer-validator-handoff
+    type: design_pattern
+    description: >
+      Separate production transitions from validation transitions. A producer
+      agent completes a narrow task and emits an artifact. A validator agent
+      checks that artifact against explicit criteria. Only then may the state
+      machine advance. Roles include orchestrator, architect, engineer,
+      merge-queue, human-or-product, human-or-architect, human, and github.
+      Review is part of the state machine, not an optional courtesy.
+    problem: |
+      If the same agent that produces work is also trusted to decide that the work is correct,
+      multi-agent execution collapses into self-attestation.
+    solution: |
+      Separate production transitions from validation transitions. A producer agent completes a
+      narrow task and emits the required artifact. A validator agent with similarly narrow scope
+      checks that artifact against explicit criteria. Only then may the state machine move to the
+      next state. The validator does not rewrite the whole project; it verifies one bounded output.
+    tradeoffs: |
+      This adds another step to many tasks. The cost is intentional because review is part of the
+      state machine, not an optional courtesy.
+    links:
+      - {target: d3cf920a8f05, rel: refines}
+      - {target: 25b0c6b0529d, rel: mitigates}
+      - {target: d1479e8e74df, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-005
+    hash: dd6fe2c636ef
+    name: merge-queue-ownership
+    type: design_pattern
+    description: >
+      Calypso assigns merge ordering and execution to a dedicated merge-queue
+      role. The merge-queue agent determines which merge-ready features land
+      first, records the rationale, marks only the queue-head feature as
+      eligible to merge, and executes the merge. Other features remain
+      merge-ready but blocked on queue position rather than implementation
+      quality.
+    problem: |
+      A feature can be individually merge-ready while still being the wrong next PR to land. Shared
+      dependencies, main drift risk, rollout sequencing, and review ordering all create cases where
+      multiple acceptable PRs still need a deterministic landing order.
+    solution: |
+      Calypso assigns merge ordering and merge execution to a dedicated merge-queue role. The
+      merge-queue agent does not re-review the whole implementation; it determines which
+      merge-ready features should land first, records the rationale, marks only one queue-head
+      feature as eligible to merge, and executes that merge when the queue conditions hold. Other
+      features remain merge-ready but blocked on queue position rather than on implementation
+      quality.
+    tradeoffs: |
+      This introduces another explicit stage between "ready for review" and "merged." That overhead
+      is justified because merge order is part of repository safety, not a social afterthought.
+    links:
+      - {target: d1479e8e74df, rel: refines}
+      - {target: 309a8b908fc1, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-006
+    hash: 309a8b908fc1
+    name: gate-groups-and-evidence
+    type: design_pattern
+    description: >
+      The Calypso YAML groups deterministic gates by concern. Default gate
+      groups include specification, implementation, validation, and
+      merge-readiness. Each gate declares its owner, evidence source, blocking
+      behavior, and PR checklist label. This unifies local checks, CI checks,
+      agent review tasks, and human approvals into one transition model.
+    problem: |
+      Workflow states are not enough on their own. A transition also needs explicit proof that the
+      required conditions are satisfied.
+    solution: |
+      The Calypso YAML groups deterministic gates by concern. Default gate groups include
+      specification, implementation, validation, and merge-readiness. Each gate declares its owner,
+      evidence source, blocking behavior, and PR checklist label. This lets Calypso unify local
+      checks, CI checks, agent review tasks, and human approvals into one transition model instead
+      of scattering them across shell scripts and tribal process.
+    tradeoffs: |
+      Gate modeling increases workflow authoring complexity. The benefit is that process state and
+      proof of compliance live in the same machine-readable artifact.
+    links:
+      - {target: 6fab3fb9c823, rel: refines}
+      - {target: d1479e8e74df, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-007
+    hash: 0586a33b4412
+    name: task-catalog-backing-workflow
+    type: design_pattern
+    description: >
+      The Calypso workflow declares a task catalog. Default tasks include
+      builtins (doctor-clean, feature-unit-bound, workflow-files-present,
+      rust-quality, test-matrix, main-compatibility), agent tasks (pr-editor,
+      documentation-merge, blueprint-review), and human tasks
+      (human-clarification, human-review-approval). Each task has a kind and
+      implementation or assigned role, letting the state machine reference
+      stable task identifiers.
+    problem: |
+      A workflow state machine can name transitions and gates without defining which executable
+      tasks actually satisfy them. That leaves enforcement ambiguous.
+    solution: |
+      The Calypso workflow also declares a task catalog. Default task sets include builtins
+      (doctor-clean, feature-unit-bound, workflow-files-present, rust-quality, test-matrix,
+      main-compatibility), agent tasks (pr-editor, documentation-merge, blueprint-review), and
+      human tasks (human-clarification, human-review-approval). Each task has a kind and, where
+      relevant, a builtin implementation or an assigned agent role.
+    tradeoffs: |
+      The workflow now has two coordinated artifacts inside one schema: state logic and task
+      inventory. That is more structure, but it prevents drift between "what must happen" and
+      "what can actually execute."
+    links:
+      - {target: d1479e8e74df, rel: refines}
+      - {target: 309a8b908fc1, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-008
+    hash: 036dcf4739fc
+    name: structured-requirements-interview
+    type: design_pattern
+    description: >
+      The agent generates a structured interview document with concrete
+      questions organized by domain: user roles, data model, workflows,
+      integrations, constraints. The Product Owner answers in writing. The
+      agent synthesizes answers into a canonical PRD with testable acceptance
+      criteria. If it is not in the PRD, the agent does not build it.
+    problem: |
+      Product requirements communicated informally (chat messages, verbal descriptions, vague
+      feature requests) produce vague, incomplete, and contradictory specifications. The agent
+      builds what it thinks was meant, not what was actually needed.
+    solution: |
+      The agent generates a structured interview document with concrete questions organized by
+      domain: user roles, data model, workflows, integrations, constraints. The Product Owner
+      answers in writing. The agent synthesizes the answers into a canonical PRD with testable
+      acceptance criteria. The PRD is the contract — if it is not in the PRD, the agent does not
+      build it.
+    tradeoffs: |
+      The interview process takes time upfront. Product Owners may resist the formality. But the
+      alternative — building from informal requirements and iterating on misunderstandings — costs
+      far more in rework.
+    links:
+      - {target: 86131854ce87, rel: refines}
+      - {target: 88f41cbb90a5, rel: mitigates}
+      - {target: cbc24fa6797a, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-D-009
+    hash: 3d643a9a5413
+    name: infrastructure-before-features
+    type: design_pattern
+    description: >
+      Before implementing any feature, the repository, CI pipeline, test
+      stubs, and deployment infrastructure must be operational. If the
+      scaffold is not complete, no feature work begins. The scaffold is a
+      prerequisite that must be satisfied immediately and maintained throughout
+      development.
+    problem: |
+      Agents optimize for visible output. Given a feature list, an agent will build the most
+      impressive-looking features first, leaving infrastructure, testing, and error handling for
+      "later." Later arrives and the codebase is a demo with no foundation.
+    solution: |
+      Before implementing any feature, the repository, CI pipeline, test stubs, and deployment
+      infrastructure must be operational. The rule is simple: if the scaffold is not complete, no
+      feature work begins. The scaffold is not a phase — it is a prerequisite that must be
+      satisfied immediately and maintained throughout development.
+    tradeoffs: |
+      This discipline requires resisting the pull toward visible progress. An agent that has not
+      shipped a feature may appear unproductive. The alternative — building features on a broken
+      foundation — produces work that cannot be tested, deployed, or extended.
+    links:
+      - {target: f67b4697ac23, rel: refines}
+      - {target: 8f6e7b3a1ff9, rel: mitigates}
+      - {target: a9a86673862d, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-D-010
+    hash: "4a9c2e7d1b83"
+    name: pr-depends-on-enforcement
+    type: design_pattern
+    description: >
+      Declare explicit merge-order dependencies between PRs using a
+      `Depends-on: #N` line in the PR body, enforced by a GitHub Actions
+      workflow that fails until PR #N is merged.
+    problem: |
+      When multiple PRs must land in a specific order (e.g. foundational
+      infrastructure before features, schema migrations before application
+      code), the dependency is tacit. Without machine enforcement, a PR can
+      be merged out of order by a reviewer who is unaware of the constraint,
+      or by an agent that lacks session context about which PR was opened
+      first. The result is a broken main branch or a revert.
+    solution: |
+      Add `.github/workflows/pr-depends-on.yml` (see examples/). When a PR
+      body contains the line `Depends-on: #N` (case-insensitive, leading
+      whitespace tolerant), the workflow fetches PR #N and fails the
+      `depends-on` status check until that PR is merged. The PR template
+      (`.github/PULL_REQUEST_TEMPLATE.md`) includes a reminder comment
+      showing the syntax. Pair with branch protection to make `depends-on`
+      a required status check so merge is physically blocked, not merely
+      advisory.
+    tradeoffs: |
+      Only one dependency level is enforced per PR. Chains require each PR
+      in the chain to declare its immediate predecessor. The check re-runs
+      on every push, so a dependency that becomes satisfied unblocks the PR
+      automatically without human action.
+    links:
+      - {target: 8f6e7b3a1ff9, rel: mitigates}
+      - {target: f67b4697ac23, rel: refines}
+      - {target: 3d643a9a5413, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-011
+    hash: "b4e71d903a28"
+    name: github-branch-protection-ruleset
+    type: design_pattern
+    description: >
+      Apply a GitHub repository ruleset immediately after the first push.
+      The ruleset targets ~DEFAULT_BRANCH, sets bypass_actors to [], and
+      requires twelve named status checks before merge: build, lint, format,
+      unit, integration, e2e, coverage, checklist, depends-on,
+      issue-checklist, conflicts, and single-issue. The pr-checklist.yml
+      workflow enforces all PR task items are checked; pr-depends-on.yml
+      blocks merge until any declared `Depends-on: #N` predecessor PR is
+      merged; pr-issue-checklist.yml blocks merge if the linked issue has
+      unchecked tasks; pr-conflicts.yml fails when the branch has merge
+      conflicts; pr-single-issue.yml enforces exactly one closing issue
+      reference. Because these checks only appear as known check names after
+      the first PR that triggers them, a dummy PR or workflow_dispatch run
+      must be used to pre-register each check name immediately after setup.
+    problem: |
+      Without enforced branch protection, any actor — including admins — can
+      merge a PR with failing tests, incomplete checklist items, or no CI run
+      at all. This is a single point of failure that bypasses every other
+      process guarantee the project depends on.
+    solution: |
+      Use the GitHub Rulesets API to create a ruleset with enforcement: active,
+      bypass_actors: [], and a required_status_checks rule listing all nine
+      check names. Store the ruleset JSON template in
+      examples/github-workflows/ruleset.json and apply it with:
+
+        gh api --method POST repos/{owner}/{repo}/rulesets \
+          --input ruleset.json
+
+      Add .github/workflows/pr-checklist.yml (from
+      examples/github-workflows/pr-checklist.yml) to the repository before
+      the first PR. After applying the ruleset, open and close a dummy PR or
+      trigger the workflow via workflow_dispatch so GitHub registers the
+      checklist check name as a known status check that the ruleset can
+      validate against.
+    tradeoffs: |
+      The checklist check requires at least one PR to have been opened before
+      it appears as a selectable required check in the GitHub UI. The ruleset
+      JSON must list the exact check name (checklist) that the workflow job
+      uses. Keeping the ruleset JSON in the repository makes it reproducible
+      and agent-applicable; it is not sensitive data.
+    links:
+      - {target: 7d2a9f1e50c3, rel: refines}
+      - {target: a1f3c8e24b91, rel: mitigates}
+      - {target: 3d643a9a5413, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-012
+    hash: 8a4c2e7f10d6
+    name: fused-gate-architecture
+    type: design_pattern
+    description: >
+      Two-tier gate model separating local dev gates (git hooks run by the
+      developer or agent) from project gates (GitHub Actions CI). The CLI
+      maintains a fused view: a unified model of declared gates versus actual
+      enforcement. Hook scripts and workflow files are the ground truth; YAML
+      declares intent but does not enforce. Doctor checks
+      (required-git-hooks-installed, required-workflows-present) detect drift
+      between declared and actual gate state.
+    links:
+      - {target: 6fab3fb9c823, rel: refines}   # PROCESS-P-008
+      - {target: 309a8b908fc1, rel: refines}   # PROCESS-D-006
+      - {target: b4e71d903a28, rel: refines}   # PROCESS-D-011
+    deprecated: false
+
+  - number: PROCESS-D-013
+    hash: "e3a7f1c09b24"
+    name: pr-issue-completeness-gate
+    type: design_pattern
+    description: >
+      Block PR merge if the linked GitHub issue has any unchecked task items,
+      enforced by a GitHub Actions workflow that parses the issue body.
+    problem: |
+      A PR can be merged while its acceptance criteria or test plan items are
+      still unchecked on the linked issue. The issue-level checklist is the
+      contract between what was planned and what was delivered; merging before
+      it is complete silently ignores unfinished work and makes the issue
+      unreliable as a record of completion.
+    solution: |
+      Add `.github/workflows/pr-issue-checklist.yml` (see examples/). The
+      workflow parses all `Closes/Fixes/Resolves #N` references from the PR
+      body, fetches each linked issue via the GitHub REST API, and fails the
+      `issue-checklist` status check if any `- [ ]` items remain in the issue
+      body. Register `issue-checklist` as a required status check in the
+      branch protection ruleset so merge is physically blocked.
+    tradeoffs: |
+      Requires the PR body to use closing keywords at the start of a line
+      (`Closes #N`) for GitHub's auto-close to work and for the check to find
+      the issue. PRs that do not close an issue pass the check automatically.
+    links:
+      - {target: b4e71d903a28, rel: refines}   # PROCESS-D-011
+      - {target: 3d643a9a5413, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-014
+    hash: "a2d8e5f3c107"
+    name: pr-conflict-visibility-gate
+    type: design_pattern
+    description: >
+      Surface merge conflicts as an explicit CI failure on the PR, with
+      actionable rebase instructions, rather than relying on GitHub's passive
+      merge-conflict banner which agents routinely overlook.
+    problem: |
+      GitHub marks conflicted PRs with a UI banner but does not fail any
+      required status check. Agents working headlessly or scanning CI output
+      do not see the banner and proceed as if the PR is ready to merge,
+      leading to repeated rebase loops that are only discovered at merge time.
+    solution: |
+      Add `.github/workflows/pr-conflicts.yml` (see examples/). The workflow
+      fetches the PR's `mergeable` field from the GitHub API on every push and
+      fails the `conflicts` status check with explicit `git rebase` fix
+      instructions when conflicts are detected. A 30-minute cron also scans
+      all open non-draft PRs so conflicts are surfaced even when main moves
+      after a PR was last pushed. Register `conflicts` as a required status
+      check in the branch protection ruleset.
+    tradeoffs: |
+      GitHub computes `mergeable` asynchronously; the workflow polls once
+      after a short delay. Conflicts introduced by main moving are only
+      detected on the next cron run (up to 30 minutes later), not instantly.
+    links:
+      - {target: b4e71d903a28, rel: refines}   # PROCESS-D-011
+      - {target: 8f6e7b3a1ff9, rel: mitigates}
+    deprecated: false
+
+  - number: PROCESS-D-015
+    hash: "c9b4f2e70a31"
+    name: pr-single-issue-invariant
+    type: design_pattern
+    description: >
+      Enforce the 1:1:1 invariant at the PR level: each PR must close exactly
+      one issue using a GitHub closing keyword, and must not reference any
+      other issues.
+    problem: |
+      Without machine enforcement, PRs accumulate scope and close multiple
+      issues, or reference issues without closing them, breaking the
+      one-issue:one-branch:one-PR invariant. This makes history hard to trace,
+      causes issues to auto-close unexpectedly, and makes dependency ordering
+      ambiguous.
+    solution: |
+      Add `.github/workflows/pr-single-issue.yml` (see examples/). The
+      workflow scans the PR body for `Closes/Fixes/Resolves #N` patterns and
+      fails the `single-issue` status check if: (a) no closing reference is
+      found, (b) more than one closing reference is found, or (c) any bare
+      `#N` reference that is not a closing keyword is found. Register
+      `single-issue` as a required status check.
+    tradeoffs: |
+      Closing keywords must appear at the start of a line (GitHub requirement
+      for auto-close). PRs that intentionally reference related issues without
+      closing them must move those references to issue comments or PR comments
+      instead of the PR description.
+    links:
+      - {target: b4e71d903a28, rel: refines}   # PROCESS-D-011
+      - {target: 4a9c2e7d1b83, rel: refines}   # PROCESS-D-010
+      - {target: f67b4697ac23, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-D-016
+    hash: "f3a9c2e17b05"
+    name: merge-queue-ruleset-scaffold
+    type: design_pattern
+    description: >
+      Apply the GitHub merge queue branch ruleset during the init scaffold step
+      so the merge agent can sequence concurrent PRs atomically. The ruleset
+      uses HEADGREEN grouping: each PR merges independently as soon as its own
+      checks pass, rather than waiting for every queued PR to be green.
+    problem: |
+      Without a GitHub merge queue ruleset the merge agent has no atomic
+      mechanism for sequencing multiple ready PRs. Ad-hoc ordering creates race
+      conditions: two agents can merge conflicting PRs concurrently, or a slow
+      CI job on one PR blocks all other ready PRs from landing.
+    solution: |
+      Add a scaffold-merge-queue step to the init state machine, after
+      scaffold-github-actions. The step applies
+      examples/github-workflows/ruleset.json via:
+
+        gh api --method POST repos/{owner}/{repo}/rulesets \
+          --input examples/github-workflows/ruleset.json
+
+      The ruleset includes a merge_queue rule with grouping_strategy: HEADGREEN
+      and min_entries_to_merge: 1 so single PRs are not held waiting for a
+      batch. If a ruleset already exists the step is skipped. If the gh CLI
+      lacks permissions the step transitions to blocked with a clear error.
+      After scaffolding, the merge agent submits PRs via `gh pr merge --merge`,
+      which enqueues them when the ruleset is active.
+    tradeoffs: |
+      HEADGREEN merges each PR on its own schedule, maximising throughput.
+      PRs that touch shared files and must land in order must declare explicit
+      Depends-on references to enforce sequencing.
+    links:
+      - {target: b4e71d903a28, rel: refines}   # PROCESS-D-011
+    deprecated: false
+
+  # ── Architectures ────────────────────────────────────────────────────────────
+
+  - number: PROCESS-A-001
+    hash: 56228b6b54f0
+    name: solo-agent-loop
+    type: architecture
+    description: >
+      Single agent working on a project. Agent reads PRD, plan, and
+      next-prompt; executes the next task; commits code changes, updated plan,
+      and new next-prompt; then loops or ends the session. Human checks in
+      periodically to review commits and adjust PRD or next-prompt. No
+      parallelism; simple and predictable.
+    diagram: |
+      ┌──────────────────────────────────────────────────┐
+      │                                                  │
+      │  Human writes/updates PRD                        │
+      │       │                                          │
+      │       ▼                                          │
+      │  Agent reads PRD + plan + next-prompt            │
+      │       │                                          │
+      │       ▼                                          │
+      │  Agent executes next task                        │
+      │       │                                          │
+      │       ▼                                          │
+      │  Agent commits:                                  │
+      │    1. Code changes                               │
+      │    2. Updated implementation plan                │
+      │    3. New next-prompt                            │
+      │       │                                          │
+      │       ▼                                          │
+      │  Loop back to "read" (same session)              │
+      │  ── or ──                                        │
+      │  Session ends; next session reads next-prompt    │
+      │                                                  │
+      └──────────────────────────────────────────────────┘
+    when_appropriate: |
+      Single agent working on a project. Most common case for early-stage development. Human checks
+      in periodically to review commits and adjust the PRD or next-prompt.
+    tradeoffs: |
+      No parallelism. One agent, one task at a time. Simple and predictable.
+    links:
+      - {target: ce4b1e4f537f, rel: refines}
+      - {target: 7adecf113ceb, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-A-002
+    hash: 309eabc8623a
+    name: calypso-orchestrated-multi-agent
+    type: architecture
+    description: >
+      Calypso YAML state machine assigns the current state to a narrow
+      producer agent. The producer emits an artifact; a validator agent checks
+      it. The CLI evaluates deterministic gates and decides whether to advance,
+      loop, or escalate. Concurrency is explicit and auditable rather than
+      emergent and fragile.
+    diagram: |
+      ┌────────────────────────────────────────────────────────┐
+      │                                                        │
+      │  Calypso YAML state machine                            │
+      │       │                                                │
+      │       ▼                                                │
+      │  Calypso CLI assigns current state                     │
+      │  to a narrow producer agent                            │
+      │       │                                                │
+      │       ▼                                                │
+      │  ┌─────────────┐    artifact    ┌───────────────┐     │
+      │  │ Producer     │──────────────▶│ Validator      │     │
+      │  │ agent        │               │ agent          │     │
+      │  │ narrow task  │               │ narrow check   │     │
+      │  └──────┬──────┘                └───────┬───────┘     │
+      │         │                               │             │
+      │         └──────────────┬────────────────┘             │
+      │                        ▼                              │
+      │          Calypso CLI evaluates deterministic gates    │
+      │                        │                              │
+      │               pass ───▶│◀── fail                      │
+      │                        ▼                              │
+      │               Advance / loop / escalate               │
+      │                                                        │
+      └────────────────────────────────────────────────────────┘
+    when_appropriate: |
+      Projects that need concurrent agent execution without surrendering sequencing authority to
+      whichever agent happens to run next. Each task is small, role-bound, and
+      transition-controlled.
+    tradeoffs: |
+      More orchestration machinery and more validation steps. The benefit is that concurrency
+      becomes explicit and auditable instead of emergent and fragile.
+    links:
+      - {target: d3cf920a8f05, rel: refines}
+      - {target: d1479e8e74df, rel: refines}
+      - {target: 0cb0c7f4709f, rel: refines}
+    deprecated: false
+
+  - number: PROCESS-A-003
+    hash: 7429d9d42df4
+    name: human-in-the-loop-gated
+    type: architecture
+    description: >
+      Agent executes one task, commits, and writes next-prompt. A human gate
+      reviews the commit before the agent proceeds. Approved commits let the
+      agent continue; rejected commits result in the human editing next-prompt
+      with corrections. Appropriate for high-stakes domains where correctness
+      matters more than velocity.
+    diagram: |
+      ┌────────────────────────────────────────────────────────┐
+      │                                                        │
+      │  Agent executes one task → commits → writes next-prompt│
+      │       │                                                │
+      │       ▼                                                │
+      │  GATE: Human reviews commit                            │
+      │       │                                                │
+      │       ├── Approved → Agent reads next-prompt, continues│
+      │       │                                                │
+      │       └── Rejected → Human edits next-prompt with      │
+      │                      corrections, agent re-executes    │
+      │                                                        │
+      └────────────────────────────────────────────────────────┘
+    when_appropriate: |
+      High-stakes domains (finance, healthcare, compliance) where every commit must be reviewed
+      before the agent proceeds. Slower but safer. The human is a gate, not a driver — the agent
+      still proposes the work and the plan.
+    tradeoffs: |
+      Throughput is limited by human review speed. The agent may idle waiting for approval.
+      Acceptable when correctness matters more than velocity.
+    links:
+      - {target: 7adecf113ceb, rel: refines}
+      - {target: 6fab3fb9c823, rel: refines}
+    deprecated: false
+
+  # ── Checklist ────────────────────────────────────────────────────────────────
+
+  - number: PROCESS-C-001
+    hash: f2a41812c656
+    name: prd-exists-with-acceptance-criteria
+    type: checklist
+    description: >
+      docs/prd.md exists and contains testable acceptance criteria from a
+      structured interview.
+    links:
+      - {target: 036dcf4739fc, rel: verifies}
+      - {target: 86131854ce87, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-002
+    hash: 2110600d43f2
+    name: implementation-plan-issue-current
+    type: checklist
+    description: >
+      A GitHub Implementation Plan issue exists, links to all active feature
+      issues, and reflects the current state of completed and remaining work.
+    links:
+      - {target: 22de09615f92, rel: verifies}
+      - {target: ce4b1e4f537f, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-003
+    hash: c1980c686fd4
+    name: next-prompt-valid
+    type: checklist
+    description: >
+      next-prompt.md exists locally (untracked, not committed to the
+      repository) and contains a valid, self-contained next action. This file
+      is a session recovery artifact — it is not a team artifact and must not
+      enter version control.
+    links:
+      - {target: c93476ff124b, rel: verifies}
+      - {target: 7adecf113ceb, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-004
+    hash: 607b8479a54b
+    name: calypso-workflow-yaml-exists
+    type: checklist
+    description: >
+      Calypso workflow YAML exists and defines states, transitions, roles, and
+      gates.
+    links:
+      - {target: d1479e8e74df, rel: verifies}
+      - {target: 5ad85d2660cc, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-005
+    hash: 888ece3bbd9f
+    name: pre-commit-hook-enforces-updates
+    type: checklist
+    description: >
+      Pre-commit hook does not gate on plan or next-prompt artifacts. Hooks
+      run quality checks only (build, lint, format). Planning state lives in
+      GitHub Issues; next-prompt.md is untracked. Neither is a valid hook
+      target.
+    links:
+      - {target: 22de09615f92, rel: verifies}
+      - {target: ce4b1e4f537f, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-006
+    hash: d38caa99ef55
+    name: scaffold-complete-before-features
+    type: checklist
+    description: >
+      All scaffold tasks completed: repo, CI, test stubs verified before any
+      feature work.
+    links:
+      - {target: f67b4697ac23, rel: verifies}
+      - {target: 3d643a9a5413, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-007
+    hash: 814c80af43f4
+    name: full-loop-demonstrated
+    type: checklist
+    description: >
+      At least one full loop demonstrated: commit, plan update, next-prompt,
+      next commit resumes from prompt.
+    links:
+      - {target: 7adecf113ceb, rel: verifies}
+      - {target: ce4b1e4f537f, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-008
+    hash: 166925371982
+    name: prd-human-approved
+    type: checklist
+    description: >
+      Human has reviewed and approved the PRD.
+    links:
+      - {target: 86131854ce87, rel: verifies}
+      - {target: 036dcf4739fc, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-009
+    hash: b5cd8c003d47
+    name: no-features-before-scaffold
+    type: checklist
+    description: >
+      Agent has not built any features ahead of scaffold completion.
+    links:
+      - {target: f67b4697ac23, rel: verifies}
+      - {target: a9a86673862d, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-C-010
+    hash: 8db9cf604651
+    name: plan-reflects-reality
+    type: checklist
+    description: >
+      Implementation plan accurately reflects all completed and remaining work,
+      audited by human.
+    links:
+      - {target: 22de09615f92, rel: verifies}
+      - {target: e856a0333bca, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-C-011
+    hash: df7e5116a5a0
+    name: next-prompt-chain-unbroken
+    type: checklist
+    description: >
+      Next-prompt chain has been unbroken for at least 10 consecutive commits.
+    links:
+      - {target: 7adecf113ceb, rel: verifies}
+      - {target: c93476ff124b, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-012
+    hash: 66d4d5574d84
+    name: human-override-tested
+    type: checklist
+    description: >
+      Human override of next-prompt tested and agent respected the override.
+    links:
+      - {target: f517de24772c, rel: verifies}
+      - {target: c93476ff124b, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-013
+    hash: 0e0e9402d9e2
+    name: multi-session-resume
+    type: checklist
+    description: >
+      Multiple sessions demonstrated: agent resumes from next-prompt after
+      session boundary.
+    links:
+      - {target: c66f31f99932, rel: verifies}
+      - {target: 7adecf113ceb, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-014
+    hash: 05e745a6fee4
+    name: discovered-tasks-in-plan
+    type: checklist
+    description: >
+      Plan includes discovered tasks added during implementation, not just
+      initial planning.
+    links:
+      - {target: 22de09615f92, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-015
+    hash: 61a19083b227
+    name: process-docs-reflect-reality
+    type: checklist
+    description: >
+      Process documentation in docs/ reflects the actual process used, not
+      aspirational.
+    links:
+      - {target: 22de09615f92, rel: verifies}
+      - {target: e856a0333bca, rel: depends_on}
+    deprecated: false
+
+  - number: PROCESS-C-016
+    hash: c2a4f26fcf3b
+    name: crash-recovery-tested
+    type: checklist
+    description: >
+      Recovery procedure tested: agent resumes correctly after a crashed
+      session with uncommitted work.
+    links:
+      - {target: 94f48f83cfcb, rel: verifies}
+      - {target: 00a96cb15cc4, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-017
+    hash: 09a906b4832b
+    name: onboarding-via-three-documents
+    type: checklist
+    description: >
+      Human can onboard a new agent to the project using only the three
+      planning documents.
+    links:
+      - {target: ce4b1e4f537f, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-018
+    hash: e4582b706eba
+    name: producer-validator-transition-exercised
+    type: checklist
+    description: >
+      At least one producer-to-validator transition exercised through the
+      Calypso CLI.
+    links:
+      - {target: 0cb0c7f4709f, rel: verifies}
+      - {target: 25b0c6b0529d, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-019
+    hash: 5905ce32b15f
+    name: gate-failure-handled
+    type: checklist
+    description: >
+      At least one deterministic gate failure observed and handled without
+      manual workflow improvisation.
+    links:
+      - {target: 6fab3fb9c823, rel: verifies}
+      - {target: 309a8b908fc1, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-020
+    hash: "f9b2c5a7e16d"
+    name: branch-protection-ruleset-applied
+    type: checklist
+    description: >
+      GitHub repository ruleset applied targeting ~DEFAULT_BRANCH with all
+      nine required status checks (build, lint, format, unit, integration,
+      e2e, coverage, checklist, depends-on) and bypass_actors set to [].
+    links:
+      - {target: 7d2a9f1e50c3, rel: verifies}
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-021
+    hash: "c3e8d4b0f925"
+    name: pr-checklist-workflow-deployed
+    type: checklist
+    description: >
+      .github/workflows/pr-checklist.yml present in the repository and
+      confirmed to run on pull_request events, failing when unchecked task
+      items (- [ ]) exist in the PR body.
+    links:
+      - {target: b4e71d903a28, rel: verifies}
+      - {target: 7d2a9f1e50c3, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-022
+    hash: "d7a1f6e39b04"
+    name: checklist-check-name-registered
+    type: checklist
+    description: >
+      The checklist status check name is registered in GitHub (appears as a
+      known check) via a dummy PR or workflow_dispatch run, so the branch
+      protection ruleset can validate it on future PRs.
+    links:
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-023
+    hash: "7f3b1d9e2c56"
+    name: pr-depends-on-workflow-deployed
+    type: checklist
+    description: >
+      `.github/workflows/pr-depends-on.yml` is present in the repository,
+      the `depends-on` check name is registered as a required status check
+      in the branch protection ruleset, and `.github/PULL_REQUEST_TEMPLATE.md`
+      includes the `Depends-on` usage comment.
+    links:
+      - {target: 4a9c2e7d1b83, rel: verifies}
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  # ── Antipatterns ─────────────────────────────────────────────────────────────
+
+  - number: PROCESS-X-001
+    hash: e856a0333bca
+    name: phantom-plan
+    type: antipattern
+    description: >
+      Writing an implementation plan at the start and never updating it. The
+      plan diverges from reality within days; the agent ignores it and makes
+      its own decisions. The plan becomes a historical artifact that misleads
+      anyone who reads it.
+    links:
+      - {target: 22de09615f92, rel: contradicts}
+      - {target: 8db9cf604651, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-002
+    hash: a9a86673862d
+    name: feature-first-development
+    type: antipattern
+    description: >
+      Jumping to visible features before scaffold infrastructure is complete.
+      The result is a demo that cannot be tested, deployed, or extended.
+      Fixing the foundation after building the house is always more expensive.
+    links:
+      - {target: f67b4697ac23, rel: contradicts}
+      - {target: 3d643a9a5413, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-003
+    hash: baf471cbca13
+    name: session-amnesia
+    type: antipattern
+    description: >
+      Starting each agent session by asking what to work on instead of reading
+      the next-prompt file. The agent re-derives project state from the
+      codebase, arrives at a different conclusion, and produces conflicting or
+      duplicate work.
+    links:
+      - {target: c93476ff124b, rel: contradicts}
+      - {target: 7adecf113ceb, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-004
+    hash: 6de50417b805
+    name: parallel-agents-without-machine
+    type: antipattern
+    description: >
+      Spawning multiple agents and hoping they coordinate through intuition,
+      branch names, or chat logs. Without a governing state machine and
+      deterministic gates, concurrency becomes nondeterministic drift.
+    links:
+      - {target: 5ad85d2660cc, rel: contradicts}
+      - {target: d1479e8e74df, rel: contradicts}
+      - {target: b91051b5cbdd, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-005
+    hash: ab00fd72fad4
+    name: monolithic-commits
+    type: antipattern
+    description: >
+      Accumulating hours of work into a single massive commit. If the session
+      crashes before commit, all work is lost. If the commit introduces a bug,
+      the revert is catastrophic. Small commits are cheaper in every dimension.
+    links:
+      - {target: 00a96cb15cc4, rel: contradicts}
+      - {target: 94f48f83cfcb, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-006
+    hash: 9fa4fad8a2c3
+    name: verbal-requirements
+    type: antipattern
+    description: >
+      Accepting feature requests from chat messages, verbal conversations, or
+      vague tickets without formalizing them into the PRD. The agent builds
+      what it understood, which is never exactly what was meant.
+    links:
+      - {target: 86131854ce87, rel: contradicts}
+      - {target: 036dcf4739fc, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-007
+    hash: 84ac3a03267e
+    name: plan-as-wishlist
+    type: antipattern
+    description: >
+      Writing implementation plan tasks as vague goals instead of concrete,
+      verifiable actions. Vague tasks produce vague work.
+    links:
+      - {target: 22de09615f92, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-008
+    hash: cbc24fa6797a
+    name: skipping-the-interview
+    type: antipattern
+    description: >
+      Assuming the agent already knows what the product should do based on
+      training data or a brief description. Every product has domain-specific
+      requirements that cannot be inferred. The structured interview surfaces
+      them before development begins.
+    links:
+      - {target: 86131854ce87, rel: contradicts}
+      - {target: 036dcf4739fc, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-009
+    hash: "e5c0a2d87f43"
+    name: admin-bypass-on-main
+    type: antipattern
+    description: >
+      Configuring branch protection with admin bypass actors or leaving the
+      ruleset in evaluate or disabled enforcement mode. Any bypass actor
+      creates a path for unreviewed, untested code to reach main. The
+      temptation to add bypass actors for "hotfixes" is the canonical failure
+      mode; the correct response is a fast, automated fix PR through the
+      normal pipeline.
+    links:
+      - {target: 7d2a9f1e50c3, rel: contradicts}
+      - {target: b4e71d903a28, rel: contradicts}
+    deprecated: false
+
+  - number: PROCESS-X-010
+    hash: "c1e5f8a03d72"
+    name: implicit-merge-order
+    type: antipattern
+    description: >
+      Relying on PR creation order, review timing, or verbal coordination to
+      enforce merge sequencing instead of declaring dependencies explicitly
+      in the PR body. Any reviewer or agent with merge permissions can land
+      a PR out of order, silently breaking the branch.
+    links:
+      - {target: 4a9c2e7d1b83, rel: contradicts}
+      - {target: 8f6e7b3a1ff9, rel: contradicts}
+    deprecated: false
+
+  # ── Additional Checklist Items (repo bootstrap verification) ─────────────────
+
+  - number: PROCESS-C-024
+    hash: "a8f2b4c1e703"
+    name: all-check-names-pre-registered
+    type: checklist
+    description: >
+      All 9 required CI check names (build, lint, format, unit, integration,
+      e2e, coverage, checklist, depends-on) are pre-registered with GitHub by
+      running each workflow at least once before the branch protection ruleset
+      is enabled. GitHub only recognizes a required status check by name after
+      the workflow that produces it has run at least once.
+    links:
+      - {target: b4e71d903a28, rel: verifies}
+      - {target: 7d2a9f1e50c3, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-025
+    hash: "b9e3d5f2c814"
+    name: first-pr-all-checks-pass
+    type: checklist
+    description: >
+      The first PR through the gate demonstrates all required status checks
+      (build, lint, format, unit, integration, e2e, coverage, checklist,
+      depends-on) as required and passing before merge is permitted.
+    links:
+      - {target: 7d2a9f1e50c3, rel: verifies}
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-026
+    hash: "c0d4e6a3f925"
+    name: admin-bypass-verified-blocked
+    type: checklist
+    description: >
+      An admin account has been verified unable to bypass the gate: a PR with
+      a failing required check was confirmed unmergeable even by a repository
+      admin or owner.
+    links:
+      - {target: 7d2a9f1e50c3, rel: verifies}
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-027
+    hash: "d1e5f7b2a038"
+    name: coverage-gate-verified
+    type: checklist
+    description: >
+      Coverage threshold verified: a PR that drops below 99% line coverage is
+      blocked by the coverage required status check and cannot be merged.
+    links:
+      - {target: 7d2a9f1e50c3, rel: verifies}
+      - {target: b4e71d903a28, rel: verifies}
+    deprecated: false
+
+  - number: PROCESS-C-028
+    hash: "f4b1d9e20c73"
+    name: pr-issue-checklist-workflow-deployed
+    type: checklist
+    description: >
+      `.github/workflows/pr-issue-checklist.yml` is present in the repository,
+      runs on pull_request events, and the `issue-checklist` status check is
+      registered as a required check in the branch protection ruleset.
+    links:
+      - {target: e3a7f1c09b24, rel: verifies}   # PROCESS-D-013
+      - {target: b4e71d903a28, rel: verifies}   # PROCESS-D-011
+    deprecated: false
+
+  - number: PROCESS-C-029
+    hash: "b7e3a0f18d52"
+    name: pr-conflicts-workflow-deployed
+    type: checklist
+    description: >
+      `.github/workflows/pr-conflicts.yml` is present in the repository, runs
+      on pull_request events and on a 30-minute schedule, and the `conflicts`
+      status check is registered as a required check in the branch protection
+      ruleset.
+    links:
+      - {target: a2d8e5f3c107, rel: verifies}   # PROCESS-D-014
+      - {target: b4e71d903a28, rel: verifies}   # PROCESS-D-011
+    deprecated: false
+
+  - number: PROCESS-C-030
+    hash: "d5c2e9a14f86"
+    name: pr-single-issue-workflow-deployed
+    type: checklist
+    description: >
+      `.github/workflows/pr-single-issue.yml` is present in the repository,
+      runs on pull_request events, and the `single-issue` status check is
+      registered as a required check in the branch protection ruleset.
+    links:
+      - {target: c9b4f2e70a31, rel: verifies}   # PROCESS-D-015
+      - {target: b4e71d903a28, rel: verifies}   # PROCESS-D-011
+    deprecated: false
+
+  - number: PROCESS-C-031
+    hash: "a8d4f1e903b6"
+    name: merge-queue-ruleset-applied
+    type: checklist
+    description: >
+      The merge queue ruleset (examples/github-workflows/ruleset.json) has been
+      applied to the repository via the GitHub Rulesets API with
+      grouping_strategy: HEADGREEN, and the merge agent submits PRs via
+      `gh pr merge --merge` to enqueue them.
+    links:
+      - {target: f3a9c2e17b05, rel: verifies}   # PROCESS-D-016
+      - {target: b4e71d903a28, rel: verifies}   # PROCESS-D-011
+    deprecated: false
+
+  - number: PROCESS-C-032
+    hash: "e1b7d5f290a4"
+    name: intake-user-roles-and-stories-present
+    type: checklist
+    description: >
+      Every feature request submitted through the intake state names at least
+      one user role and provides at least one user story per role before
+      advancing to architecture evaluation. Internal-only features satisfy this
+      by explicitly stating "users: internal only".
+    links:
+      - {target: c7e4b2d18f39, rel: verifies}   # PROCESS-P-010
+      - {target: 036dcf4739fc, rel: verifies}   # PROCESS-D-008
+    deprecated: false
+
+repo_standards:
+  description: >
+    Concrete repository configuration standards for all Calypso projects.
+    These are the machine-enforceable settings that back the principles and
+    design patterns declared in the rules above.
+
+  branch_protection:
+    target: "~DEFAULT_BRANCH"
+    enforcement: active
+    bypass_actors: []
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews_on_push: true
+      require_last_push_approval: true
+    required_status_checks:
+      - name: build
+        verifies: Project compiles without errors
+      - name: lint
+        verifies: No lint warnings
+      - name: format
+        verifies: Code formatted per project style
+      - name: unit
+        verifies: All unit tests pass
+      - name: integration
+        verifies: Integration tests pass against real external dependencies
+      - name: e2e
+        verifies: End-to-end tests pass
+      - name: coverage
+        verifies: "Line coverage >= 99%"
+      - name: checklist
+        verifies: All unchecked task items in PR body are checked before merge
+      - name: depends-on
+        verifies: Any declared Depends-on predecessor PR is merged
+
+  pr_checklist_enforcement: >
+    The pr-checklist.yml workflow scans every PR body for unchecked - [ ]
+    markdown task items. If any are found, the checklist check fails and the
+    PR cannot merge. This enforces that agents and humans explicitly attest
+    to every item in the PR description before landing code.
+
+  check_name_registration: >
+    GitHub only recognizes a required status check by name after the workflow
+    that produces it has run at least once. The scaffold procedure (see
+    init/scaffold-task.md) includes a step to pre-register all check names by
+    triggering each workflow manually before enabling the ruleset. For the
+    checklist check specifically, push a dummy PR or trigger via
+    workflow_dispatch before configuring the ruleset.
+
+  ruleset_template: "examples/github-workflows/ruleset.json"
+
+  implementation_checklist:
+    - "GitHub ruleset created via `gh api` using the template in examples/github-workflows/ruleset.json"
+    - "bypass_actors confirmed empty in the ruleset (verified via `gh api repos/{owner}/{repo}/rulesets`)"
+    - "All 9 required check names pre-registered by running each workflow at least once"
+    - ".github/workflows/pr-checklist.yml present and triggering on PR open/edit/sync/reopen"
+    - "First PR through the gate demonstrates all 9 checks required and passing before merge"
+    - "Admin account verified unable to bypass the gate (test with a PR that has a failing check)"
+    - "Coverage threshold verified: a PR that drops below 99% line coverage is blocked"
+    - "Merge queue ruleset applied via ScaffoldMergeQueue init step with grouping_strategy: HEADGREEN"
+    - "Merge agent submits PRs via `gh pr merge --merge` to enqueue them through the active ruleset"
+
+development_state_machine:
+  description: >
+    The top-level lifecycle machine for a Calypso-managed repository. Tracks
+    which phase of the development process is active and delegates setup work
+    to sub-state-machines. Implemented as the DevelopmentPhase enum in
+    cli/src/state.rs. See also: issues #95, #96.
+
+  phases:
+    - slug: init
+      name: Init
+      description: >
+        Repository setup. Delegates entirely to the init state machine
+        (InitStep). Entering this phase triggers `calypso init`. This is
+        the default entry point for a new repository. Completion of the init
+        state machine (InitStep::Complete) automatically transitions the
+        development state machine to Development.
+    - slug: development
+      name: Development
+      description: >
+        Active feature development. The repository is fully set up and agents
+        are running feature work.
+    - slug: testing
+      name: Testing
+      description: >
+        Testing and QA. Features are under validation before release.
+
+  transitions:
+    - from: Init
+      to: Development
+      trigger: InitStep reaches Complete
+    - from: Development
+      to: Testing
+      trigger: feature work ready for validation
+    - from: Development
+      to: Init
+      trigger: re-init requested (calypso-cli init --reinit)
+    - from: Testing
+      to: Development
+      trigger: validation complete or correction needed
+    - from: Testing
+      to: Init
+      trigger: re-init requested (calypso-cli init --reinit)
+
+  nested_state_machine_pattern: >
+    The Init phase demonstrates the canonical nested state machine pattern
+    used throughout Calypso:
+    1. The outer machine (DevelopmentPhase) enters Init.
+    2. Control is delegated entirely to the inner machine (InitStep).
+    3. When InitStep reaches Complete, the outer machine transitions from
+       Init to Development.
+    4. The outer machine can re-enter Init at any time (e.g. to update
+       workflows or re-run doctor checks).
+    Future phases (Deployment, Operations) follow the same structure.
+
+  reinit: >
+    The Init phase can be re-entered at any time from Development or Testing
+    using `calypso-cli init --reinit`. This re-runs all init steps, refreshing
+    GitHub Actions workflows and re-verifying setup. It does not destroy
+    existing .calypso/ state.
+
+  implementation_references:
+    - "cli/src/state.rs — DevelopmentPhase enum"
+    - "cli/src/init.rs — InitStep, InitProgress, run_init_interactive"
+    - "cli/tests/state.rs — development_phase_* test suite"
+    - "issues: #95, #96"
+
+  init_state_machine:
+    description: >
+      The first step of the development lifecycle: initializing the environment
+      and control plane. The `calypso init` command drives a strictly linear
+      state machine that sets up a repository for Calypso usage. Progress is
+      persisted to `.calypso/init-state.json` so an interrupted init can be
+      resumed from the last completed step. Implemented in cli/src/init.rs.
+      See also: issues #94, #95.
+
+    steps:
+      - slug: prompt-directory
+        name: PromptDirectory
+        description: >
+          Choose or confirm the workspace directory. Non-interactive when run
+          from CWD.
+      - slug: create-git-repo
+        name: CreateGitRepo
+        description: >
+          Initialize .git if the directory is not already a git repository.
+      - slug: create-upstream
+        name: CreateUpstream
+        description: >
+          Create or configure the GitHub upstream remote (origin). Skipped if
+          a GitHub remote already exists.
+      - slug: scaffold-github-actions
+        name: ScaffoldGithubActions
+        description: >
+          Write the core GitHub Actions workflow files under
+          .github/workflows/. Existing files are left unchanged.
+        scaffolds:
+          - file: .github/workflows/pr-checklist.yml
+            purpose: Fails CI if any unchecked task items remain in a PR body
+          - file: .github/workflows/pr-depends-on.yml
+            purpose: Blocks merge if a Depends-on predecessor PR is unmerged
+          - file: .github/workflows/ci.yml
+            purpose: Generic CI placeholder; teams replace the run step with their test command
+      - slug: scaffold-merge-queue
+        name: ScaffoldMergeQueue
+        description: >
+          Apply the GitHub merge queue branch ruleset from
+          examples/github-workflows/ruleset.json using the GitHub Rulesets API.
+          Skipped if the ruleset already exists. Transitions to blocked with a
+          clear error if the gh CLI lacks sufficient permissions.
+      - slug: configure-local
+        name: ConfigureLocal
+        description: >
+          Write .calypso/ directory with repository-state.json, template YAML
+          files, and the pre-push git hook.
+      - slug: verify-setup
+        name: VerifySetup
+        description: >
+          Run doctor checks to confirm prerequisites and repository
+          configuration. Validates: git installed and CWD is a repo, gh CLI
+          authenticated, GitHub remote is a GitHub URL, required workflow
+          files present.
+      - slug: complete
+        name: Complete
+        description: Terminal state. Init is done.
+
+    transitions:
+      - from: PromptDirectory
+        to: CreateGitRepo
+      - from: CreateGitRepo
+        to: CreateUpstream
+      - from: CreateUpstream
+        to: ScaffoldGithubActions
+      - from: ScaffoldGithubActions
+        to: ScaffoldMergeQueue
+      - from: ScaffoldMergeQueue
+        to: ConfigureLocal
+      - from: ConfigureLocal
+        to: VerifySetup
+      - from: VerifySetup
+        to: Complete
+
+    persisted_state_file: ".calypso/init-state.json"
+
+    cli_commands:
+      - command: "calypso-cli init"
+        effect: Run init from the current directory (resume if in progress)
+      - command: "calypso-cli init --reinit"
+        effect: Re-run all init steps even if previously completed
+      - command: "calypso-cli init --state"
+        effect: Show the current init state from .calypso/init-state.json
+
+    implementation_references:
+      - "cli/src/init.rs — InitStep, InitProgress, run_init_interactive, scaffold_github_actions"
+      - "cli/tests/init.rs — unit and integration tests"
+      - "issues: #94, #95"
+
+  future_phases:
+    - slug: deployment
+      name: Deployment
+      description: CI/CD pipeline management and environment targeting
+    - slug: operations
+      name: Operations
+      description: Post-release monitoring and incident response

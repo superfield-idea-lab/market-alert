@@ -1,7 +1,7 @@
 /**
  * @file imap-etl-worker.ts
  *
- * IMAP ETL worker — reused from calypso-distribution pattern.
+ * IMAP ETL worker — reused from superfield-distribution pattern.
  *
  * Two-phase landing + classify model:
  *
@@ -25,10 +25,10 @@
  *   PERMFAIL, parse errors) are propagated so the worker can mark the task
  *   as 'dead'.
  *
- * Calypso-distribution reference
+ * Superfield-distribution reference
  * --------------------------------
  * This module re-implements the `imap-etl-worker.ts` pattern from
- * `calypso-distribution/packages/core/imap-etl-worker.ts` for the
+ * `superfield-distribution/packages/core/imap-etl-worker.ts` for the
  * superfield-kb-demo workspace. Any structural change here should be
  * reflected there and vice versa.
  *

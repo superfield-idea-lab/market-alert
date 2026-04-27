@@ -63,7 +63,7 @@ export function NotificationDemoCard() {
   const sendTestNotification = useCallback(() => {
     if (!featureAvailable || Notification.permission !== 'granted') return;
     new Notification('PWA Demo', {
-      body: 'Your test notification from the Calypso PWA demo.',
+      body: 'Your test notification from the Superfield PWA demo.',
       icon: '/icons/icon-192.png',
     });
     setLastNotificationSent(true);

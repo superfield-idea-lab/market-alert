@@ -10,12 +10,12 @@
 #
 # Phases (each gates on a health check before the next begins):
 #   1. DB migrations  — bun run packages/db/migrate.ts; gate: SELECT 1 on DB
-#   2. API server     — kubectl set image deployment/calypso-app; gate: GET /health
+#   2. API server     — kubectl set image deployment/superfield-app; gate: GET /health
 #   3. Workers        — kubectl set image per worker type; gate: pod Ready condition
 #   4. Static web     — aws s3 sync + CDN invalidation; gate: sync succeeds
 #
 # Environment variables (required at deploy time):
-#   IMAGE_REPO        — container image repository (default: ghcr.io/<owner>/calypso-starter-ts)
+#   IMAGE_REPO        — container image repository (default: ghcr.io/<owner>/superfield-starter-ts)
 #   API_URL           — base URL for the running API server (default: http://<host>:31415/health)
 #   DATABASE_URL      — postgres connection string used by migration runner
 #   CDN_DISTRIBUTION  — CloudFront distribution ID for cache invalidation (optional)
@@ -44,7 +44,7 @@ HEALTH_RETRY_INTERVAL="${HEALTH_RETRY_INTERVAL:-2}"
 # API health check URL — must be reachable from the runner.
 # Default assumes the app NodePort (31415) is reachable at the deploy host.
 # Override with API_URL=https://your-domain if a public hostname is available.
-APP_DEPLOYMENT="${APP_DEPLOYMENT:-calypso-app}"
+APP_DEPLOYMENT="${APP_DEPLOYMENT:-superfield-app}"
 APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-app}"
 API_HEALTHZ_URL="${API_URL:-http://${DEPLOY_HOST:-localhost}:31415}/health"
 
@@ -69,8 +69,8 @@ die() {
 # The DB is only reachable inside the cluster, so migrations must run there.
 run_migration_job() {
   local image="$1"
-  local namespace="${DEPLOY_NAMESPACE:-calypso-demo}"
-  local job_name="calypso-migrate-$(date +%s)"
+  local namespace="${DEPLOY_NAMESPACE:-superfield-demo}"
+  local job_name="superfield-migrate-$(date +%s)"
 
   log "Creating migration Job ${job_name} in namespace ${namespace}..."
   kubectl apply -f - <<MANIFEST
@@ -80,14 +80,14 @@ metadata:
   name: ${job_name}
   namespace: ${namespace}
   labels:
-    app: calypso-migrate
+    app: superfield-migrate
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: calypso-migrate
+        app: superfield-migrate
     spec:
       restartPolicy: Never
       imagePullSecrets:
@@ -100,7 +100,7 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: DATABASE_URL
           resources:
             requests:
@@ -118,7 +118,7 @@ MANIFEST
       --timeout="${HEALTH_MAX_RETRIES}s"; then
     log "Migration Job failed — fetching logs..."
     kubectl logs --namespace="${namespace}" \
-      --selector="app=calypso-migrate" --tail=100 || true
+      --selector="app=superfield-migrate" --tail=100 || true
     kubectl delete job "${job_name}" --namespace="${namespace}" --ignore-not-found || true
     return 1
   fi

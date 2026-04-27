@@ -24,7 +24,7 @@
  * ----------------------
  * - AGENT_DATABASE_URL              — read-only agent role connection string (required)
  * - AGENT_TYPE                      — agent type name, e.g. "coding" (required)
- * - API_BASE_URL                    — base URL of the Calypso API server (required)
+ * - API_BASE_URL                    — base URL of the Superfield API server (required)
  * - CLAUDE_CLI_PATH                 — path to the Claude CLI binary; validated at startup.
  *                                     When set, Claude credentials are restored from DB.
  *                                     When unset, the dev stub is used as fallback.

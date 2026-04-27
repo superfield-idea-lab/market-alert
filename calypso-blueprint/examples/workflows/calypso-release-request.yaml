@@ -1,0 +1,312 @@
+version: 1
+name: calypso-release-request
+initial_state: tag-received
+
+# Trigger: a valid semver tag (v*) is pushed to main.
+# Event-driven — no human initiation step.
+
+trigger:
+  event: git-tag-push
+  pattern: "v*"
+  branch_constraint: main
+  ci_entry: .github/workflows/release-cli.yml
+
+states:
+  tag-received:
+    kind: deterministic
+    description: >
+      Validate that the pushed tag is well-formed semver pointing to a commit on main.
+    checks:
+      - tag-is-semver
+      - tag-commit-is-on-main
+    next:
+      on_pass: release-quality
+      on_fail: blocked
+
+  release-quality:
+    kind: github
+    description: >
+      Run quality checks on the tagged commit via release-cli.yml.
+    ci_job:
+      workflow: .github/workflows/release-cli.yml
+      job: build
+      steps:
+        - uses: actions/checkout@v5
+        - uses: dtolnay/rust-toolchain@stable
+        - name: Clippy
+          run: cargo clippy --all-targets -- -D warnings
+        - name: Format check
+          run: cargo fmt --all -- --check
+        - name: Build
+          run: cargo build --release
+    checks:
+      - release-lint-passing
+      - release-format-clean
+      - release-build-verification-passing
+    next:
+      on_pass: release-tests
+      on_fail: blocked
+
+  release-tests:
+    kind: github
+    description: >
+      Run full Rust test suite on the tagged commit.
+    ci_job:
+      workflow: .github/workflows/release-cli.yml
+      job: build
+      steps:
+        - uses: actions/checkout@v5
+        - uses: dtolnay/rust-toolchain@stable
+        - name: Run unit tests
+          run: cargo test --lib --workspace
+        - name: Run integration tests
+          run: cargo test --test '*' --workspace
+        - name: Run e2e tests
+          run: cargo test -p calypso-cli --test '*'
+    checks:
+      - ci-unit-tests-green
+      - ci-integration-tests-green
+      - ci-e2e-tests-green
+    next:
+      on_pass: build-release-bundle
+      on_fail: blocked
+
+  build-release-bundle:
+    kind: github
+    description: >
+      Build CLI binary and create GitHub release with executable asset.
+    ci_job:
+      workflow: .github/workflows/release-cli.yml
+      job: publish
+      needs: [build]
+      steps:
+        - uses: actions/checkout@v5
+        - uses: dtolnay/rust-toolchain@stable
+        - name: Build release binary
+          run: cargo build --release
+        - name: Create GitHub release
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: >
+            gh release create "${{ github.ref_name }}" target/release/calypso
+            --title "${{ github.ref_name }}" --generate-notes
+    checks:
+      - cli-binary-built
+      - github-release-created
+      - github-release-asset-attached
+    next:
+      on_pass: build-container-image
+      on_fail: blocked
+
+  build-container-image:
+    status: proposed
+    kind: github
+    description: >
+      Build Docker image, sign it, and push to GHCR.
+    ci_job:
+      workflow: .github/workflows/release-ghcr-images.yml
+      trigger: github-release-published
+      jobs:
+        - job: build-sign-push
+          runs_on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v5
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                registry: ghcr.io
+                username: ${{ github.actor }}
+                password: ${{ secrets.GITHUB_TOKEN }}
+            - name: Extract metadata
+              uses: docker/metadata-action@v5
+              with:
+                images: ghcr.io/${{ github.repository }}
+                tags: |
+                  type=semver,pattern={{version}}
+                  type=semver,pattern={{major}}.{{minor}}
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                context: .
+                push: true
+                tags: ${{ steps.meta.outputs.tags }}
+                labels: ${{ steps.meta.outputs.labels }}
+            - name: Sign container image
+              env:
+                COSIGN_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+              run: cosign sign --key env://COSIGN_KEY ${{ steps.meta.outputs.tags }}
+    checks:
+      - docker-image-built
+      - docker-image-pushed-to-ghcr
+      - ghcr-image-tag-matches-semver
+      - docker-image-signed
+    next:
+      on_pass: smoke-test
+      on_fail: blocked
+
+  smoke-test:
+    status: proposed
+    kind: github
+    description: >
+      Run smoke tests against the published container image.
+    ci_job:
+      workflow: .github/workflows/release-smoke-test.yml
+      trigger: ghcr-image-published
+      jobs:
+        - job: smoke-test
+          runs_on: ubuntu-latest
+          steps:
+            - name: TBD — pull image and run smoke test suite against it
+    checks:
+      - smoke-test-passed
+    next:
+      on_pass: mark-latest
+      on_fail: blocked
+
+  mark-latest:
+    kind: github
+    role: release-manager
+    description: >
+      Mark GitHub release and GHCR image as "latest" after full verification.
+    prompt: |
+      1. `gh release edit <tag> --latest`
+      2. Re-tag GHCR image with `latest`.
+      3. Confirm both release page and GHCR package reflect "latest".
+    completion:
+      all_of:
+        - github-release-marked-latest
+        - ghcr-image-tagged-latest
+    next:
+      on_success: done
+      on_failure: blocked
+
+  done:
+    kind: terminal
+    description: Release bundle and container image are published and marked latest.
+
+  blocked:
+    kind: human
+    role: operator-or-orchestrator
+    description: A release step failed and requires human resolution.
+    prompt: |
+      Inspect the failed CI job, fix root cause, re-push tag or re-run workflow.
+    next:
+      on:
+        issue-cleared: tag-received
+        retry-quality: release-quality
+        retry-tests: release-tests
+        retry-build: build-release-bundle
+        retry-container: build-container-image
+        retry-smoke: smoke-test
+        abort: aborted
+
+  aborted:
+    kind: terminal
+
+checks:
+  tag-is-semver:
+    kind: deterministic
+    description: The pushed tag matches the semver pattern vMAJOR.MINOR.PATCH (plus optional pre-release/build metadata).
+  tag-commit-is-on-main:
+    kind: deterministic
+    description: The commit the tag points to exists on the main branch.
+  release-lint-passing:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo clippy --all-targets -- -D warnings passes on tagged commit.
+  release-format-clean:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo fmt --all -- --check passes on the tagged commit.
+  release-build-verification-passing:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo build --release succeeds on the tagged commit.
+  ci-unit-tests-green:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo test --lib --workspace passes.
+  ci-integration-tests-green:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo test --test '*' --workspace passes.
+  ci-e2e-tests-green:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo test -p calypso-cli --test '*' passes.
+  cli-binary-built:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: cargo build --release produces target/release/calypso.
+  github-release-created:
+    kind: deterministic
+    source: ci
+    workflow: .github/workflows/release-cli.yml
+    description: gh release create succeeded for the tag.
+  github-release-asset-attached:
+    kind: deterministic
+    description: target/release/calypso is attached as an asset on the GitHub release.
+  docker-image-built:
+    kind: deterministic
+    status: proposed
+    source: ci
+    workflow: .github/workflows/release-ghcr-images.yml
+    description: Docker image built successfully for the release tag.
+  docker-image-pushed-to-ghcr:
+    kind: deterministic
+    status: proposed
+    source: ci
+    workflow: .github/workflows/release-ghcr-images.yml
+    description: Image is available at ghcr.io/<repo>:<semver>.
+  ghcr-image-tag-matches-semver:
+    kind: deterministic
+    description: The GHCR image tag exactly matches the git semver tag.
+  docker-image-signed:
+    kind: deterministic
+    status: proposed
+    source: ci
+    workflow: .github/workflows/release-ghcr-images.yml
+    description: Container image cryptographically signed with project cosign key.
+  smoke-test-passed:
+    kind: deterministic
+    status: proposed
+    source: ci
+    workflow: .github/workflows/release-smoke-test.yml
+    description: Smoke test suite passed against the published container image. (TBD)
+  github-release-marked-latest:
+    kind: deterministic
+    description: The GitHub release page shows this release as "Latest release".
+  ghcr-image-tagged-latest:
+    kind: deterministic
+    description: The GHCR package has a `latest` tag pointing to this release image.
+
+agent_prompts:
+  release-manager: |
+    Once all CI jobs green and container verified, mark GitHub release and GHCR image as latest via gh CLI and docker/GitHub API.
+
+github_actions:
+  current:
+    - workflow: .github/workflows/release-cli.yml
+      trigger: "push: tags: v*"
+      jobs:
+        - build
+        - publish
+  proposed:
+    - workflow: .github/workflows/release-ghcr-images.yml
+      trigger: github-release-published
+      purpose: Build and push the versioned Docker image to GHCR.
+      jobs:
+        - build-and-push
+    - workflow: .github/workflows/release-smoke-test.yml
+      trigger: ghcr-image-published
+      purpose: Run smoke tests against the published container image.
+      status: tbd
+      jobs:
+        - smoke-test

@@ -1,0 +1,11 @@
+{
+  "name": "Remove template task board surface and generic task CRUD",
+  "phase": "Template cleanup",
+  "motivation": "The current app shell defaults to a generic project board with template task CRUD that is not part of the Superfield KB PRD workflows. Keeping this surface increases maintenance cost, confuses product scope, and pollutes schema/entity usage with non-PRD concepts.",
+  "intended_experience": "When users open the app, they land on PRD-aligned product surfaces (wiki, campaign analysis, settings/admin as authorized) without a generic task board. Backend no longer exposes template task CRUD endpoints.",
+  "constraints": [
+    "Do not regress PRD workflows for wiki, annotation, campaign analysis, passkey auth, or compliance.",
+    "Remove only template board functionality and its direct dependencies.",
+    "Keep migration and deletion steps safe for existing environments."
+  ]
+}

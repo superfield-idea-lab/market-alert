@@ -40,7 +40,7 @@ uniques.log
 # Deprecated agent contexts
 .agent-context-deprecated-*
 .studio
-.calypso-db
+.superfield-db
 
 # Docker files (not needed inside image)
 docker-compose.yml

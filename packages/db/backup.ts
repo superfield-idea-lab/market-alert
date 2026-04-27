@@ -32,7 +32,7 @@
  *
  * ## Environment variables
  *
- *   BACKUP_STORE_DIR   — Local directory for backup artifacts (default: /var/backups/calypso)
+ *   BACKUP_STORE_DIR   — Local directory for backup artifacts (default: /var/backups/superfield)
  *   ENCRYPTION_MASTER_KEY — Required for local-dev KMS backend; omit to disable encryption
  *   DATABASE_URL       — App database (default: pg-container URL when running in tests)
  *   AUDIT_DATABASE_URL — Audit database (default: same as DATABASE_URL)
@@ -473,16 +473,16 @@ export async function runScheduledBackup(config: BackupConfig): Promise<BackupRe
  */
 export function loadBackupConfig(env: NodeJS.ProcessEnv = process.env): BackupConfig {
   return {
-    storeDir: env.BACKUP_STORE_DIR ?? '/var/backups/calypso',
+    storeDir: env.BACKUP_STORE_DIR ?? '/var/backups/superfield',
     appDatabaseUrl:
       env.ADMIN_DATABASE_URL ??
       env.DATABASE_URL ??
-      'postgres://app_rw:app_rw_password@localhost:5432/calypso_app',
+      'postgres://app_rw:app_rw_password@localhost:5432/superfield_app',
     auditDatabaseUrl:
       env.ADMIN_AUDIT_DATABASE_URL ??
       env.AUDIT_DATABASE_URL ??
       env.ADMIN_DATABASE_URL ??
       env.DATABASE_URL ??
-      'postgres://audit_w:audit_w_password@localhost:5432/calypso_audit',
+      'postgres://audit_w:audit_w_password@localhost:5432/superfield_audit',
   };
 }

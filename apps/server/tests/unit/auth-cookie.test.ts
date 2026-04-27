@@ -92,7 +92,7 @@ describe('authCookieHeader — dev mode (SECURE_COOKIES unset)', () => {
   });
 
   test('uses plain cookie name', () => {
-    expect(authCookieHeader('token123')).toMatch(/^calypso_auth=/);
+    expect(authCookieHeader('token123')).toMatch(/^superfield_auth=/);
   });
 
   test('includes Path=/', () => {
@@ -122,7 +122,7 @@ describe('authCookieHeader — HTTPS mode (SECURE_COOKIES=true)', () => {
   });
 
   test('uses __Host- prefixed cookie name', () => {
-    expect(authCookieHeader('token123')).toMatch(/^__Host-calypso_auth=/);
+    expect(authCookieHeader('token123')).toMatch(/^__Host-superfield_auth=/);
   });
 
   test('includes Path=/', () => {
@@ -141,13 +141,13 @@ describe('authCookieClearHeader', () => {
 
   test('dev mode: plain name, Max-Age=0', () => {
     delete process.env.SECURE_COOKIES;
-    expect(authCookieClearHeader()).toContain('calypso_auth=');
+    expect(authCookieClearHeader()).toContain('superfield_auth=');
     expect(authCookieClearHeader()).toContain('Max-Age=0');
   });
 
   test('HTTPS mode: __Host- prefix, Secure, Max-Age=0', () => {
     process.env.SECURE_COOKIES = 'true';
-    expect(authCookieClearHeader()).toContain('__Host-calypso_auth=');
+    expect(authCookieClearHeader()).toContain('__Host-superfield_auth=');
     expect(authCookieClearHeader()).toContain('Secure');
     expect(authCookieClearHeader()).toContain('Max-Age=0');
   });
@@ -169,14 +169,14 @@ describe('logout clears session cookie', () => {
     delete process.env.CSRF_DISABLED;
   });
 
-  test('dev mode: clears calypso_auth with Max-Age=0', async () => {
+  test('dev mode: clears superfield_auth with Max-Age=0', async () => {
     delete process.env.SECURE_COOKIES;
     const appState = makeMinimalAppState();
     const req = new Request('http://localhost/api/auth/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: 'calypso_auth=some-token',
+        Cookie: 'superfield_auth=some-token',
       },
     });
 
@@ -185,19 +185,19 @@ describe('logout clears session cookie', () => {
     expect(res!.status).toBe(200);
 
     const setCookies = res!.headers.getSetCookie();
-    const clearCookie = setCookies.find((h) => h.includes('calypso_auth='));
+    const clearCookie = setCookies.find((h) => h.includes('superfield_auth='));
     expect(clearCookie).toBeDefined();
     expect(clearCookie).toContain('Max-Age=0');
   });
 
-  test('HTTPS mode: clears __Host-calypso_auth with Secure and Max-Age=0', async () => {
+  test('HTTPS mode: clears __Host-superfield_auth with Secure and Max-Age=0', async () => {
     process.env.SECURE_COOKIES = 'true';
     const appState = makeMinimalAppState();
     const req = new Request('http://localhost/api/auth/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: '__Host-calypso_auth=some-token',
+        Cookie: '__Host-superfield_auth=some-token',
       },
     });
 
@@ -206,7 +206,7 @@ describe('logout clears session cookie', () => {
     expect(res!.status).toBe(200);
 
     const setCookies = res!.headers.getSetCookie();
-    const clearCookie = setCookies.find((h) => h.includes('calypso_auth='));
+    const clearCookie = setCookies.find((h) => h.includes('superfield_auth='));
     expect(clearCookie).toBeDefined();
     expect(clearCookie).toContain('Max-Age=0');
     expect(clearCookie).toContain('Secure');

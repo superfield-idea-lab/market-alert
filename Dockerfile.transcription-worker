@@ -21,7 +21,7 @@
 # Environment variables expected at container startup:
 #   AGENT_DATABASE_URL — read-only PostgreSQL connection string for the agent role
 #   AGENT_TYPE         — must be "transcription"
-#   API_BASE_URL       — base URL of the Calypso API server (cluster-internal)
+#   API_BASE_URL       — base URL of the Superfield API server (cluster-internal)
 #   WORKER_ID          — unique identifier for this instance (defaults to hostname)
 #   CLAUDE_CLI_PATH    — path to the transcription CLI binary (optional; dev stub used if unset)
 

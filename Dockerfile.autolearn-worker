@@ -27,7 +27,7 @@
 # CI must download and verify the pinned binary before building this image.
 #
 # Environment variables expected at container startup:
-#   API_BASE_URL        — base URL of the Calypso API server
+#   API_BASE_URL        — base URL of the Superfield API server
 #   WORKER_TOKEN        — single-use scoped token (from token minting endpoint)
 #   DEPARTMENT_ID       — bound department scope for this run
 #   CUSTOMER_ID         — bound customer scope for this run
@@ -74,8 +74,8 @@ FROM oven/bun:1.2-distroless@sha256:e2c3f36733fa2c2c9c80d89b481d9fc7629558cac253
 
 ARG CLAUDE_VERSION=unknown
 LABEL claude.version="${CLAUDE_VERSION}"
-LABEL calypso.worker-type="autolearn"
-LABEL calypso.ephemeral="true"
+LABEL superfield.worker-type="autolearn"
+LABEL superfield.ephemeral="true"
 
 # Non-root user — worker runs as UID/GID 1000.
 # The bun distroless image provides a non-root user at UID 1000.

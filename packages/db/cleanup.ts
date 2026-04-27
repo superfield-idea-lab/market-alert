@@ -12,7 +12,7 @@
 import { join } from 'path';
 import { existsSync, unlinkSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 
-const SENTINEL_FILE = '.calypso-db';
+const SENTINEL_FILE = '.superfield-db';
 
 export interface CleanupRecord {
   containerId: string;
@@ -84,7 +84,7 @@ export function cleanupStaleContainers(): void {
   try {
     const files = readdirSync(repoRoot);
     for (const file of files) {
-      if (file.startsWith('.calypso-db-')) {
+      if (file.startsWith('.superfield-db-')) {
         try {
           const content = readFileSync(join(repoRoot, file), 'utf-8').trim();
           // Check if it's a JSON sentinel or legacy plain container ID

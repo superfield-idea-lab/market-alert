@@ -18,7 +18,6 @@ jobs:
         with:
           # Fetch full history so we can access main branch's schema
           fetch-depth: 0
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Setup Bun

@@ -26,7 +26,7 @@ const html = `<!doctype html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Design System Catalog — Calypso</title>
+  <title>Design System Catalog — Superfield</title>
   <style>
 ${tokensCSS}
 
@@ -273,7 +273,7 @@ h2 {
 
 <div class="catalog-header">
   <h1>Design System Catalog</h1>
-  <p>Calypso — Phase 0 token foundation and Button primitive</p>
+  <p>Superfield — Phase 0 token foundation and Button primitive</p>
 </div>
 
 <!-- ================================================================ -->

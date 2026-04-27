@@ -6,8 +6,8 @@
  * ## What is tested
  *
  * 1. Namespace manifests (k8s/linkerd/namespaces.yaml):
- *    - Three application namespaces are defined (calypso-server, calypso-web,
- *      calypso-worker).
+ *    - Three application namespaces are defined (superfield-server, superfield-web,
+ *      superfield-worker).
  *    - Every namespace has `linkerd.io/inject: enabled` in both labels and
  *      annotations (required by the Linkerd admission webhook).
  *
@@ -120,7 +120,7 @@ describe('k8s/linkerd/namespaces.yaml — sidecar injection annotations (PRD §7
     expect(namespaceDocs).toHaveLength(3);
   });
 
-  const EXPECTED_NAMESPACES = ['calypso-server', 'calypso-web', 'calypso-worker'];
+  const EXPECTED_NAMESPACES = ['superfield-server', 'superfield-web', 'superfield-worker'];
 
   for (const nsName of EXPECTED_NAMESPACES) {
     test(`Namespace '${nsName}' is declared`, () => {
@@ -201,42 +201,48 @@ describe('k8s/linkerd/authorization-policies.yaml — default-deny enforcement (
     }
   });
 
-  test('calypso-server namespace has a Server and AuthorizationPolicy', () => {
+  test('superfield-server namespace has a Server and AuthorizationPolicy', () => {
     const content = readFileSync(POLICIES_FILE, 'utf-8');
     const allDocs = splitYamlDocuments(content);
 
-    const serverDocs = documentsInNamespace(documentsOfKind(allDocs, 'Server'), 'calypso-server');
+    const serverDocs = documentsInNamespace(
+      documentsOfKind(allDocs, 'Server'),
+      'superfield-server',
+    );
     const policyDocs = documentsInNamespace(
       documentsOfKind(allDocs, 'AuthorizationPolicy'),
-      'calypso-server',
+      'superfield-server',
     );
 
     expect(serverDocs.length).toBeGreaterThanOrEqual(1);
     expect(policyDocs.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('calypso-worker namespace has a Server and AuthorizationPolicy', () => {
+  test('superfield-worker namespace has a Server and AuthorizationPolicy', () => {
     const content = readFileSync(POLICIES_FILE, 'utf-8');
     const allDocs = splitYamlDocuments(content);
 
-    const serverDocs = documentsInNamespace(documentsOfKind(allDocs, 'Server'), 'calypso-worker');
+    const serverDocs = documentsInNamespace(
+      documentsOfKind(allDocs, 'Server'),
+      'superfield-worker',
+    );
     const policyDocs = documentsInNamespace(
       documentsOfKind(allDocs, 'AuthorizationPolicy'),
-      'calypso-worker',
+      'superfield-worker',
     );
 
     expect(serverDocs.length).toBeGreaterThanOrEqual(1);
     expect(policyDocs.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('calypso-web namespace has a Server and AuthorizationPolicy', () => {
+  test('superfield-web namespace has a Server and AuthorizationPolicy', () => {
     const content = readFileSync(POLICIES_FILE, 'utf-8');
     const allDocs = splitYamlDocuments(content);
 
-    const serverDocs = documentsInNamespace(documentsOfKind(allDocs, 'Server'), 'calypso-web');
+    const serverDocs = documentsInNamespace(documentsOfKind(allDocs, 'Server'), 'superfield-web');
     const policyDocs = documentsInNamespace(
       documentsOfKind(allDocs, 'AuthorizationPolicy'),
-      'calypso-web',
+      'superfield-web',
     );
 
     expect(serverDocs.length).toBeGreaterThanOrEqual(1);

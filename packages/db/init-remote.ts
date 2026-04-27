@@ -4,10 +4,10 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const DEFAULT_DATABASE_NAMES = {
-  app: 'calypso_app',
-  audit: 'calypso_audit',
-  analytics: 'calypso_analytics',
-  dictionary: 'calypso_dictionary',
+  app: 'superfield_app',
+  audit: 'superfield_audit',
+  analytics: 'superfield_analytics',
+  dictionary: 'superfield_dictionary',
 } as const;
 
 const ROLE_NAMES = {

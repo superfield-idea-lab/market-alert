@@ -54,8 +54,8 @@ async function getTestSession(base: string, username?: string): Promise<string> 
   });
   if (!res.ok) throw new Error(`test-session failed: ${res.status} ${await res.text()}`);
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
-  return match ? `calypso_auth=${match[1]}` : '';
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
+  return match ? `superfield_auth=${match[1]}` : '';
 }
 
 // ---------------------------------------------------------------------------

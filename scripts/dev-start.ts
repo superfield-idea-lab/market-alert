@@ -24,7 +24,7 @@ import { createProxy } from '../apps/web/vite.config';
 
 // Dev cluster Postgres URL (k3d loadbalancer exposes port 5432 on localhost)
 const DEV_DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgres://calypso:calypso@localhost:5432/calypso';
+  process.env.DATABASE_URL ?? 'postgres://superfield:superfield@localhost:5432/superfield';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const WEB_PORT_BASE = Number(process.env.PORT ?? 5174);
@@ -148,6 +148,9 @@ async function main() {
       AUDIT_DATABASE_URL: process.env.AUDIT_DATABASE_URL,
       ANALYTICS_DATABASE_URL: process.env.ANALYTICS_DATABASE_URL,
       PORT: String(API_PORT),
+      // Bind the API server to loopback in dev — it is accessed via the Vite
+      // proxy and should never be directly reachable on external interfaces.
+      SERVER_HOSTNAME: '127.0.0.1',
     },
     stdout: 'inherit',
     stderr: 'inherit',

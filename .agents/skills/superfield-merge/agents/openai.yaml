@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-merge'
+  short_description: 'Run the deterministic merge flow for the selected PR'
+policy:
+  allow_implicit_invocation: false

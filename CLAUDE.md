@@ -1,4 +1,4 @@
-# Calypso Agent Instructions
+# Superfield Agent Instructions
 
 <!-- last-edited: 2026-03-21 -->
 
@@ -26,11 +26,11 @@ vendor-only copies of shared logic.
 
 ## Default Entry Points
 
-- Use `calypso-auto` for continuous Plan execution.
-- Use `calypso-develop` to carry one selected Plan issue from verified prep through merge.
-- Use `calypso-merge` only for deterministic merge actions on the current selected PR.
-- Use `calypso-feature` as the command flow for new planned work.
-- Use `calypso-replan` as the command for compliance auditing plus Plan rewriting.
+- Use `superfield-auto` for continuous Plan execution.
+- Use `superfield-develop` to carry one selected Plan issue from verified prep through merge.
+- Use `superfield-merge` only for deterministic merge actions on the current selected PR.
+- Use `superfield-feature` as the command flow for new planned work.
+- Use `superfield-replan` as the command for compliance auditing plus Plan rewriting.
 
 Skills under `.agents/skills/` are internal implementation details. Enter through
 commands, not skills.

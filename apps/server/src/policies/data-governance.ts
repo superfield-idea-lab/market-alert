@@ -9,7 +9,7 @@ import type {
 /**
  * The current server still writes directly to mutable tables for starter-level
  * features. These functions mark the enterprise policy boundaries that must
- * replace those direct writes as Calypso grows into the blueprint posture.
+ * replace those direct writes as Superfield grows into the blueprint posture.
  */
 
 export async function appendConsequentialWrite(

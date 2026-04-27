@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-pull-request'
+  short_description: 'Run the repository pull-request workflow'
+policy:
+  allow_implicit_invocation: false

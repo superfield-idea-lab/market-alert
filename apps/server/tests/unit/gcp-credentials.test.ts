@@ -13,8 +13,8 @@ import {
 } from '../../../../scripts/gcp/common';
 
 const ENV_KEYS = [
-  'CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR',
-  'CALYPSO_CLOUD_PROVIDER_HTTP_MODE',
+  'SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR',
+  'SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE',
   'GCP_ACCESS_TOKEN',
   'GCP_OAUTH_TOKEN_FILE',
   'GCP_SERVICE_ACCOUNT_JSON',
@@ -28,7 +28,7 @@ describe('Google credential resolution', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-gcp-tests-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-gcp-tests-'));
     process.env.GCP_OAUTH_TOKEN_FILE = join(tempDir, 'missing-oauth.json');
     clearGoogleAccessTokenCache();
     clearGoogleHttpFixtureState();

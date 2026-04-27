@@ -5,8 +5,8 @@
 # Security model
 # ---------------
 # The transcription worker runs in a distroless container.  A NetworkPolicy
-# blocks ALL external egress — the pod can only reach the Calypso API gateway
-# (calypso-app) and the DNS resolver.  Audio data never leaves the cluster.
+# blocks ALL external egress — the pod can only reach the Superfield API gateway
+# (superfield-app) and the DNS resolver.  Audio data never leaves the cluster.
 #
 # Blueprint constraints enforced here:
 #   WORKER-C-001  No-shell distroless runtime
@@ -26,7 +26,7 @@
 
 # ── NetworkPolicy: transcription worker ──────────────────────────────────────
 # Restricts outbound traffic from the transcription worker pod.
-#   - Allows egress to the API gateway (calypso-app) on port 80 only.
+#   - Allows egress to the API gateway (superfield-app) on port 80 only.
 #   - Allows DNS resolution (UDP/TCP port 53).
 #   - Blocks ALL other outbound traffic, including any external internet access.
 #     This ensures audio data stays within the cluster trust boundary.
@@ -34,23 +34,23 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: calypso-worker-transcription-egress
+  name: superfield-worker-transcription-egress
   labels:
-    app: calypso-worker-transcription
+    app: superfield-worker-transcription
 spec:
   podSelector:
     matchLabels:
-      app: calypso-worker-transcription
+      app: superfield-worker-transcription
   policyTypes:
     - Egress
   egress:
-    # Allow outbound to API gateway (calypso-app) on port 80 only.
+    # Allow outbound to API gateway (superfield-app) on port 80 only.
     # This is the sole permitted external connection — workers submit transcripts
     # via POST /api/transcriptions using their delegated token.
     - to:
         - podSelector:
             matchLabels:
-              app: calypso-app
+              app: superfield-app
       ports:
         - protocol: TCP
           port: 80
@@ -75,25 +75,25 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calypso-worker-transcription
+  name: superfield-worker-transcription
   labels:
-    app: calypso-worker-transcription
+    app: superfield-worker-transcription
     agent-type: transcription
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-worker-transcription
+      app: superfield-worker-transcription
   template:
     metadata:
       labels:
-        app: calypso-worker-transcription
+        app: superfield-worker-transcription
         agent-type: transcription
     spec:
       containers:
         - name: worker
           # Image tag is set via deploy.sh or kubectl set image
-          image: ghcr.io/<owner>/calypso-worker-transcription:latest
+          image: ghcr.io/<owner>/superfield-worker-transcription:latest
           env:
             - name: AGENT_TYPE
               value: 'transcription'
@@ -103,20 +103,20 @@ spec:
             - name: AGENT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-transcription-secret
+                  name: superfield-worker-transcription-secret
                   key: AGENT_DATABASE_URL
             # API gateway base URL for task claim and transcript submission.
             - name: API_BASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-transcription-secret
+                  name: superfield-worker-transcription-secret
                   key: API_BASE_URL
             # Path to the transcription CLI binary (e.g. a Whisper-based tool).
             # When unset, the dev stub is used as a fallback.
             - name: CLAUDE_CLI_PATH
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-transcription-secret
+                  name: superfield-worker-transcription-secret
                   key: CLAUDE_CLI_PATH
                   optional: true
             # Vendor API key is intentionally absent from the worker environment.

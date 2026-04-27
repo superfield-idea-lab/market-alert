@@ -275,7 +275,7 @@ test('Direct INSERT into wiki_page_versions by a restricted DB role is denied', 
   await sql.unsafe(`CREATE ROLE ${roleName} LOGIN PASSWORD '${rolePassword}'`);
   await sql.unsafe(`REVOKE ALL ON wiki_page_versions FROM ${roleName}`);
   await sql.unsafe(`GRANT SELECT ON wiki_page_versions TO ${roleName}`);
-  await sql.unsafe(`GRANT CONNECT ON DATABASE calypso TO ${roleName}`);
+  await sql.unsafe(`GRANT CONNECT ON DATABASE superfield TO ${roleName}`);
   await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${roleName}`);
 
   // Connect as the restricted role.

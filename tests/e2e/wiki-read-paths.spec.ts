@@ -61,9 +61,9 @@ async function getTestSession(username: string): Promise<{ cookie: string; userI
   }
   const body = (await res.json()) as { user: { id: string; username: string } };
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
   return {
-    cookie: match ? `calypso_auth=${match[1]}` : '',
+    cookie: match ? `superfield_auth=${match[1]}` : '',
     userId: body.user.id,
   };
 }
@@ -109,7 +109,7 @@ async function seedWikiVersion(opts: {
 }
 
 /**
- * Build Playwright cookie objects from a raw `calypso_auth=<value>` cookie
+ * Build Playwright cookie objects from a raw `superfield_auth=<value>` cookie
  * string suitable for `context.addCookies()`.
  */
 function cookieObjects(rawCookie: string): Array<{
@@ -118,9 +118,9 @@ function cookieObjects(rawCookie: string): Array<{
   domain: string;
   path: string;
 }> {
-  const match = /calypso_auth=([^;]+)/.exec(rawCookie);
+  const match = /superfield_auth=([^;]+)/.exec(rawCookie);
   if (!match) return [];
-  return [{ name: 'calypso_auth', value: match[1], domain: 'localhost', path: '/' }];
+  return [{ name: 'superfield_auth', value: match[1], domain: 'localhost', path: '/' }];
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ describe('happy-path: RM opens a seeded customer wiki', () => {
       await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
       // Assert the main app shell is rendered (not the login screen).
-      // The logged-in view shows the "Calypso" logo icon and navigation.
+      // The logged-in view shows the "Superfield" logo icon and navigation.
       await playwrightExpect(page.locator('[data-testid="wiki-view-page"]')).toHaveCount(0);
 
       // Directly request the wiki API and assert the structure is sound

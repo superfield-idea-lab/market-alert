@@ -10,7 +10,7 @@
 ## Purpose
 
 This runbook defines the procedure for performing, verifying, and restoring
-encrypted Postgres backups for the Calypso KB system. It is the **backup
+encrypted Postgres backups for the Superfield KB system. It is the **backup
 verification proof** artifact referenced in the SOC 2 evidence package (issue
 #92).
 
@@ -39,7 +39,7 @@ The sidecar `meta.json` structure:
 {
   "backupId": "<YYYY-MM-DDTHH-MM-SSZ>",
   "createdAt": "<ISO-8601 timestamp>",
-  "databases": ["calypso_app", "calypso_audit"],
+  "databases": ["superfield_app", "superfield_audit"],
   "encryptedDek": "<base64-encoded KMS-encrypted data key>",
   "iv": "<base64-encoded AES-GCM IV>"
 }
@@ -49,7 +49,7 @@ The sidecar `meta.json` structure:
 
 ```bash
 # From a node with DATABASE_URL and AUDIT_DATABASE_URL set
-./scripts/backup-postgres.sh --store-dir /var/backups/calypso
+./scripts/backup-postgres.sh --store-dir /var/backups/superfield
 ```
 
 ---
@@ -66,8 +66,8 @@ The sidecar `meta.json` structure:
 
 ```bash
 ./scripts/restore-postgres.sh \
-  --enc-file  /var/backups/calypso/<backup-id>.dump.enc \
-  --meta-file /var/backups/calypso/<backup-id>.meta.json \
+  --enc-file  /var/backups/superfield/<backup-id>.dump.enc \
+  --meta-file /var/backups/superfield/<backup-id>.meta.json \
   --target-url postgres://admin:password@<host>:5432/<restore-db>
 ```
 
@@ -88,7 +88,7 @@ A restore drill must be run quarterly and the result recorded as a
 1. **Select the most recent backup artifact** from the backup store.
 
 2. **Create a temporary restore target** database (or use the dedicated
-   `calypso_restore` database in staging).
+   `superfield_restore` database in staging).
 
 3. **Run the restore** and capture the row count:
 
@@ -96,7 +96,7 @@ A restore drill must be run quarterly and the result recorded as a
    ./scripts/restore-postgres.sh \
      --enc-file  <path>.dump.enc \
      --meta-file <path>.meta.json \
-     --target-url postgres://admin:password@staging:5432/calypso_restore
+     --target-url postgres://admin:password@staging:5432/superfield_restore
    ```
 
 4. **Verify row counts** match the source database:

@@ -130,7 +130,7 @@ describe('InstallPrompt routing logic', () => {
   });
 
   test('dismissed key name is stable (used in localStorage)', () => {
-    expect(DISMISSED_KEY).toBe('calypso:pwa-install-dismissed');
+    expect(DISMISSED_KEY).toBe('superfield:pwa-install-dismissed');
   });
 
   test('DISMISS_TTL_MS is 90 days in milliseconds', () => {
@@ -193,7 +193,7 @@ describe('InstallPrompt module exports', () => {
 
   test('DISMISSED_KEY is exported from the module', async () => {
     const mod = await import('../../src/components/pwa/install-prompt.js');
-    expect(mod.DISMISSED_KEY).toBe('calypso:pwa-install-dismissed');
+    expect(mod.DISMISSED_KEY).toBe('superfield:pwa-install-dismissed');
   });
 
   test('resolveInstallPromptVariant is exported from the module', async () => {

@@ -6,8 +6,8 @@
  * ## What is tested
  *
  * 1. k8s/autolearn-worker.yaml exists and contains the required resources.
- * 2. A NetworkPolicy resource named `calypso-autolearn-worker-egress` is present.
- * 3. The NetworkPolicy selects pods with `app: calypso-autolearn-worker`.
+ * 2. A NetworkPolicy resource named `superfield-autolearn-worker-egress` is present.
+ * 3. The NetworkPolicy selects pods with `app: superfield-autolearn-worker`.
  * 4. Egress to the API server (port 80) is allowed.
  * 5. Egress to Anthropic API (port 443) is allowed.
  * 6. DNS egress (port 53) is allowed.
@@ -79,18 +79,18 @@ describe('NetworkPolicy — egress rules (WORKER-C-006, WORKER-C-024)', () => {
     expect(policies).toHaveLength(1);
   });
 
-  test('NetworkPolicy is named calypso-autolearn-worker-egress', () => {
+  test('NetworkPolicy is named superfield-autolearn-worker-egress', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [policy] = documentsOfKind(docs, 'NetworkPolicy');
-    expect(extractField(policy, 'name')).toBe('calypso-autolearn-worker-egress');
+    expect(extractField(policy, 'name')).toBe('superfield-autolearn-worker-egress');
   });
 
-  test('NetworkPolicy selects pods with app: calypso-autolearn-worker', () => {
+  test('NetworkPolicy selects pods with app: superfield-autolearn-worker', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [policy] = documentsOfKind(docs, 'NetworkPolicy');
-    expect(policy).toContain('app: calypso-autolearn-worker');
+    expect(policy).toContain('app: superfield-autolearn-worker');
     expect(policy).toContain('podSelector');
   });
 
@@ -143,11 +143,11 @@ describe('Deployment — autolearn worker (WORKER-C-020, WORKER-T-009)', () => {
     expect(deployments).toHaveLength(1);
   });
 
-  test('Deployment is named calypso-autolearn-worker', () => {
+  test('Deployment is named superfield-autolearn-worker', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(extractField(deployment, 'name')).toBe('calypso-autolearn-worker');
+    expect(extractField(deployment, 'name')).toBe('superfield-autolearn-worker');
   });
 
   test('Deployment has agent-type: autolearn label', () => {
@@ -183,11 +183,11 @@ describe('Deployment — autolearn worker (WORKER-C-020, WORKER-T-009)', () => {
     expect(apiKeySection).toContain('secretKeyRef');
   });
 
-  test('Deployment uses calypso-autolearn-worker-secret Secret', () => {
+  test('Deployment uses superfield-autolearn-worker-secret Secret', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('calypso-autolearn-worker-secret');
+    expect(deployment).toContain('superfield-autolearn-worker-secret');
   });
 
   test('Deployment runs as non-root (securityContext)', () => {
@@ -215,10 +215,10 @@ describe('ServiceAccount — autolearn worker', () => {
     expect(accounts).toHaveLength(1);
   });
 
-  test('ServiceAccount is named calypso-autolearn-worker', () => {
+  test('ServiceAccount is named superfield-autolearn-worker', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [account] = documentsOfKind(docs, 'ServiceAccount');
-    expect(extractField(account, 'name')).toBe('calypso-autolearn-worker');
+    expect(extractField(account, 'name')).toBe('superfield-autolearn-worker');
   });
 });

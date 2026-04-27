@@ -8,40 +8,40 @@ import { resolveDatabaseUrls, resolveSchemaSqlPath, splitSqlStatements } from '.
 describe('resolveDatabaseUrls', () => {
   it('uses localhost defaults when only DATABASE_URL is unset', () => {
     expect(resolveDatabaseUrls({} as NodeJS.ProcessEnv)).toEqual({
-      app: 'postgres://app_rw:app_rw_password@localhost:5432/calypso_app',
-      audit: 'postgres://audit_w:audit_w_password@localhost:5432/calypso_audit',
-      analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics',
-      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/calypso_dictionary',
+      app: 'postgres://app_rw:app_rw_password@localhost:5432/superfield_app',
+      audit: 'postgres://audit_w:audit_w_password@localhost:5432/superfield_audit',
+      analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/superfield_analytics',
+      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/superfield_dictionary',
     });
   });
 
   it('respects explicit pool environment overrides', () => {
     expect(
       resolveDatabaseUrls({
-        DATABASE_URL: 'postgres://app@example/calypso_app',
-        AUDIT_DATABASE_URL: 'postgres://audit@example/calypso_audit',
-        ANALYTICS_DATABASE_URL: 'postgres://analytics@example/calypso_analytics',
-        DICTIONARY_DATABASE_URL: 'postgres://dict@example/calypso_dictionary',
+        DATABASE_URL: 'postgres://app@example/superfield_app',
+        AUDIT_DATABASE_URL: 'postgres://audit@example/superfield_audit',
+        ANALYTICS_DATABASE_URL: 'postgres://analytics@example/superfield_analytics',
+        DICTIONARY_DATABASE_URL: 'postgres://dict@example/superfield_dictionary',
       } as NodeJS.ProcessEnv),
     ).toEqual({
-      app: 'postgres://app@example/calypso_app',
-      audit: 'postgres://audit@example/calypso_audit',
-      analytics: 'postgres://analytics@example/calypso_analytics',
-      dictionary: 'postgres://dict@example/calypso_dictionary',
+      app: 'postgres://app@example/superfield_app',
+      audit: 'postgres://audit@example/superfield_audit',
+      analytics: 'postgres://analytics@example/superfield_analytics',
+      dictionary: 'postgres://dict@example/superfield_dictionary',
     });
   });
 
   it('falls back independently when audit, analytics or dictionary URLs are missing', () => {
     expect(
       resolveDatabaseUrls({
-        DATABASE_URL: 'postgres://app@example/calypso_app',
-        AUDIT_DATABASE_URL: 'postgres://audit@example/calypso_audit',
+        DATABASE_URL: 'postgres://app@example/superfield_app',
+        AUDIT_DATABASE_URL: 'postgres://audit@example/superfield_audit',
       } as NodeJS.ProcessEnv),
     ).toEqual({
-      app: 'postgres://app@example/calypso_app',
-      audit: 'postgres://audit@example/calypso_audit',
-      analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics',
-      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/calypso_dictionary',
+      app: 'postgres://app@example/superfield_app',
+      audit: 'postgres://audit@example/superfield_audit',
+      analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/superfield_analytics',
+      dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/superfield_dictionary',
     });
   });
 });
@@ -83,7 +83,7 @@ describe('resolveSchemaSqlPath', () => {
   });
 
   it('falls back to packaged schema.sql when running from a bundled dist directory', () => {
-    const root = mkdtempSync(join(tmpdir(), 'calypso-schema-path-'));
+    const root = mkdtempSync(join(tmpdir(), 'superfield-schema-path-'));
     const distDir = join(root, 'dist');
     const packagedDir = join(root, 'packages', 'db');
     mkdirSync(distDir, { recursive: true });

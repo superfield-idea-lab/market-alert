@@ -508,7 +508,7 @@ export interface VaultKmsBackendOptions {
   token: string;
   /**
    * Name of the Transit encryption key in Vault.
-   * Defaults to `calypso-field-enc`.
+   * Defaults to `superfield-field-enc`.
    */
   keyName?: string;
   /** Transit secrets engine mount path. Defaults to `transit`. */
@@ -534,7 +534,7 @@ export class VaultKmsBackend implements KmsBackend {
   constructor(opts: VaultKmsBackendOptions) {
     this.addr = opts.addr.replace(/\/$/, '');
     this.token = opts.token;
-    this.keyName = opts.keyName ?? 'calypso-field-enc';
+    this.keyName = opts.keyName ?? 'superfield-field-enc';
     this.mount = opts.mount ?? 'transit';
   }
 

@@ -1,6 +1,6 @@
 /**
  * These types define the target enterprise data-policy boundaries described in the
- * Calypso blueprints. The current application code does not implement them yet.
+ * Superfield blueprints. The current application code does not implement them yet.
  * They exist so future work can land against explicit contracts instead of
  * scattering implicit TODOs across the server.
  */

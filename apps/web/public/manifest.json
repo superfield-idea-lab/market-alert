@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Calypso",
-  "short_name": "Calypso",
-  "description": "Calypso – modern full-stack starter with PWA support",
+  "name": "Superfield",
+  "short_name": "Superfield",
+  "description": "Superfield – modern full-stack starter with PWA support",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#3b82f6",

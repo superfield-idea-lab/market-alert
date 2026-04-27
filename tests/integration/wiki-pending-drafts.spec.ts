@@ -47,8 +47,8 @@ async function getTestSession(base: string, username: string): Promise<string> {
   const body = await res.json();
   const userId: string = (body as { user: { id: string } }).user.id;
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
-  const cookie = match ? `calypso_auth=${match[1]}` : '';
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
+  const cookie = match ? `superfield_auth=${match[1]}` : '';
   return `${cookie}|${userId}`;
 }
 

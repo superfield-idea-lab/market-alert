@@ -53,9 +53,9 @@ async function getTestSession(
   expect(res.ok).toBe(true);
   const body = (await res.json()) as { user: { id: string } };
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
   return {
-    cookie: match ? `calypso_auth=${match[1]}` : '',
+    cookie: match ? `superfield_auth=${match[1]}` : '',
     userId: body.user.id,
   };
 }
@@ -213,12 +213,12 @@ test('TP-1: BDM selects an asset manager and sees anonymised chunks in the UI', 
 
   // Get session and inject cookie into Playwright context.
   const { cookie: rawCookie } = await getTestSession(env.baseUrl, `cam-playwright-${Date.now()}`);
-  const cookieValue = rawCookie.replace(/^calypso_auth=/, '');
+  const cookieValue = rawCookie.replace(/^superfield_auth=/, '');
 
   const page = await browser.newPage();
   await page.context().addCookies([
     {
-      name: 'calypso_auth',
+      name: 'superfield_auth',
       value: cookieValue,
       url: env.baseUrl,
     },

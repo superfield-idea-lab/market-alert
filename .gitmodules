@@ -1,9 +1,0 @@
-[submodule "calypso-blueprint"]
-	path = calypso-blueprint
-	url = https://github.com/superfield-ai/superfield-blueprint.git
-[submodule ".agents"]
-	path = .agents
-	url = https://github.com/dot-matrix-labs/calypso-agents.git
-[submodule "studio"]
-	path = studio
-	url = https://github.com/superfield-ai/superfield-studio.git

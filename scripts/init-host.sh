@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# init-host.sh — Calypso host provisioning via SSH (local-to-remote orchestrator)
+# init-host.sh — Superfield host provisioning via SSH (local-to-remote orchestrator)
 #
 # Usage:
 #   scripts/init-host.sh <host> <env> --admin-key <pubkey-file> [options]
@@ -7,7 +7,7 @@
 # Arguments:
 #   <host>              Remote host address (IP or hostname) — SSH target
 #   <env>               Deployment environment label (e.g. "demo", "prod")
-#                       Kubernetes namespace will be "calypso-<env>"
+#                       Kubernetes namespace will be "superfield-<env>"
 #
 # Optional:
 #   --admin-key <file>  Path to a public key file to install in superfield's
@@ -188,10 +188,10 @@ if _is_legacy_call; then
   # The following block is the pre-#142 implementation preserved for CI
   # compatibility. test-host-init.yml calls the legacy signature.
   ENV_LABEL="${POSITIONAL[0]}"
-  NAMESPACE="calypso-${ENV_LABEL}"
-  REPO="${CALYPSO_IMAGE_REPO:-ghcr.io/superfield-ai/superfield-kb-demo}"
+  NAMESPACE="superfield-${ENV_LABEL}"
+  REPO="${SUPERFIELD_IMAGE_REPO:-ghcr.io/superfield-ai/superfield-kb-demo}"
 
-  echo "==> Calypso host initialisation (legacy mode)"
+  echo "==> Superfield host initialisation (legacy mode)"
   echo "    Environment : ${ENV_LABEL}"
   echo "    Namespace   : ${NAMESPACE}"
   echo ""
@@ -270,11 +270,11 @@ if _is_legacy_call; then
     fi
   fi
 
-  if [[ -z "${CALYPSO_IMAGE_TAG:-}" ]] && [ -t 0 ]; then
-    read -rp "    Calypso image tag (e.g. v1.2.3): " CALYPSO_IMAGE_TAG
+  if [[ -z "${SUPERFIELD_IMAGE_TAG:-}" ]] && [ -t 0 ]; then
+    read -rp "    Superfield image tag (e.g. v1.2.3): " SUPERFIELD_IMAGE_TAG
   fi
-  : "${CALYPSO_IMAGE_TAG:?CALYPSO_IMAGE_TAG is required}"
-  IMAGE="${REPO}:${CALYPSO_IMAGE_TAG}"
+  : "${SUPERFIELD_IMAGE_TAG:?SUPERFIELD_IMAGE_TAG is required}"
+  IMAGE="${REPO}:${SUPERFIELD_IMAGE_TAG}"
 
   if [[ -z "${MNEMONIC:-}" ]] && [[ -z "${SUPERUSER_PASSWORD:-}" ]] && [ -t 0 ]; then
     read -rsp "    Superuser mnemonic (or leave blank to use SUPERUSER_PASSWORD): " MNEMONIC
@@ -324,26 +324,26 @@ if _is_legacy_call; then
       -o jsonpath="{.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null || true
   }
 
-  if kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
-    echo "    Found existing calypso-api-secrets — reusing role passwords (idempotent run)."
-    _existing_db_url="$(_decode_secret_key "${NAMESPACE}" calypso-api-secrets DATABASE_URL)"
+  if kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
+    echo "    Found existing superfield-api-secrets — reusing role passwords (idempotent run)."
+    _existing_db_url="$(_decode_secret_key "${NAMESPACE}" superfield-api-secrets DATABASE_URL)"
     APP_RW_PASSWORD="$(echo "${_existing_db_url}" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')"
-    AUDIT_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AUDIT_W_PASSWORD)"
-    ANALYTICS_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets ANALYTICS_W_PASSWORD)"
-    DICT_RW_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets DICT_RW_PASSWORD)"
-    AGENT_CODING_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_CODING_PASSWORD)"
-    AGENT_ANALYSIS_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_ANALYSIS_PASSWORD)"
-    AGENT_CODE_CLEANUP_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_CODE_CLEANUP_PASSWORD)"
-    AGENT_EMAIL_INGEST_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets AGENT_EMAIL_INGEST_PASSWORD)"
+    AUDIT_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets AUDIT_W_PASSWORD)"
+    ANALYTICS_W_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets ANALYTICS_W_PASSWORD)"
+    DICT_RW_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets DICT_RW_PASSWORD)"
+    AGENT_CODING_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets AGENT_CODING_PASSWORD)"
+    AGENT_ANALYSIS_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets AGENT_ANALYSIS_PASSWORD)"
+    AGENT_CODE_CLEANUP_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets AGENT_CODE_CLEANUP_PASSWORD)"
+    AGENT_EMAIL_INGEST_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets AGENT_EMAIL_INGEST_PASSWORD)"
     DICT_RW_PASSWORD="${DICT_RW_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_CODING_PASSWORD="${AGENT_CODING_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_ANALYSIS_PASSWORD="${AGENT_ANALYSIS_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD:-$(openssl rand -hex 24)}"
     AGENT_EMAIL_INGEST_PASSWORD="${AGENT_EMAIL_INGEST_PASSWORD:-$(openssl rand -hex 24)}"
-    JWT_SECRET="$(_decode_secret_key "${NAMESPACE}" calypso-api-secrets JWT_SECRET)"
-    ENCRYPTION_MASTER_KEY="$(_decode_secret_key "${NAMESPACE}" calypso-api-secrets ENCRYPTION_MASTER_KEY)"
+    JWT_SECRET="$(_decode_secret_key "${NAMESPACE}" superfield-api-secrets JWT_SECRET)"
+    ENCRYPTION_MASTER_KEY="$(_decode_secret_key "${NAMESPACE}" superfield-api-secrets ENCRYPTION_MASTER_KEY)"
     if [[ "${DB_MODE}" == "local" ]]; then
-      POSTGRES_SUPERUSER_PASSWORD="$(_decode_secret_key "${NAMESPACE}" calypso-db-secrets POSTGRES_PASSWORD)"
+      POSTGRES_SUPERUSER_PASSWORD="$(_decode_secret_key "${NAMESPACE}" superfield-db-secrets POSTGRES_PASSWORD)"
     fi
   else
     echo "    Generating new secrets."
@@ -363,7 +363,7 @@ if _is_legacy_call; then
   fi
 
   if [[ "${DB_MODE}" == "local" ]]; then
-    PG_HOST="postgres"; PG_PORT="5432"; PG_ADMIN_DB="calypso_app"
+    PG_HOST="postgres"; PG_PORT="5432"; PG_ADMIN_DB="superfield_app"
     PG_ADMIN_USER="postgres"; PG_ADMIN_PASSWORD="${POSTGRES_SUPERUSER_PASSWORD:-}"; PG_SSL=""
   else
     PG_HOST="${REMOTE_PG_HOST}"; PG_PORT="${REMOTE_PG_PORT}"; PG_ADMIN_DB="${REMOTE_PG_ADMIN_DB}"
@@ -372,9 +372,9 @@ if _is_legacy_call; then
   fi
 
   if [[ "${DB_MODE}" == "local" ]]; then
-    DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@postgres:5432/calypso_app"
-    AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@postgres:5432/calypso_audit"
-    ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@postgres:5432/calypso_analytics"
+    DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@postgres:5432/superfield_app"
+    AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@postgres:5432/superfield_audit"
+    ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@postgres:5432/superfield_analytics"
     ADMIN_DATABASE_URL="postgres://${PG_ADMIN_USER}:${PG_ADMIN_PASSWORD}@postgres:5432/${PG_ADMIN_DB}"
   else
     SSL_SUFFIX=""
@@ -383,9 +383,9 @@ if _is_legacy_call; then
     elif [[ "${PG_SSL}" == "disable" ]]; then
       SSL_SUFFIX="?sslmode=disable"
     fi
-    DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@${PG_HOST}:${PG_PORT}/calypso_app${SSL_SUFFIX}"
-    AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@${PG_HOST}:${PG_PORT}/calypso_audit${SSL_SUFFIX}"
-    ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@${PG_HOST}:${PG_PORT}/calypso_analytics${SSL_SUFFIX}"
+    DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@${PG_HOST}:${PG_PORT}/superfield_app${SSL_SUFFIX}"
+    AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@${PG_HOST}:${PG_PORT}/superfield_audit${SSL_SUFFIX}"
+    ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@${PG_HOST}:${PG_PORT}/superfield_analytics${SSL_SUFFIX}"
     ADMIN_DATABASE_URL="postgres://${PG_ADMIN_USER}:${PG_ADMIN_PASSWORD}@${PG_HOST}:${PG_PORT}/${PG_ADMIN_DB}${SSL_SUFFIX}"
   fi
 
@@ -401,7 +401,7 @@ if _is_legacy_call; then
     kubectl create secret docker-registry ghcr-pull-secret \
       --namespace="${NAMESPACE}" \
       --docker-server=ghcr.io \
-      --docker-username=calypso \
+      --docker-username=superfield \
       --docker-password="${GITHUB_PAT}" \
       --dry-run=client -o yaml | kubectl apply -f -
   fi
@@ -423,8 +423,8 @@ if _is_legacy_call; then
   [[ -n "${BLOOMBERG_API_KEY:-}" ]] && API_SECRET_ARGS+=(--from-literal=BLOOMBERG_API_KEY="${BLOOMBERG_API_KEY}")
   [[ -n "${YAHOO_API_KEY:-}" ]] && API_SECRET_ARGS+=(--from-literal=YAHOO_API_KEY="${YAHOO_API_KEY}")
 
-  kubectl delete secret calypso-api-secrets --namespace="${NAMESPACE}" --ignore-not-found
-  kubectl create secret generic calypso-api-secrets "${API_SECRET_ARGS[@]}"
+  kubectl delete secret superfield-api-secrets --namespace="${NAMESPACE}" --ignore-not-found
+  kubectl create secret generic superfield-api-secrets "${API_SECRET_ARGS[@]}"
 
   DB_SECRET_ARGS=(
     --namespace="${NAMESPACE}"
@@ -440,10 +440,10 @@ if _is_legacy_call; then
   if [[ "${DB_MODE}" == "local" ]]; then
     DB_SECRET_ARGS+=(--from-literal=POSTGRES_USER="postgres")
     DB_SECRET_ARGS+=(--from-literal=POSTGRES_PASSWORD="${POSTGRES_SUPERUSER_PASSWORD}")
-    DB_SECRET_ARGS+=(--from-literal=POSTGRES_DB="calypso_app")
+    DB_SECRET_ARGS+=(--from-literal=POSTGRES_DB="superfield_app")
   fi
-  kubectl delete secret calypso-db-secrets --namespace="${NAMESPACE}" --ignore-not-found
-  kubectl create secret generic calypso-db-secrets "${DB_SECRET_ARGS[@]}"
+  kubectl delete secret superfield-db-secrets --namespace="${NAMESPACE}" --ignore-not-found
+  kubectl create secret generic superfield-db-secrets "${DB_SECRET_ARGS[@]}"
 
   DB_INIT_SECRET_ARGS=(
     --namespace="${NAMESPACE}"
@@ -458,8 +458,8 @@ if _is_legacy_call; then
     --from-literal=AGENT_EMAIL_INGEST_PASSWORD="${AGENT_EMAIL_INGEST_PASSWORD}"
   )
   [[ -n "${REMOTE_PG_CA_CERT:-}" ]] && DB_INIT_SECRET_ARGS+=(--from-literal=DB_CA_CERT="${REMOTE_PG_CA_CERT}")
-  kubectl delete secret calypso-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
-  kubectl create secret generic calypso-db-init-secret "${DB_INIT_SECRET_ARGS[@]}"
+  kubectl delete secret superfield-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
+  kubectl create secret generic superfield-db-init-secret "${DB_INIT_SECRET_ARGS[@]}"
 
   echo "    Kubernetes secrets created."
 
@@ -472,7 +472,7 @@ if _is_legacy_call; then
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: calypso-postgres-pvc
+  name: superfield-postgres-pvc
   namespace: ${NAMESPACE}
   labels:
     app: postgres
@@ -510,17 +510,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_DB
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -529,14 +529,14 @@ spec:
               mountPath: /var/lib/postgresql/data
           livenessProbe:
             exec:
-              command: [pg_isready, -U, postgres, -d, calypso_app]
+              command: [pg_isready, -U, postgres, -d, superfield_app]
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
           readinessProbe:
             exec:
-              command: [pg_isready, -U, postgres, -d, calypso_app]
+              command: [pg_isready, -U, postgres, -d, superfield_app]
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 5
@@ -551,7 +551,7 @@ spec:
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: calypso-postgres-pvc
+            claimName: superfield-postgres-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -575,21 +575,21 @@ EOF
     kubectl rollout status statefulset/postgres --namespace="${NAMESPACE}" --timeout=120s
   fi
 
-  kubectl delete job calypso-db-init --namespace="${NAMESPACE}" --ignore-not-found
+  kubectl delete job superfield-db-init --namespace="${NAMESPACE}" --ignore-not-found
   kubectl apply --namespace="${NAMESPACE}" -f - <<EOF
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: calypso-db-init
+  name: superfield-db-init
   namespace: ${NAMESPACE}
   labels:
-    app: calypso-db-init
+    app: superfield-db-init
 spec:
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
-        app: calypso-db-init
+        app: superfield-db-init
     spec:
       restartPolicy: OnFailure
       containers:
@@ -601,47 +601,47 @@ spec:
             - name: ADMIN_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: ADMIN_DATABASE_URL
             - name: APP_RW_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: APP_RW_PASSWORD
             - name: AUDIT_W_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: AUDIT_W_PASSWORD
             - name: ANALYTICS_W_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: ANALYTICS_W_PASSWORD
             - name: DICT_RW_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: DICT_RW_PASSWORD
             - name: AGENT_CODING_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: AGENT_CODING_PASSWORD
             - name: AGENT_ANALYSIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: AGENT_ANALYSIS_PASSWORD
             - name: AGENT_CODE_CLEANUP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: AGENT_CODE_CLEANUP_PASSWORD
             - name: AGENT_EMAIL_INGEST_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-init-secret
+                  name: superfield-db-init-secret
                   key: AGENT_EMAIL_INGEST_PASSWORD
           resources:
             requests:
@@ -684,7 +684,7 @@ EOF
   # ── 8. db-init job and deploy ────────────────────────────────────────────────
   echo ""
   echo "==> [8/8] Running db-init job and deploying application"
-  echo "    Waiting for calypso-db-init job to complete..."
+  echo "    Waiting for superfield-db-init job to complete..."
 
   _poll_db_init() {
     local ns="$1" tick=0
@@ -692,10 +692,10 @@ EOF
       sleep 20
       tick=$((tick + 20))
       echo "    [db-init +${tick}s] pod status:" >&2
-      kubectl get pods -n "${ns}" --selector=app=calypso-db-init \
+      kubectl get pods -n "${ns}" --selector=app=superfield-db-init \
         -o wide --no-headers 2>&1 | sed 's/^/      /' >&2 || true
       echo "    [db-init +${tick}s] recent logs:" >&2
-      kubectl logs -n "${ns}" --selector=app=calypso-db-init \
+      kubectl logs -n "${ns}" --selector=app=superfield-db-init \
         --tail=30 --ignore-errors 2>&1 | sed 's/^/      /' >&2 || true
     done
   }
@@ -703,43 +703,43 @@ EOF
   POLL_PID=$!
 
   WAIT_EXIT=0
-  kubectl wait --for=condition=complete job/calypso-db-init \
+  kubectl wait --for=condition=complete job/superfield-db-init \
     --namespace="${NAMESPACE}" --timeout=300s || WAIT_EXIT=$?
 
   kill "${POLL_PID}" 2>/dev/null || true
   wait "${POLL_PID}" 2>/dev/null || true
 
   if [[ "${WAIT_EXIT}" -ne 0 ]]; then
-    echo "    ERROR: calypso-db-init job timed out or failed." >&2
-    kubectl describe job/calypso-db-init --namespace="${NAMESPACE}" >&2 || true
-    kubectl get pods --namespace="${NAMESPACE}" --selector=app=calypso-db-init -o wide >&2 || true
-    kubectl describe pods --namespace="${NAMESPACE}" --selector=app=calypso-db-init >&2 || true
-    kubectl logs --namespace="${NAMESPACE}" --selector=app=calypso-db-init --tail=200 >&2 || true
+    echo "    ERROR: superfield-db-init job timed out or failed." >&2
+    kubectl describe job/superfield-db-init --namespace="${NAMESPACE}" >&2 || true
+    kubectl get pods --namespace="${NAMESPACE}" --selector=app=superfield-db-init -o wide >&2 || true
+    kubectl describe pods --namespace="${NAMESPACE}" --selector=app=superfield-db-init >&2 || true
+    kubectl logs --namespace="${NAMESPACE}" --selector=app=superfield-db-init --tail=200 >&2 || true
     exit 1
   fi
 
-  echo "    calypso-db-init job completed."
-  kubectl delete secret calypso-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
-  echo "    calypso-db-init-secret deleted."
+  echo "    superfield-db-init job completed."
+  kubectl delete secret superfield-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
+  echo "    superfield-db-init-secret deleted."
 
-  kubectl delete deployment calypso-app --namespace="${NAMESPACE}" --ignore-not-found
+  kubectl delete deployment superfield-app --namespace="${NAMESPACE}" --ignore-not-found
   kubectl apply --namespace="${NAMESPACE}" -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calypso-app
+  name: superfield-app
   namespace: ${NAMESPACE}
   labels:
-    app: calypso-app
+    app: superfield-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-app
+      app: superfield-app
   template:
     metadata:
       labels:
-        app: calypso-app
+        app: superfield-app
     spec:
       imagePullSecrets:
         - name: ghcr-pull-secret
@@ -755,44 +755,44 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: DATABASE_URL
             - name: AUDIT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: AUDIT_DATABASE_URL
             - name: ANALYTICS_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: ANALYTICS_DATABASE_URL
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: JWT_SECRET
             - name: ENCRYPTION_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: ENCRYPTION_MASTER_KEY
             - name: SUBSTACK_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: SUBSTACK_API_KEY
                   optional: true
             - name: BLOOMBERG_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: BLOOMBERG_API_KEY
                   optional: true
             - name: YAHOO_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-api-secrets
+                  name: superfield-api-secrets
                   key: YAHOO_API_KEY
                   optional: true
           livenessProbe:
@@ -822,13 +822,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: calypso-app
+  name: superfield-app
   namespace: ${NAMESPACE}
   labels:
-    app: calypso-app
+    app: superfield-app
 spec:
   selector:
-    app: calypso-app
+    app: superfield-app
   ports:
     - name: http
       protocol: TCP
@@ -860,9 +860,9 @@ fi
 
 HOST="${POSITIONAL[0]}"
 ENV_LABEL="${POSITIONAL[1]}"
-NAMESPACE="calypso-${ENV_LABEL}"
-SA_NAME="calypso-deployer"
-REPO="${CALYPSO_IMAGE_REPO:-ghcr.io/superfield-ai/superfield-kb-demo}"
+NAMESPACE="superfield-${ENV_LABEL}"
+SA_NAME="superfield-deployer"
+REPO="${SUPERFIELD_IMAGE_REPO:-ghcr.io/superfield-ai/superfield-kb-demo}"
 
 # ── Admin key validation ──────────────────────────────────────────────────────
 
@@ -927,7 +927,7 @@ _validate_key() {
   esac
 }
 
-echo "==> Calypso host provisioning"
+echo "==> Superfield host provisioning"
 echo "    Host        : ${HOST}"
 echo "    Environment : ${ENV_LABEL}"
 echo "    Namespace   : ${NAMESPACE}"
@@ -1152,9 +1152,9 @@ for svc in avahi-daemon cups postfix; do
 done
 
 # Kernel sysctl security parameters
-SYSCTL_CONF="/etc/sysctl.d/99-calypso-cis.conf"
+SYSCTL_CONF="/etc/sysctl.d/99-superfield-cis.conf"
 cat > "${SYSCTL_CONF}" <<SYSCTL
-# CIS Benchmark Level 1 — applied by calypso init-host.sh
+# CIS Benchmark Level 1 — applied by superfield init-host.sh
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0
 net.ipv4.conf.all.accept_redirects = 0
@@ -1321,7 +1321,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: calypso-deployer-role
+  name: superfield-deployer-role
   namespace: ${NAMESPACE}
 rules:
   - apiGroups: ["apps"]
@@ -1337,7 +1337,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: calypso-deployer-binding
+  name: superfield-deployer-binding
   namespace: ${NAMESPACE}
 subjects:
   - kind: ServiceAccount
@@ -1345,7 +1345,7 @@ subjects:
     namespace: ${NAMESPACE}
 roleRef:
   kind: Role
-  name: calypso-deployer-role
+  name: superfield-deployer-role
   apiGroup: rbac.authorization.k8s.io
 MANIFEST
 
@@ -1391,29 +1391,29 @@ fi
 SECRETS_DUMP=$(_ssh_superfield bash <<SSHDECODE
 set -euo pipefail
 export KUBECONFIG="/home/superfield/.kube/config"
-if ! kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
+if ! kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
   printf 'exists=no\n'; exit 0
 fi
 printf 'exists=yes\n'
-printf 'APP_RW_PASSWORD=%s\n' "\$(kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" \
+printf 'APP_RW_PASSWORD=%s\n' "\$(kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.DATABASE_URL}' | base64 -d | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')"
-printf 'JWT_SECRET=%s\n' "\$(kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" \
+printf 'JWT_SECRET=%s\n' "\$(kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.JWT_SECRET}' | base64 -d)"
-printf 'ENCRYPTION_MASTER_KEY=%s\n' "\$(kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" \
+printf 'ENCRYPTION_MASTER_KEY=%s\n' "\$(kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.ENCRYPTION_MASTER_KEY}' | base64 -d)"
-printf 'AUDIT_W_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'AUDIT_W_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.AUDIT_W_PASSWORD}' | base64 -d)"
-printf 'ANALYTICS_W_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'ANALYTICS_W_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.ANALYTICS_W_PASSWORD}' | base64 -d)"
-printf 'AGENT_CODING_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'AGENT_CODING_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.AGENT_CODING_PASSWORD}' | base64 -d)"
-printf 'AGENT_ANALYSIS_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'AGENT_ANALYSIS_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.AGENT_ANALYSIS_PASSWORD}' | base64 -d)"
-printf 'AGENT_CODE_CLEANUP_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'AGENT_CODE_CLEANUP_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.AGENT_CODE_CLEANUP_PASSWORD}' | base64 -d)"
-printf 'AGENT_EMAIL_INGEST_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'AGENT_EMAIL_INGEST_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.AGENT_EMAIL_INGEST_PASSWORD}' | base64 -d)"
-printf 'POSTGRES_SUPERUSER_PASSWORD=%s\n' "\$(kubectl get secret calypso-db-secrets --namespace="${NAMESPACE}" \
+printf 'POSTGRES_SUPERUSER_PASSWORD=%s\n' "\$(kubectl get secret superfield-db-secrets --namespace="${NAMESPACE}" \
   -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 SSHDECODE
 )
@@ -1421,7 +1421,7 @@ SSHDECODE
 _extract_secret() { printf '%s\n' "${SECRETS_DUMP}" | grep "^${1}=" | cut -d= -f2-; }
 
 if [[ "$(_extract_secret exists)" == "yes" ]]; then
-  echo "    Found existing calypso-api-secrets — reusing passwords (idempotent run)."
+  echo "    Found existing superfield-api-secrets — reusing passwords (idempotent run)."
   APP_RW_PASSWORD="$(_extract_secret APP_RW_PASSWORD)"
   JWT_SECRET="$(_extract_secret JWT_SECRET)"
   ENCRYPTION_MASTER_KEY="$(_extract_secret ENCRYPTION_MASTER_KEY)"
@@ -1461,10 +1461,10 @@ fi
 
 # Build database URLs
 if [[ "${DB_MODE}" == "local" ]]; then
-  DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@postgres:5432/calypso_app"
-  AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@postgres:5432/calypso_audit"
-  ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@postgres:5432/calypso_analytics"
-  ADMIN_DATABASE_URL="postgres://postgres:${POSTGRES_SUPERUSER_PASSWORD:-}@postgres:5432/calypso_app"
+  DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@postgres:5432/superfield_app"
+  AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@postgres:5432/superfield_audit"
+  ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@postgres:5432/superfield_analytics"
+  ADMIN_DATABASE_URL="postgres://postgres:${POSTGRES_SUPERUSER_PASSWORD:-}@postgres:5432/superfield_app"
 else
   REMOTE_PG_PORT="${REMOTE_PG_PORT:-5432}"
   REMOTE_PG_ADMIN_DB="${REMOTE_PG_ADMIN_DB:-postgres}"
@@ -1476,9 +1476,9 @@ else
   elif [[ "${REMOTE_PG_SSL}" == "disable" ]]; then
     SSL_SUFFIX="?sslmode=disable"
   fi
-  DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/calypso_app${SSL_SUFFIX}"
-  AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/calypso_audit${SSL_SUFFIX}"
-  ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/calypso_analytics${SSL_SUFFIX}"
+  DATABASE_URL="postgres://app_rw:${APP_RW_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/superfield_app${SSL_SUFFIX}"
+  AUDIT_DATABASE_URL="postgres://audit_w:${AUDIT_W_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/superfield_audit${SSL_SUFFIX}"
+  ANALYTICS_DATABASE_URL="postgres://analytics_w:${ANALYTICS_W_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/superfield_analytics${SSL_SUFFIX}"
   ADMIN_DATABASE_URL="postgres://${REMOTE_PG_ADMIN_USER}:${REMOTE_PG_ADMIN_PASSWORD}@${REMOTE_PG_HOST}:${REMOTE_PG_PORT}/${REMOTE_PG_ADMIN_DB}${SSL_SUFFIX}"
 fi
 
@@ -1489,8 +1489,8 @@ export KUBECONFIG="/home/superfield/.kube/config"
 
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl delete secret calypso-api-secrets --namespace="${NAMESPACE}" --ignore-not-found
-kubectl create secret generic calypso-api-secrets \
+kubectl delete secret superfield-api-secrets --namespace="${NAMESPACE}" --ignore-not-found
+kubectl create secret generic superfield-api-secrets \
   --namespace="${NAMESPACE}" \
   --from-literal=DATABASE_URL="${DATABASE_URL}" \
   --from-literal=AUDIT_DATABASE_URL="${AUDIT_DATABASE_URL}" \
@@ -1498,8 +1498,8 @@ kubectl create secret generic calypso-api-secrets \
   --from-literal=JWT_SECRET="${JWT_SECRET}" \
   --from-literal=ENCRYPTION_MASTER_KEY="${ENCRYPTION_MASTER_KEY}"
 
-kubectl delete secret calypso-db-secrets --namespace="${NAMESPACE}" --ignore-not-found
-kubectl create secret generic calypso-db-secrets \
+kubectl delete secret superfield-db-secrets --namespace="${NAMESPACE}" --ignore-not-found
+kubectl create secret generic superfield-db-secrets \
   --namespace="${NAMESPACE}" \
   --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}" \
   --from-literal=AUDIT_W_PASSWORD="${AUDIT_W_PASSWORD}" \
@@ -1510,8 +1510,8 @@ kubectl create secret generic calypso-db-secrets \
   --from-literal=AGENT_CODE_CLEANUP_PASSWORD="${AGENT_CODE_CLEANUP_PASSWORD}" \
   --from-literal=AGENT_EMAIL_INGEST_PASSWORD="${AGENT_EMAIL_INGEST_PASSWORD}"
 
-kubectl delete secret calypso-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
-kubectl create secret generic calypso-db-init-secret \
+kubectl delete secret superfield-db-init-secret --namespace="${NAMESPACE}" --ignore-not-found
+kubectl create secret generic superfield-db-init-secret \
   --namespace="${NAMESPACE}" \
   --from-literal=ADMIN_DATABASE_URL="${ADMIN_DATABASE_URL}" \
   --from-literal=APP_RW_PASSWORD="${APP_RW_PASSWORD}" \
@@ -1535,7 +1535,7 @@ export KUBECONFIG="/home/superfield/.kube/config"
 printf '%s' "${GITHUB_PAT}" | kubectl create secret docker-registry ghcr-pull-secret \
   --namespace="${NAMESPACE}" \
   --docker-server=ghcr.io \
-  --docker-username=calypso \
+  --docker-username=superfield \
   --docker-password-stdin \
   --dry-run=client -o yaml | kubectl apply -f -
 REMOTESCRIPT
@@ -1544,7 +1544,7 @@ fi
 if [[ -n "${MNEMONIC:-}" ]]; then
   _ssh_superfield bash <<REMOTESCRIPT
 export KUBECONFIG="/home/superfield/.kube/config"
-kubectl patch secret calypso-api-secrets --namespace="${NAMESPACE}" \
+kubectl patch secret superfield-api-secrets --namespace="${NAMESPACE}" \
   --type=json \
   -p='[{"op":"add","path":"/data/SUPERUSER_MNEMONIC","value":"'"$(printf '%s' "${MNEMONIC}" | base64 | tr -d '\n')"'"}]'
 REMOTESCRIPT
@@ -1553,12 +1553,12 @@ fi
 if [[ "${DB_MODE}" == "local" ]]; then
   _ssh_superfield bash <<REMOTESCRIPT
 export KUBECONFIG="/home/superfield/.kube/config"
-kubectl patch secret calypso-db-secrets --namespace="${NAMESPACE}" \
+kubectl patch secret superfield-db-secrets --namespace="${NAMESPACE}" \
   --type=json \
   -p='[
     {"op":"add","path":"/data/POSTGRES_USER","value":"'"$(printf '%s' "postgres" | base64 | tr -d '\n')"'"},
     {"op":"add","path":"/data/POSTGRES_PASSWORD","value":"'"$(printf '%s' "${POSTGRES_SUPERUSER_PASSWORD:-}" | base64 | tr -d '\n')"'"},
-    {"op":"add","path":"/data/POSTGRES_DB","value":"'"$(printf '%s' "calypso_app" | base64 | tr -d '\n')"'"}
+    {"op":"add","path":"/data/POSTGRES_DB","value":"'"$(printf '%s' "superfield_app" | base64 | tr -d '\n')"'"}
   ]'
 REMOTESCRIPT
 
@@ -1570,7 +1570,7 @@ kubectl apply --namespace="${NAMESPACE}" -f - <<MANIFEST
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: calypso-postgres-pvc
+  name: superfield-postgres-pvc
   namespace: ${NAMESPACE}
   labels:
     app: postgres
@@ -1608,17 +1608,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: calypso-db-secrets
+                  name: superfield-db-secrets
                   key: POSTGRES_DB
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -1627,14 +1627,14 @@ spec:
               mountPath: /var/lib/postgresql/data
           livenessProbe:
             exec:
-              command: [pg_isready, -U, postgres, -d, calypso_app]
+              command: [pg_isready, -U, postgres, -d, superfield_app]
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
           readinessProbe:
             exec:
-              command: [pg_isready, -U, postgres, -d, calypso_app]
+              command: [pg_isready, -U, postgres, -d, superfield_app]
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 5
@@ -1649,7 +1649,7 @@ spec:
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: calypso-postgres-pvc
+            claimName: superfield-postgres-pvc
 ---
 apiVersion: v1
 kind: Service

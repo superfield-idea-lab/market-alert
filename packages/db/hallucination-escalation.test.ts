@@ -69,7 +69,7 @@ beforeAll(async () => {
     AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 
-  const appUrl = makeRoleUrl(pg.url, 'calypso_app', 'app_rw', TEST_PASSWORDS.app);
+  const appUrl = makeRoleUrl(pg.url, 'superfield_app', 'app_rw', TEST_PASSWORDS.app);
   sql = postgres(appUrl, { max: 3 });
 
   await migrate({ databaseUrl: appUrl });

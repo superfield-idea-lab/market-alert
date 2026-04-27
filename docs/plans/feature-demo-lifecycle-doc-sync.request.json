@@ -1,0 +1,11 @@
+{
+  "name": "Demo lifecycle docs reflect real bun demo behavior",
+  "phase": "Developer experience",
+  "motivation": "Operators and contributors are using stale or partially incorrect lifecycle notes for the local Kubernetes demo, which causes confusion around readiness checks, clean-room behavior, and environment differences.",
+  "intended_experience": "When a developer runs bun demo and reads the lifecycle documentation, the described startup, teardown, readiness checks, and watch-mode actions match the real script behavior exactly.",
+  "constraints": [
+    "Keep existing Plan and issue formatting rules.",
+    "Do not change production runtime behavior as part of doc-alignment work.",
+    "Ensure terminology stays consistent with k3d and ingress naming used in the repo."
+  ]
+}

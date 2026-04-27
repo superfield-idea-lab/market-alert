@@ -1,0 +1,150 @@
+version: 1
+name: calypso-feature-request
+initial_state: intake
+
+states:
+  intake:
+    kind: human
+    role: feature-requester
+    description: Human submits a feature request with motivation, intended experience, constraints, and user context.
+    prompt: |
+      Describe the feature by answering all of the following:
+
+      1. Motivation — why is this feature needed? What problem does it solve?
+      2. Intended experience — what can the user do once it ships? Describe observable behaviour, not implementation.
+      3. Known constraints — what is explicitly out of scope or restricted in approach?
+      4. Users and roles — who uses this feature? Name each role (e.g. super user, operator, customer). If internal-only, state "users: internal only".
+      5. User stories — for each role, provide at least one user story: "As a [role], I want to [action] so that [goal]."
+      6. CRUD views — what create/read/update/delete views does this feature require per role? (e.g. super user sees bulk-action table; operator sees filtered read-only view)
+      7. Permission boundaries — what can one role do that another cannot?
+
+      The request will be rejected if items 4 and 5 are missing or vague.
+    completion:
+      all_of:
+        - feature-request-submitted
+        - user-roles-named
+        - user-stories-provided
+    next:
+      on_success: architecture-evaluation
+
+  architecture-evaluation:
+    kind: agent
+    role: architect
+    cost: guru
+    description: Evaluate whether the request is architecturally clear and safe to implement.
+    prompt: |
+      Evaluate against current architecture. Feasibility (invariants preserved?), clarity (specific enough to implement?), risk (conflicts, data model impact, cross-cutting concerns?). Clear+feasible → approve. Unclear → return to intake with specifics. Conflict → block with rationale.
+    completion:
+      any_of:
+        - architecture-clear
+        - clarification-needed
+        - architecture-conflict
+    next:
+      on:
+        architecture-clear: create-github-issue
+        clarification-needed: intake
+        architecture-conflict: blocked
+
+  create-github-issue:
+    kind: agent
+    role: feature-definer
+    cost: default
+    description: Create a well-structured GitHub issue capturing the approved feature.
+    prompt: |
+      Create GitHub issue: clear title, motivation, scope + acceptance criteria, architectural notes from evaluation, relevant doc links. Apply appropriate labels.
+    completion:
+      all_of:
+        - github-issue-created
+        - github-issue-has-description
+        - github-issue-labeled
+    next:
+      on_success: update-plan
+      on_failure: blocked
+
+  update-plan:
+    kind: agent
+    role: planner
+    cost: default
+    description: Record the new feature in the project plan with its issue reference and priority.
+    prompt: |
+      Add feature to docs/plan.md: GitHub issue reference, relative priority, known dependencies, phasing constraints.
+    completion:
+      all_of:
+        - plan-updated
+        - feature-in-plan
+    next:
+      on_success: planning
+      on_failure: blocked
+
+  planning:
+    kind: workflow
+    workflow: calypso-planning
+    description: >
+      Run a full planning pass now that the new issue exists. Reconciles the
+      new issue into the plan, re-prioritizes by dependency and risk, and
+      commits the updated plan before the orchestrator dispatches any work.
+    next:
+      on:
+        done: done
+        aborted: aborted
+
+  done:
+    kind: terminal
+
+  blocked:
+    kind: human
+    role: operator-or-orchestrator
+    description: A step encountered a blocking condition that requires human resolution.
+    prompt: |
+      Resolve the blocking issue before the feature request can continue.
+    next:
+      on:
+        issue-cleared: architecture-evaluation
+        resubmit: intake
+        abort: aborted
+
+  aborted:
+    kind: terminal
+
+checks:
+  feature-request-submitted:
+    kind: human
+    description: The feature request has been submitted with motivation, scope, constraints, user roles, and user stories.
+  user-roles-named:
+    kind: human
+    description: At least one named user role is provided, or the requester has explicitly stated "users: internal only".
+  user-stories-provided:
+    kind: human
+    description: At least one user story ("As a [role], I want to [action] so that [goal]") is provided for each named role.
+  architecture-clear:
+    kind: agent
+    role: architect
+    description: The request is architecturally feasible and clear enough to implement.
+  clarification-needed:
+    kind: agent
+    role: architect
+    description: The architect identified missing information that must be provided before evaluation can complete.
+  architecture-conflict:
+    kind: agent
+    role: architect
+    description: The request conflicts with the current architecture and cannot proceed without a redesign.
+  github-issue-created:
+    kind: deterministic
+  github-issue-has-description:
+    kind: deterministic
+  github-issue-labeled:
+    kind: deterministic
+  plan-updated:
+    kind: agent
+    role: planner
+  feature-in-plan:
+    kind: agent
+    role: planner
+
+agent_prompts:
+  architect: |
+    Evaluate feature requests against current architecture. Assess feasibility, identify risks, determine if specific enough to implement. Verify that at least one named user role and one user story per role are present — reject if missing. State exactly what is missing when clarification needed.
+  feature-definer: |
+    Create well-structured GitHub issues from approved feature requests: motivation, scope, acceptance criteria, architectural context.
+  planner: |
+    Record new features in the plan with issue reference, priority, and dependencies so the orchestrator dispatches work correctly.

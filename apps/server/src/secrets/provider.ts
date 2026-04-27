@@ -46,7 +46,7 @@ export interface VaultSecretsProviderOptions {
   token: string;
   /** KV v2 mount path (default: "secret") */
   mount?: string;
-  /** Secret path within the mount (default: "calypso") */
+  /** Secret path within the mount (default: "superfield") */
   path?: string;
   /** Cache TTL in milliseconds (default: 300_000 = 5 minutes) */
   ttlMs?: number;
@@ -73,7 +73,7 @@ export class VaultSecretsProvider implements SecretsProvider {
     this.addr = opts.addr.replace(/\/$/, '');
     this.token = opts.token;
     this.mount = opts.mount ?? 'secret';
-    this.path = opts.path ?? 'calypso';
+    this.path = opts.path ?? 'superfield';
     this.ttlMs = opts.ttlMs ?? 300_000;
   }
 

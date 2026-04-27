@@ -1,0 +1,11 @@
+{
+  "name": "Restore bun demo runtime to launch cluster with latest local code",
+  "phase": "Developer experience",
+  "motivation": "The repository has demo lifecycle documentation and historical expectations for bun demo, but the command is missing and current local flows do not provide the same cluster-backed runtime/update behavior. This causes confusion and prevents contributors from using a one-command Kubernetes demo loop.",
+  "intended_experience": "When a developer runs bun run demo, the script provisions or reuses a local k3d cluster, deploys the application from the latest local code, exposes a single reachable demo URL, and offers a watch-mode rollout loop to refresh cluster runtime after code changes.",
+  "constraints": [
+    "Keep existing Plan and issue formatting rules.",
+    "Do not change production deployment behavior while adding local demo runtime capability.",
+    "Reuse existing repository k3d/dev topology where possible and keep prerequisites explicit."
+  ]
+}

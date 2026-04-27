@@ -3,7 +3,7 @@
  *
  * Claude CLI invocation for the worker container.
  *
- * This module provides the integration layer between the Calypso task queue
+ * This module provides the integration layer between the Superfield task queue
  * and the Claude CLI binary. The worker passes each task payload as JSON on
  * stdin and reads a structured JSON result from stdout.
  *

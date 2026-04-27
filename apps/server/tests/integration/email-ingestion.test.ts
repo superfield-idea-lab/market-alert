@@ -50,7 +50,7 @@ const TEST_PASSWORDS = {
   email_ingest: 'email_ingest_test_pw',
 };
 
-const DB_NAMES = { app: 'calypso_app' };
+const DB_NAMES = { app: 'superfield_app' };
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {
   const u = new URL(adminUrl);

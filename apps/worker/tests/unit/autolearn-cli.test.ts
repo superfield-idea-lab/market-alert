@@ -130,7 +130,7 @@ describe('sha256', () => {
  * Caller is responsible for cleanup.
  */
 function writeTempScript(name: string, content: string): string {
-  const p = join(tmpdir(), `calypso-autolearn-test-${name}-${Date.now()}.sh`);
+  const p = join(tmpdir(), `superfield-autolearn-test-${name}-${Date.now()}.sh`);
   writeFileSync(p, content, { mode: 0o755 });
   return p;
 }

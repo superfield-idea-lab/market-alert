@@ -1,0 +1,37 @@
+{
+  "title": "feat: remove template task board surface and task CRUD",
+  "phase": "Template cleanup",
+  "issue_kind": "feature",
+  "canonical_docs": [
+    "cleanup-plan.md",
+    "docs/PRD.md",
+    "apps/web/src/App.tsx",
+    "apps/server/src/api/tasks.ts",
+    "apps/server/src/index.ts"
+  ],
+  "dependencies": [],
+  "motivation": "The board-first shell and generic task CRUD are template artifacts outside the PRD product model, and they keep non-PRD entities active in runtime and tests.",
+  "behaviour": "Remove board-centric navigation and TaskListView rendering from the main shell. Remove /api/tasks controller routing and handler usage. Keep only PRD-aligned surfaces in the primary nav.\n\nCode examples:\n\n```tsx\n// before\n{activeView === 'board' && <TaskListView />}\n```\n\n```ts\n// remove this route branch\nif (url.pathname.startsWith('/api/tasks')) {\n  const tasksRes = await handleTasksRequest(req, url, appState);\n  if (tasksRes) return withTrace(tasksRes);\n}\n```",
+  "scope": {
+    "in": [
+      "Remove board navigation state and template board header affordances.",
+      "Remove TaskListView integration and generic task CRUD API wiring.",
+      "Update tests/docs that currently assume board-first UX."
+    ],
+    "out": [
+      "Changes to PRD wiki/campaign/compliance domain workflows.",
+      "Refactors unrelated to template board removal."
+    ]
+  },
+  "acceptance_criteria": [
+    "No board view or template project header appears in the main app shell.",
+    "`/api/tasks` endpoints are removed or return not-found because handler wiring is deleted.",
+    "Wiki/campaign/admin/settings PRD surfaces remain reachable and working."
+  ],
+  "test_plan": [
+    "Run web and server test suites that cover shell navigation and API routing; verify no regression in PRD surfaces.",
+    "Attempt GET/POST/PATCH/DELETE on `/api/tasks` and verify route removal behavior.",
+    "Smoke-test login -> wiki view -> campaign view -> settings flow in browser."
+  ],
+  "stage": "Specified"
+}

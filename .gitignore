@@ -41,9 +41,10 @@ coverage/
 # Deprecated agent contexts
 .agent-context-deprecated-*
 .studio
+.agents/tmp/
 
 # Studio cleanup sentinel
-.calypso-db
+.superfield-db
 
 # Kubernetes secrets (never commit real credentials)
 k8s/secrets.yaml

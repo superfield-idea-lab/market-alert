@@ -1,5 +1,5 @@
 /**
- * @file sw.ts — Calypso PWA service worker (TypeScript source)
+ * @file sw.ts — Superfield PWA service worker (TypeScript source)
  *
  * This file is compiled to `dist/sw.js` by Vite (see vite.config.ts
  * build.rollupOptions.input). The compiled output is registered from
@@ -38,7 +38,7 @@
 declare const self: ServiceWorkerGlobalScope;
 
 const CACHE_VERSION = 'v1';
-const CACHE_NAME = `calypso-shell-${CACHE_VERSION}`;
+const CACHE_NAME = `superfield-shell-${CACHE_VERSION}`;
 
 /**
  * App-shell resources to pre-cache on install.
@@ -64,7 +64,7 @@ const OFFLINE_HTML = `<!doctype html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Calypso – Offline</title>
+  <title>Superfield – Offline</title>
   <style>
     body { font-family: system-ui, sans-serif; display: flex; align-items: center;
            justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc; }

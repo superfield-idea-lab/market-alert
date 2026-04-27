@@ -1,11 +1,11 @@
 {
   "request": {
     "method": "GET",
-    "url": "https://compute.googleapis.com/compute/v1/projects/superfield-492115/global/addresses/calypso-demo-psa"
+    "url": "https://compute.googleapis.com/compute/v1/projects/superfield-492115/global/addresses/superfield-demo-psa"
   },
   "response": {
     "body": {
-      "name": "calypso-demo-psa"
+      "name": "superfield-demo-psa"
     },
     "headers": {
       "content-type": "application/json; charset=UTF-8"

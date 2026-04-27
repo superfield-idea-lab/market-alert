@@ -14,8 +14,8 @@ import {
 import { pollDeviceCodeToken } from '../../../../scripts/gcp/login';
 
 const ENV_KEYS = [
-  'CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR',
-  'CALYPSO_CLOUD_PROVIDER_HTTP_MODE',
+  'SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR',
+  'SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE',
   'GCP_ACCESS_TOKEN',
   'GCP_OAUTH_TOKEN_FILE',
   'GCP_SERVICE_ACCOUNT_JSON',
@@ -55,7 +55,7 @@ describe('Google device code login flow', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-gcp-device-code-tests-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-gcp-device-code-tests-'));
     process.env.GCP_OAUTH_TOKEN_FILE = join(tempDir, 'missing-oauth.json');
     clearGoogleAccessTokenCache();
     clearGoogleHttpFixtureState();

@@ -1,7 +1,7 @@
 /**
  * MSW helper that loads golden fixture files from disk and serves them
  * as sequential HTTP responses. This replaces the custom
- * CALYPSO_CLOUD_PROVIDER_HTTP_MODE=replay transport with network-level
+ * SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE=replay transport with network-level
  * interception so that real fetch() code paths execute.
  *
  * Usage:

@@ -44,8 +44,8 @@ async function getTestSession(base: string, username: string): Promise<string> {
     throw new Error(`test-session failed: ${res.status} ${await res.text()}`);
   }
   const setCookieHeader = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookieHeader);
-  return match ? `calypso_auth=${match[1]}` : '';
+  const match = /superfield_auth=([^;]+)/.exec(setCookieHeader);
+  return match ? `superfield_auth=${match[1]}` : '';
 }
 
 interface MintResponse {

@@ -1,5 +1,5 @@
 {
-  "name": "calypso-weekly",
+  "name": "superfield-weekly",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -27,13 +27,11 @@
     "demo": "bun run scripts/demo.ts",
     "demo:delete": "bun run scripts/demo.ts --delete",
     "demo:status": "bun run scripts/demo.ts --status",
-    "db:migrate": "DATABASE_URL=postgres://calypso:calypso@localhost:5432/calypso bun run packages/db/migrate.ts",
+    "db:migrate": "DATABASE_URL=postgres://superfield:superfield@localhost:5432/superfield bun run packages/db/migrate.ts",
     "gcp:login": "bun run scripts/gcp/login.ts",
     "gcp:doctor": "bun run scripts/gcp/doctor.ts",
     "gcp:provision": "bun run scripts/gcp/provision.ts",
     "gcp:deploy": "bun run scripts/gcp/deploy.ts",
-    "studio": "bun run studio/scripts/studio-start.ts",
-    "studio:down": "bun run studio/scripts/studio-down.ts",
     "record:fixtures": "bun run scripts/record-fixture.ts"
   },
   "dependencies": {

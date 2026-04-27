@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-auto'
+  short_description: 'Run the sequential Plan auto-loop for this repo'
+policy:
+  allow_implicit_invocation: false

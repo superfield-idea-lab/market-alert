@@ -15,8 +15,8 @@ import {
 import { runDoctor } from '../../../../scripts/gcp/doctor';
 
 const ENV_KEYS = [
-  'CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR',
-  'CALYPSO_CLOUD_PROVIDER_HTTP_MODE',
+  'SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR',
+  'SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE',
   'GCP_ACCESS_TOKEN',
   'GCP_SERVICE_ACCOUNT_JSON',
   'GCP_OAUTH_TOKEN_FILE',
@@ -26,7 +26,7 @@ describe('Google cloud-provider fixture transport', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-gcp-fixtures-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-gcp-fixtures-'));
     process.env.GCP_OAUTH_TOKEN_FILE = join(tempDir, 'missing-oauth.json');
     clearGoogleAccessTokenCache();
     clearGoogleHttpFixtureState();
@@ -53,8 +53,8 @@ describe('Google cloud-provider fixture transport', () => {
     const localTokenUri = `http://127.0.0.1:${addr.port}/token`;
 
     try {
-      process.env.CALYPSO_CLOUD_PROVIDER_HTTP_MODE = 'record';
-      process.env.CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR = tempDir;
+      process.env.SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE = 'record';
+      process.env.SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR = tempDir;
       // Use a service account key that points at our local token server
       process.env.GCP_SERVICE_ACCOUNT_JSON = makeServiceAccountJson(localTokenUri);
 
@@ -77,8 +77,8 @@ describe('Google cloud-provider fixture transport', () => {
   });
 
   test('replay mode fails fast when a fixture is missing', async () => {
-    process.env.CALYPSO_CLOUD_PROVIDER_HTTP_MODE = 'replay';
-    process.env.CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR = tempDir;
+    process.env.SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE = 'replay';
+    process.env.SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR = tempDir;
     process.env.GCP_ACCESS_TOKEN = 'replay-token';
 
     await expect(
@@ -87,8 +87,8 @@ describe('Google cloud-provider fixture transport', () => {
   });
 
   test('replays the recorded doctor permission-failure scenario', async () => {
-    process.env.CALYPSO_CLOUD_PROVIDER_HTTP_MODE = 'replay';
-    process.env.CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR = join(
+    process.env.SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE = 'replay';
+    process.env.SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR = join(
       process.cwd(),
       'tests',
       'fixtures',

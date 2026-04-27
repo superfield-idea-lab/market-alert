@@ -133,7 +133,7 @@ export function MobileInstallPage({ onSkip, onDone }: MobileInstallPageProps) {
 
       <h1 className="text-2xl font-bold text-zinc-900 mb-2">Instantly Install Mobile App</h1>
       <p className="text-sm text-zinc-500 mb-8 max-w-xs">
-        Add Calypso to your home screen for a full-screen, app-like experience — no app store
+        Add Superfield to your home screen for a full-screen, app-like experience — no app store
         required.
       </p>
 

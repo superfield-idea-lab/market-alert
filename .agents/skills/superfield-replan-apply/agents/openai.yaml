@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-replan-apply'
+  short_description: 'Apply a prepared sequential Plan result'
+policy:
+  allow_implicit_invocation: false

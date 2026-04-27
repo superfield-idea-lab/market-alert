@@ -1,6 +1,6 @@
 /**
  * DIY Testcontainers — spins up an isolated postgres:16 Docker container
- * and tears it down on request. Used by both the test suite and studio mode.
+ * and tears it down on request. Used by the test suite.
  *
  * Usage:
  *   const pg = await startPostgres();
@@ -12,9 +12,9 @@
 import postgres from 'postgres';
 import { cleanupStaleContainers, addProcess, removeProcess } from './cleanup';
 
-const PG_USER = 'calypso';
-const PG_PASSWORD = 'calypso';
-const PG_DB = 'calypso';
+const PG_USER = 'superfield';
+const PG_PASSWORD = 'superfield';
+const PG_DB = 'superfield';
 const PG_IMAGE = 'postgres:16';
 const PG_VECTOR_IMAGE = 'pgvector/pgvector:pg16';
 const READY_TIMEOUT_MS = 30_000;

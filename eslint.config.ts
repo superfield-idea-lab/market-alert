@@ -85,7 +85,7 @@ const noMockRule = {
 };
 
 export default [
-  { ignores: ['**/dist/**', '**/coverage/**', '.agents/**', 'calypso-blueprint/**', 'studio/**'] },
+  { ignores: ['**/dist/**', '**/coverage/**', 'calypso-blueprint/**'] },
   { files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'] },
   { languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } } },
   { languageOptions: { globals: { ...globals.browser, ...globals.node, Bun: 'readonly' } } },

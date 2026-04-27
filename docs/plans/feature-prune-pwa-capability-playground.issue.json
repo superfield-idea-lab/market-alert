@@ -1,0 +1,37 @@
+{
+  "title": "feat: prune PWA capability playground and keep product RM flows",
+  "phase": "Template cleanup",
+  "issue_kind": "feature",
+  "canonical_docs": [
+    "cleanup-plan.md",
+    "docs/PRD.md",
+    "apps/web/src/pages/pwa-demo.tsx",
+    "apps/web/src/components/pwa/demos/meeting-recording-demo.tsx",
+    "apps/web/src/lib/transcription.ts"
+  ],
+  "dependencies": [],
+  "motivation": "The PWA capabilities playground mixes product behavior with generic browser demos, causing product-scope drift and maintenance overhead.",
+  "behaviour": "Remove generic capability demo cards and retain only PRD-required RM flows (meeting recording, transcription pathing, transcript handling).\n\nCode examples:\n\n```tsx\n// remove generic demo cards\n<NotificationDemoCard />\n<StorageDemoCard />\n<CameraDemoCard />\n<MicDemoCard />\n```\n\n```tsx\n// keep product-focused mobile flows\n<MeetingRecordingFlow />\n<TranscriptReviewFlow />\n```",
+  "scope": {
+    "in": [
+      "Delete or retire generic PWA demo cards and platform playground framing.",
+      "Preserve and harden PRD-aligned RM recording/transcription flows.",
+      "Update route labels and docs so mobile UX is product-oriented, not demo-oriented."
+    ],
+    "out": [
+      "Re-architecture of transcription backends beyond current PRD requirements.",
+      "New unrelated PWA feature development."
+    ]
+  },
+  "acceptance_criteria": [
+    "No generic capability-demo cards are shown in the RM mobile surface.",
+    "Recording/transcription product flows remain functional for edge and worker paths.",
+    "Mobile UX copy and routing describe product behavior rather than demo behavior."
+  ],
+  "test_plan": [
+    "Run web component/unit tests for PWA pages and transcription helpers.",
+    "Manual mobile smoke test: record -> transcribe -> upload transcript path still works.",
+    "Verify removed demo-card imports/components do not remain referenced in build output."
+  ],
+  "stage": "Specified"
+}

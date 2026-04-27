@@ -11,18 +11,18 @@ describe('loadAgentDbConfig', () => {
   it('throws when AGENT_TYPE is missing', () => {
     expect(() =>
       loadAgentDbConfig({
-        AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
+        AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/superfield_app',
       } as NodeJS.ProcessEnv),
     ).toThrow('Missing required environment variables');
   });
 
   it('returns config when all required vars are present', () => {
     const config = loadAgentDbConfig({
-      AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
+      AGENT_DATABASE_URL: 'postgres://agent_email_ingest:pw@localhost/superfield_app',
       AGENT_TYPE: 'email_ingest',
     } as NodeJS.ProcessEnv);
     expect(config).toEqual({
-      agentDatabaseUrl: 'postgres://agent_email_ingest:pw@localhost/calypso_app',
+      agentDatabaseUrl: 'postgres://agent_email_ingest:pw@localhost/superfield_app',
       agentType: 'email_ingest',
     });
   });

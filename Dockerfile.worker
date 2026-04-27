@@ -19,7 +19,7 @@
 # Environment variables expected at container startup:
 #   AGENT_DATABASE_URL — read-only PostgreSQL connection string for the agent role
 #   AGENT_TYPE         — agent type name (e.g. "coding")
-#   API_BASE_URL       — base URL of the Calypso API server
+#   API_BASE_URL       — base URL of the Superfield API server
 #   WORKER_ID          — unique identifier for this instance (defaults to hostname)
 #   CODEX_PATH         — path to the codex binary (default: /usr/local/bin/codex)
 

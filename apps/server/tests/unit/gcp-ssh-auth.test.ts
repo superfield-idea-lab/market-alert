@@ -13,8 +13,8 @@ import {
 } from '../../../../scripts/gcp/common';
 
 const ENV_KEYS = [
-  'CALYPSO_SSH_PRIVATE_KEY_FILE',
-  'CALYPSO_SSH_PUBLIC_KEY_FILE',
+  'SUPERFIELD_SSH_PRIVATE_KEY_FILE',
+  'SUPERFIELD_SSH_PUBLIC_KEY_FILE',
   'SSH_AGENT_PID',
   'SSH_AUTH_SOCK',
 ];
@@ -23,7 +23,7 @@ describe('Google SSH auth resolution', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-gcp-ssh-auth-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-gcp-ssh-auth-'));
   });
 
   afterEach(() => {
@@ -42,7 +42,7 @@ describe('Google SSH auth resolution', () => {
 
   test('uses key-file fallback when no ssh-agent is available', () => {
     const keyPath = generateKeyPair(tempDir, 'fallback');
-    process.env.CALYPSO_SSH_PRIVATE_KEY_FILE = keyPath;
+    process.env.SUPERFIELD_SSH_PRIVATE_KEY_FILE = keyPath;
 
     const sshAuth = ensureSshAuthMaterial();
 

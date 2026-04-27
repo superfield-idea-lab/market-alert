@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-replan-audit'
+  short_description: 'Audit issue and PR compliance before replanning'
+policy:
+  allow_implicit_invocation: false

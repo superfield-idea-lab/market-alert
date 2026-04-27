@@ -104,7 +104,7 @@ test('test session backdoor issues HttpOnly SameSite=Strict cookie', async () =>
     : [res.headers.get('set-cookie') ?? ''];
 
   // Find the auth session cookie
-  const authCookieRaw = setCookies.find((c) => c.startsWith('calypso_auth='));
+  const authCookieRaw = setCookies.find((c) => c.startsWith('superfield_auth='));
   expect(authCookieRaw).toBeDefined();
 
   // Assert required cookie flags
@@ -112,7 +112,7 @@ test('test session backdoor issues HttpOnly SameSite=Strict cookie', async () =>
   expect(authCookieRaw).toMatch(/SameSite=Strict/i);
 
   // Clean up — not strictly needed, just a sanity check we hold a valid session
-  expect(session.cookie).toContain('calypso_auth=');
+  expect(session.cookie).toContain('superfield_auth=');
 });
 
 // ---------------------------------------------------------------------------

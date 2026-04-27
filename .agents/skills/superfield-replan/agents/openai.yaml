@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-replan'
+  short_description: 'Audit and rewrite the Plan sequentially'
+policy:
+  allow_implicit_invocation: false

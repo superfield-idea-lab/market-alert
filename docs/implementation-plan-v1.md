@@ -7,7 +7,7 @@ CONTEXT MAP
 this ──implements─────▶ docs/PRD.md
 this ──feeds──────────▶ GitHub "Implementation Plan" tracking issue
 this ──references─────▶ calypso-blueprint/rules/blueprints/ (arch, auth, data, deploy, env, process, prune, task-queue, test, ux, worker)
-this ──reuses─────────▶ ~/calypso-distribution (k3d cluster, task queue, IMAP ETL worker, GitHub workflows)
+this ──reuses─────────▶ ~/superfield-distribution (k3d cluster, task queue, IMAP ETL worker, GitHub workflows)
 this ──references─────▶ calypso-blueprint/development/product-owner-interview.md
 this ──references─────▶ docs/technical/db-architecture.md
 this ──references─────▶ docs/technical/security.md
@@ -19,12 +19,12 @@ this ──references─────▶ docs/technical/md-file-editing.md
 ## About this document
 
 This is a **specification artifact**, not the live Plan. The authoritative
-Plan for Calypso execution is the GitHub "Implementation Plan" tracking issue.
+Plan for Superfield execution is the GitHub "Implementation Plan" tracking issue.
 This document exists to propose the phase structure, dependency ordering,
 scout-gating strategy, and blueprint-rule mapping **before** the Plan issue
 and its child feature issues are created. Once the Plan issue exists, this
 document is frozen as a historical record of the original plan; ongoing
-ordering and status live only on the Plan issue per `calypso-replan`.
+ordering and status live only on the Plan issue per `superfield-replan`.
 
 **Scope of v1.** The plan below covers the product surface described in the
 v1 PRD: email + meeting-audio ingestion, autolearning wiki, annotation-thread
@@ -45,11 +45,11 @@ These constraints shape every phase below. They are extracted from
 - One phase at a time. One issue at a time. One branch = one worktree = one
   PR (PROCESS blueprint, feature-unit invariant).
 - Each phase begins with exactly one **scout issue**. All other issues in the
-  phase are gated behind the scout's merge (`calypso-replan` rule). The scout
+  phase are gated behind the scout's merge (`superfield-replan` rule). The scout
   is the smallest end-to-end vertical slice that proves the phase's
   architectural assumptions before parallel-friendly work lands.
 - Dependencies live only on the Plan issue, never in titles or issue bodies
-  (`calypso-replan` rule). Phase/step/batch metadata is forbidden in titles.
+  (`superfield-replan` rule). Phase/step/batch metadata is forbidden in titles.
 - Infrastructure scaffolding must be complete before any feature work begins
   (PROCESS blueprint). Phase 0 cannot be skipped or interleaved.
 
@@ -69,7 +69,7 @@ These constraints shape every phase below. They are extracted from
 - **Task queue** (not ad-hoc cron): every worker phase claims tasks from a
   PostgreSQL task queue using `SELECT … FOR UPDATE SKIP LOCKED`. Cron is a
   _producer_ that inserts task rows; workers are _consumers_ that claim them.
-  Reuse `calypso-distribution/packages/db/task-queue.ts` and the API endpoints
+  Reuse `superfield-distribution/packages/db/task-queue.ts` and the API endpoints
   in `apps/server/src/api/tasks.ts` (`TQ-D-001` through `TQ-D-006`).
 - Passkey-only authentication from the first user-facing commit (AUTH
   blueprint); no password fallback.
@@ -94,7 +94,7 @@ These constraints shape every phase below. They are extracted from
 - Workspace aliases for imports; no `../../../` deep relative paths.
 - Every external dependency requires a documented buy-vs-build justification.
 - **Dev environment = k3d** (not Docker Compose). Reuse
-  `calypso-distribution/scripts/local-demo.ts` and `deploy/base/` manifests.
+  `superfield-distribution/scripts/local-demo.ts` and `deploy/base/` manifests.
   `ENV-D-002`: dev/CI/prod use the same container topology. `ENV-X-009`: tests
   never run against a cluster database — integration tests use ephemeral k3d-local
   containers on randomised ports.
@@ -102,7 +102,7 @@ These constraints shape every phase below. They are extracted from
   e2e, coverage, checklist, depends-on, **issue-checklist**, **conflicts**,
   **single-issue**. Coverage threshold = 99% line coverage. All check names
   pre-registered before branch protection is enabled (`PROCESS-C-024`).
-  Reuse `calypso-distribution/.github/workflows/` as the starting set.
+  Reuse `superfield-distribution/.github/workflows/` as the starting set.
 - **Test suite time budget**: all four suites complete in under 5 minutes total
   in CI (`TEST-C-020`).
 - **Feature flags table** (`PRUNE-D-002`): `feature_flags` DB table with
@@ -154,16 +154,16 @@ blueprint; (b) a single `/health` endpoint (liveness + readiness + deep,
 with build, lint, format, unit, integration, e2e, coverage, checklist,
 depends-on, issue-checklist, conflicts, and single-issue checks wired and
 failing closed — 99% coverage threshold; (d) local dev commands identical to
-CI commands; (e) k3d cluster via `calypso-distribution/scripts/local-demo.ts`
+CI commands; (e) k3d cluster via `superfield-distribution/scripts/local-demo.ts`
 (not Docker Compose — `ENV-D-002`).
 
 **Follow-on issues (gated behind the scout).**
 
-- **k3d dev cluster scaffold** — reuse `calypso-distribution/deploy/base/`
+- **k3d dev cluster scaffold** — reuse `superfield-distribution/deploy/base/`
   manifests (api-server, worker, postgres, ingress). Replace Docker Compose.
   `pnpm dev` = `k3d cluster create && kubectl apply`. Ephemeral test DB
   containers on randomised ports for integration tests (`ENV-D-003`).
-- **Task queue scaffold** — reuse `calypso-distribution/packages/db/task-queue.ts`
+- **Task queue scaffold** — reuse `superfield-distribution/packages/db/task-queue.ts`
   and `apps/server/src/api/tasks.ts` (claim, complete, fail, heartbeat
   endpoints). Extend `TaskType` for autolearn, ingestion, transcription,
   correction, deepclean, bdm-summary. Per-type views, DLQ monitoring
@@ -180,7 +180,7 @@ CI commands; (e) k3d cluster via `calypso-distribution/scripts/local-demo.ts`
   log entries retrievable in one query (`DEPLOY-C-021`).
 - k3s deployment manifests for server, web, worker image; image builds
   produce distroless-style containers (WORKER blueprint). Reuse
-  `calypso-distribution/k8s/agent-worker.yaml` as the worker manifest
+  `superfield-distribution/k8s/agent-worker.yaml` as the worker manifest
   baseline (includes NetworkPolicy blocking pod→DB direct access).
 - Secrets abstraction layer (env-var shim in dev, KMS-backed in prod;
   abstraction from day one so no plaintext env vars ever ship).
@@ -300,13 +300,13 @@ ingestion substrate.
 
 **Follow-on issues.**
 
-- IMAP ingestion worker: reuse `calypso-distribution/packages/core/imap-etl-worker.ts`
+- IMAP ingestion worker: reuse `superfield-distribution/packages/core/imap-etl-worker.ts`
   (two-phase landing + classify, PII encryption, `EtlStore` abstraction). The
-  cron dispatcher inserts a task row into the task queue (`calypso-distribution/
+  cron dispatcher inserts a task row into the task queue (`superfield-distribution/
 apps/server/src/cron/imap-etl-dispatch.ts` pattern); the worker claims it via
   the HTTP task-queue API (`ApiEtlStore` pattern). Extend `TaskType` to include
   `EMAIL_INGEST`. Use Greenmail test container for integration tests
-  (`calypso-distribution/packages/db/imap-container.ts`). PRD §6; schedule,
+  (`superfield-distribution/packages/db/imap-container.ts`). PRD §6; schedule,
   retry, and failure handling via task queue stale-claim recovery.
 - PII tokeniser: stable tokens, per-tenant salt, round-trip via the
   dictionary service. Test corpus: curated sample of realistic
@@ -357,11 +357,11 @@ scales.
 
 - Kubernetes ephemeral pod spec: distroless, read-only root FS, no
   shell, service account bound to (dept, customer) scope (WORKER
-  blueprint). Reuse `calypso-distribution/k8s/agent-worker.yaml` as
+  blueprint). Reuse `superfield-distribution/k8s/agent-worker.yaml` as
   the baseline manifest.
 - **Worker NetworkPolicy** — `NetworkPolicy` blocking the worker pod from
   reaching the database port directly (`WORKER-C-006`). The
-  `calypso-distribution/k8s/agent-worker.yaml` already enforces this:
+  `superfield-distribution/k8s/agent-worker.yaml` already enforces this:
   egress allows only api-server (port 80) and HTTPS (443) + DNS (53).
 - **Worker egress restriction** — outbound connections restricted to declared
   vendor API hostnames only (Anthropic API). No other external egress
@@ -680,10 +680,10 @@ affect begins.
    phase structure above, with each phase's scout as the first
    referenced issue.
 3. **Create feature issues** (one per follow-on bullet above). Titles
-   carry no phase/step metadata (`calypso-replan` rule). Bodies follow
+   carry no phase/step metadata (`superfield-replan` rule). Bodies follow
    the standard feature-issue template.
 4. **Attach dependencies** in the Plan issue only — never in individual
    issue bodies.
-5. **Begin Phase 0** via `calypso-auto` or `calypso-develop`, starting
+5. **Begin Phase 0** via `superfield-auto` or `superfield-develop`, starting
    with the Phase 0 scout issue. No work on later phases until the
    Phase 0 scout merges.

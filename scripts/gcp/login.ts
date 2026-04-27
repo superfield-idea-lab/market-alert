@@ -73,7 +73,7 @@ interface DeviceTokenPollResponse {
 
 const helpText = `
 Run a repository-owned local Google OAuth login flow (without gcloud), then
-write refreshable token material for Calypso Google scripts.
+write refreshable token material for Superfield Google scripts.
 
 Two login modes are supported:
 
@@ -94,7 +94,7 @@ Optional:
   --device-code                              use device code flow (no localhost callback)
   --client-secret / GCP_OAUTH_CLIENT_SECRET
   --scopes / GCP_OAUTH_SCOPES                default: cloud-platform
-  --token-file / GCP_OAUTH_TOKEN_FILE        default: ~/.config/calypso/gcp-oauth-token.json
+  --token-file / GCP_OAUTH_TOKEN_FILE        default: ~/.config/superfield/gcp-oauth-token.json
   --listen-host / GCP_OAUTH_LISTEN_HOST      default: 127.0.0.1  (localhost flow only)
   --listen-port / GCP_OAUTH_LISTEN_PORT      default: 0 (ephemeral)  (localhost flow only)
   --timeout-seconds / GCP_OAUTH_TIMEOUT_SECONDS default: 300  (device code flow only: total wait)
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     state,
   });
 
-  console.log('Open this URL to authorize Calypso Google Cloud access:');
+  console.log('Open this URL to authorize Superfield Google Cloud access:');
   console.log(authorizationUrl);
   console.log('');
 
@@ -277,7 +277,7 @@ export async function runDeviceCodeFlow(params: {
   });
 
   console.log('');
-  console.log('Visit the following URL to authorize Calypso Google Cloud access:');
+  console.log('Visit the following URL to authorize Superfield Google Cloud access:');
   console.log(`  ${deviceCodeResponse.verification_url}`);
   console.log('');
   console.log(`Enter this code when prompted: ${deviceCodeResponse.user_code}`);
@@ -520,7 +520,7 @@ function handleOAuthCallbackRequest(
     return;
   }
 
-  respondText(res, 200, 'Calypso OAuth login complete. You can close this tab.');
+  respondText(res, 200, 'Superfield OAuth login complete. You can close this tab.');
   resolveResult(payload);
 }
 

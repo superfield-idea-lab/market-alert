@@ -25,21 +25,21 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: calypso-worker-soc-compliance-egress
+  name: superfield-worker-soc-compliance-egress
   labels:
-    app: calypso-worker-soc-compliance
+    app: superfield-worker-soc-compliance
 spec:
   podSelector:
     matchLabels:
-      app: calypso-worker-soc-compliance
+      app: superfield-worker-soc-compliance
   policyTypes:
     - Egress
   egress:
-    # Allow outbound to API gateway (calypso-app) on port 80
+    # Allow outbound to API gateway (superfield-app) on port 80
     - to:
         - podSelector:
             matchLabels:
-              app: calypso-app
+              app: superfield-app
       ports:
         - protocol: TCP
           port: 80
@@ -59,25 +59,25 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calypso-worker-soc-compliance
+  name: superfield-worker-soc-compliance
   labels:
-    app: calypso-worker-soc-compliance
+    app: superfield-worker-soc-compliance
     agent-type: soc_compliance
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-worker-soc-compliance
+      app: superfield-worker-soc-compliance
   template:
     metadata:
       labels:
-        app: calypso-worker-soc-compliance
+        app: superfield-worker-soc-compliance
         agent-type: soc_compliance
     spec:
       containers:
         - name: worker
           # Image tag is set via deploy.sh or kubectl set image
-          image: ghcr.io/<owner>/calypso-worker-soc-compliance:latest
+          image: ghcr.io/<owner>/superfield-worker-soc-compliance:latest
           env:
             - name: AGENT_TYPE
               value: 'soc_compliance'
@@ -85,26 +85,26 @@ spec:
             - name: AGENT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-soc-compliance-secret
+                  name: superfield-worker-soc-compliance-secret
                   key: AGENT_DATABASE_URL
             # API gateway base URL for task claim and result submission
             - name: API_BASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-soc-compliance-secret
+                  name: superfield-worker-soc-compliance-secret
                   key: API_BASE_URL
             # Claude CLI binary path (required for SOC compliance analysis)
             - name: CLAUDE_CLI_PATH
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-soc-compliance-secret
+                  name: superfield-worker-soc-compliance-secret
                   key: CLAUDE_CLI_PATH
                   optional: true
             # Vendor API key for the Claude CLI (Claude API key)
             - name: VENDOR_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-worker-soc-compliance-secret
+                  name: superfield-worker-soc-compliance-secret
                   key: VENDOR_API_KEY
           resources:
             requests:

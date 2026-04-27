@@ -39,7 +39,7 @@ const TEST_PASSWORDS = {
 };
 
 const DB_NAMES = {
-  app: 'calypso_app',
+  app: 'superfield_app',
 };
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {

@@ -1,0 +1,111 @@
+# Product Owner Interview Template
+
+<!-- last-edited: 2026-03-10 -->
+
+CONTEXT MAP
+this ──extends──────────▶ agent-communication.md §Workflow: Product Requirements Collection (steps 1–7)
+this ──references───────▶ development/userflow-state-machines.md (formalize workflows as state machines)
+this ◀──referenced by──── init/scaffold-task.md §Step 10
+
+> **Scope:** This document is the interview template supplement for the Product Requirements Collection workflow defined in `agent-communication.md §Workflow: Product Requirements Collection`. Follow the steps defined there; use this document for the questionnaire content at step 2. Do NOT duplicate those workflow steps here.
+
+---
+
+## Preconditions
+
+```
+PRECONDITIONS:
+- [ ] The human Product Owner is available and has provided a high-level description of the application
+- [ ] No Implementation Plan GitHub Issue exists, or the human has explicitly requested a requirements revision
+- [ ] Agent has read `agent-communication.md §Workflow: Product Requirements Collection` before this document
+
+If no high-level description has been provided: ask the Product Owner for a 2–3 sentence description of the application before generating questions.
+```
+
+---
+
+## Steps
+
+The full Product Requirements Collection workflow is defined in `agent-communication.md §Workflow: Product Requirements Collection`. The steps specific to conducting the interview (step 2 of that workflow) are:
+
+1. Read the Product Owner's high-level description.
+2. Generate structured questions using the **Questionnaire Categories** below.
+3. **Pre-fill your best inferred answers** for every question based on the description. Do not leave blank text boxes.
+4. If you cannot confidently infer an answer, provide multiple-choice options (including "Other — please specify").
+5. Present the pre-filled questionnaire to the Product Owner in a single message. Do not ask one question at a time.
+6. Wait for the Product Owner to confirm, correct, or expand on the pre-filled answers.
+7. Synthesize confirmed answers into GitHub Issues: create an Implementation Plan issue with phases, and create feature issues per feature, per `agent-communication.md §Workflow: Product Requirements Collection` step 4.
+8. For each primary user goal (from "Core Workflows & User Stories"), map the workflow to a state machine using the template in `development/userflow-state-machines.md`. This formalization must be completed before implementation begins.
+
+---
+
+## Output Specification
+
+```
+OUTPUTS:
+- Pre-filled questionnaire presented to the Product Owner in a single message
+- Implementation Plan GitHub Issue created with title "Implementation Plan" and initial phase structure
+- Feature Issues created (one per feature) with Motivation, Features, Test Plan, and Stage sections
+- External API test credentials collected and stored in `.env.test` (not committed to version control)
+- README.md or equivalent documentation updated to link to the Implementation Plan issue
+```
+
+---
+
+## Failure Handling
+
+```
+IF the Product Owner's description is too vague to infer answers:
+  1. Ask for clarification on the core user goal only — one question.
+  2. Do NOT proceed to the full questionnaire until the core goal is clear.
+
+IF the Product Owner rejects the pre-filled answers extensively:
+  1. Acknowledge the corrections, update the pre-filled answers in place.
+  2. Re-present the revised questionnaire for final confirmation.
+  3. Do NOT create issues until the Product Owner has confirmed.
+
+IF external API credentials are not provided at interview time:
+  1. Create a feature issue: "Collect test credentials for [service]" with appropriate stage.
+  2. Add the issue to the Implementation Plan and mark as a dependency for related features.
+  3. Continue — do not block Issue creation on missing credentials.
+```
+
+---
+
+## Questionnaire Categories
+
+Generate and pre-fill high-impact questions under each of the following critical categories. Present as a single markdown-formatted questionnaire addressed to the Product Owner. Pre-fill every answer based on the Product Owner's description; use multiple-choice options where you cannot confidently infer. Focus on product features, user stories, user roles, and workflows only — do not ask technical architecture questions.
+
+### 1. Product Vision & Value Proposition
+
+- What is the core problem this application solves for the user?
+- How does the user currently solve this problem, and how is this application better?
+- What does a successful outcome look like for the primary user?
+
+### 2. Core Workflows & User Stories
+
+- Describe the "Happy Path" workflow from the moment a user signs up to the moment they achieve their primary goal.
+- What are the most common edge cases or alternative workflows a user might take?
+- Are there complex state machines for entities (e.g., an order moving from Draft -> Paid -> Shipped -> Delivered)?
+- _Agent instruction: Formulate specific questions to extract exactly what entities exist and how they interact, and pre-fill them._
+
+### 3. User Roles, Permissions, and Access
+
+- What distinct types/roles of users exist in the system (e.g., Administrator, Free User, Premium Customer)?
+- What specific features and data can each role access? What are they restricted from seeing or doing?
+- Does authorization depend on complex conditions (e.g., "A manager can only approve requests from their own department")?
+- Is there a distinction between a **user** (the person using the app) and a **customer** (the entity/account being managed)? How does this affect schema and access control?
+- What CRUD (Create, Read, Update, Delete) views should different user roles have? Does a super user need bulk action capabilities (e.g., bulk edit, bulk delete)?
+
+### 4. External Integrations (Business Context)
+
+- What external services (e.g., Payment Gateways like Stripe, CRMs like Salesforce, Email Providers like SendGrid) must the system integrate with to support the user workflow?
+- What specific business actions trigger a call to these external services (e.g., "When a user upgrades their plan, charge their card")?
+
+### 5. Test Credentials and Setup
+
+- _Note: All external API interactions are considered critical to test. The AI must execute real network requests._
+- Please provide the necessary Sandbox/Test API keys and connection credentials for all external services so I can build the automated fixture generator. (Ensure these test credentials will not cause destructive side-effects in your production environment).
+
+**Output Format:**
+Output the pre-filled questionnaire as a single markdown document addressed to the Product Owner. Use blockquotes or clear formatting to show your inferred answers or your multiple-choice lists, asking them to simply edit, confirm, or select the correct options.

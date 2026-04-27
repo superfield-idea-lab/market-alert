@@ -23,21 +23,21 @@
 #   https://linkerd.io/2.14/reference/authorization-policy/
 #   https://linkerd.io/2.14/tasks/restricting-access/
 
-# ── calypso-server namespace ──────────────────────────────────────────────────
+# ── superfield-server namespace ──────────────────────────────────────────────────
 
-# Server: protect the API gateway HTTP port in calypso-server.
+# Server: protect the API gateway HTTP port in superfield-server.
 ---
 apiVersion: policy.linkerd.io/v1beta3
 kind: Server
 metadata:
-  name: calypso-app-http
-  namespace: calypso-server
+  name: superfield-app-http
+  namespace: superfield-server
   labels:
-    app: calypso-app
+    app: superfield-app
 spec:
   podSelector:
     matchLabels:
-      app: calypso-app
+      app: superfield-app
   port: 31415
   proxyProtocol: HTTP/1
 
@@ -50,13 +50,13 @@ apiVersion: policy.linkerd.io/v1beta3
 kind: MeshTLSAuthentication
 metadata:
   name: meshed-identity-server
-  namespace: calypso-server
+  namespace: superfield-server
 spec:
   identityRefs:
     - kind: Namespace
-      name: calypso-server
+      name: superfield-server
     - kind: Namespace
-      name: calypso-worker
+      name: superfield-worker
 
 
 # AuthorizationPolicy: bind the MeshTLSAuthentication to the Server.
@@ -67,22 +67,22 @@ spec:
 apiVersion: policy.linkerd.io/v1beta3
 kind: AuthorizationPolicy
 metadata:
-  name: allow-meshed-to-calypso-app
-  namespace: calypso-server
+  name: allow-meshed-to-superfield-app
+  namespace: superfield-server
 spec:
   targetRef:
     group: policy.linkerd.io
     kind: Server
-    name: calypso-app-http
+    name: superfield-app-http
   requiredAuthenticationRefs:
     - name: meshed-identity-server
       kind: MeshTLSAuthentication
       group: policy.linkerd.io
 
 
-# ── calypso-worker namespace ──────────────────────────────────────────────────
+# ── superfield-worker namespace ──────────────────────────────────────────────────
 
-# Server: protect any HTTP-speaking worker in the calypso-worker namespace.
+# Server: protect any HTTP-speaking worker in the superfield-worker namespace.
 # Workers don't expose HTTP ports to each other in normal operation, but
 # the Server resource is declared here to ensure the default-deny posture
 # is in effect if a worker ever exposes a port in the future.
@@ -90,8 +90,8 @@ spec:
 apiVersion: policy.linkerd.io/v1beta3
 kind: Server
 metadata:
-  name: calypso-worker-http
-  namespace: calypso-worker
+  name: superfield-worker-http
+  namespace: superfield-worker
   labels:
     app.kubernetes.io/component: worker
 spec:
@@ -108,13 +108,13 @@ apiVersion: policy.linkerd.io/v1beta3
 kind: MeshTLSAuthentication
 metadata:
   name: meshed-identity-worker
-  namespace: calypso-worker
+  namespace: superfield-worker
 spec:
   identityRefs:
     - kind: Namespace
-      name: calypso-worker
+      name: superfield-worker
     - kind: Namespace
-      name: calypso-server
+      name: superfield-server
 
 
 # AuthorizationPolicy: bind the worker MeshTLSAuthentication to the worker Server.
@@ -122,52 +122,52 @@ spec:
 apiVersion: policy.linkerd.io/v1beta3
 kind: AuthorizationPolicy
 metadata:
-  name: allow-meshed-to-calypso-worker
-  namespace: calypso-worker
+  name: allow-meshed-to-superfield-worker
+  namespace: superfield-worker
 spec:
   targetRef:
     group: policy.linkerd.io
     kind: Server
-    name: calypso-worker-http
+    name: superfield-worker-http
   requiredAuthenticationRefs:
     - name: meshed-identity-worker
       kind: MeshTLSAuthentication
       group: policy.linkerd.io
 
 
-# ── calypso-web namespace ─────────────────────────────────────────────────────
+# ── superfield-web namespace ─────────────────────────────────────────────────────
 
-# Server: protect the web serving pod (PWA static server) in calypso-web.
+# Server: protect the web serving pod (PWA static server) in superfield-web.
 ---
 apiVersion: policy.linkerd.io/v1beta3
 kind: Server
 metadata:
-  name: calypso-web-http
-  namespace: calypso-web
+  name: superfield-web-http
+  namespace: superfield-web
   labels:
-    app: calypso-web
+    app: superfield-web
 spec:
   podSelector:
     matchLabels:
-      app: calypso-web
+      app: superfield-web
   port: 3000
   proxyProtocol: HTTP/1
 
 
-# MeshTLSAuthentication: accept requests from calypso-server (API gateway →
-# web static assets) and within calypso-web itself.
+# MeshTLSAuthentication: accept requests from superfield-server (API gateway →
+# web static assets) and within superfield-web itself.
 ---
 apiVersion: policy.linkerd.io/v1beta3
 kind: MeshTLSAuthentication
 metadata:
   name: meshed-identity-web
-  namespace: calypso-web
+  namespace: superfield-web
 spec:
   identityRefs:
     - kind: Namespace
-      name: calypso-web
+      name: superfield-web
     - kind: Namespace
-      name: calypso-server
+      name: superfield-server
 
 
 # AuthorizationPolicy: bind the web MeshTLSAuthentication to the web Server.
@@ -175,13 +175,13 @@ spec:
 apiVersion: policy.linkerd.io/v1beta3
 kind: AuthorizationPolicy
 metadata:
-  name: allow-meshed-to-calypso-web
-  namespace: calypso-web
+  name: allow-meshed-to-superfield-web
+  namespace: superfield-web
 spec:
   targetRef:
     group: policy.linkerd.io
     kind: Server
-    name: calypso-web-http
+    name: superfield-web-http
   requiredAuthenticationRefs:
     - name: meshed-identity-web
       kind: MeshTLSAuthentication

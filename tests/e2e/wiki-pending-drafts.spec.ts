@@ -61,9 +61,9 @@ async function getTestSession(username: string): Promise<{ cookie: string; userI
   if (!res.ok) throw new Error(`test-session failed: ${res.status}`);
   const body = (await res.json()) as { user: { id: string } };
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
   return {
-    cookie: match ? `calypso_auth=${match[1]}` : '',
+    cookie: match ? `superfield_auth=${match[1]}` : '',
     userId: body.user.id,
   };
 }
@@ -156,8 +156,8 @@ describe('PendingDraftsBadge — browser rendering', () => {
       // Inject the session cookie so the app loads authenticated
       await page.context().addCookies([
         {
-          name: 'calypso_auth',
-          value: cookie.replace('calypso_auth=', ''),
+          name: 'superfield_auth',
+          value: cookie.replace('superfield_auth=', ''),
           domain: 'localhost',
           path: '/',
         },
@@ -285,8 +285,8 @@ describe('PendingDraftsBadge — browser rendering', () => {
       const approverBody = (await approverRes.json()) as { user: { id: string } };
       const approverCookie = (() => {
         const setCookie = approverRes.headers.get('set-cookie') ?? '';
-        const m = /calypso_auth=([^;]+)/.exec(setCookie);
-        return m ? `calypso_auth=${m[1]}` : '';
+        const m = /superfield_auth=([^;]+)/.exec(setCookie);
+        return m ? `superfield_auth=${m[1]}` : '';
       })();
 
       // Query the pending-drafts count as this approver (will be non-approver unless

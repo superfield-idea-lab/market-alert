@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-feature'
+  short_description: 'Evaluate a feature request and update the Plan'
+policy:
+  allow_implicit_invocation: false

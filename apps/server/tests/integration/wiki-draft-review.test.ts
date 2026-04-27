@@ -119,8 +119,8 @@ async function createSession(username: string): Promise<{ cookie: string; userId
   if (!res.ok) throw new Error(`test-session failed: ${res.status} ${await res.text()}`);
   const body = (await res.json()) as { user: { id: string } };
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const m = /calypso_auth=([^;]+)/.exec(setCookie);
-  return { cookie: m ? `calypso_auth=${m[1]}` : '', userId: body.user.id };
+  const m = /superfield_auth=([^;]+)/.exec(setCookie);
+  return { cookie: m ? `superfield_auth=${m[1]}` : '', userId: body.user.id };
 }
 
 async function mintWorkerToken(dept: string, customer: string): Promise<string> {
@@ -214,8 +214,8 @@ beforeAll(async () => {
     if (!res.ok) throw new Error(`test-session on approver server failed: ${res.status}`);
     const body = (await res.json()) as { user: { id: string } };
     const setCookie = res.headers.get('set-cookie') ?? '';
-    const m = /calypso_auth=([^;]+)/.exec(setCookie);
-    return { cookie: m ? `calypso_auth=${m[1]}` : '', userId: body.user.id };
+    const m = /superfield_auth=([^;]+)/.exec(setCookie);
+    return { cookie: m ? `superfield_auth=${m[1]}` : '', userId: body.user.id };
   })();
   approverCookie = approverSess.cookie;
 }, 90_000);

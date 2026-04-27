@@ -50,7 +50,7 @@ afterAll(async () => {
 
 test('test session backdoor issues a session cookie', async () => {
   const session = await createTestSession(BASE);
-  expect(session.cookie).toContain('calypso_auth=');
+  expect(session.cookie).toContain('superfield_auth=');
   expect(session.userId).toBeTruthy();
   expect(session.username).toBeTruthy();
 });
@@ -68,7 +68,7 @@ test('session cookie grants access to GET /api/auth/me', async () => {
 test('logout revokes the token so subsequent requests return 401', async () => {
   // 1. Create a fresh session
   const session = await createTestSession(BASE);
-  const cookie = session.cookie.split(';')[0]; // just calypso_auth=<token>
+  const cookie = session.cookie.split(';')[0]; // just superfield_auth=<token>
 
   // 2. Verify the token is valid before logout
   const meBeforeRes = await fetch(`${BASE}/api/auth/me`, {

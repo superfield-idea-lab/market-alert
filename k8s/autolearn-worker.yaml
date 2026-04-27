@@ -27,7 +27,7 @@
 #   kubectl apply -f k8s/autolearn-worker.yaml
 #
 # Environment variables injected per-run (via Job spec env overrides):
-#   API_BASE_URL        — Calypso API server URL
+#   API_BASE_URL        — Superfield API server URL
 #   WORKER_TOKEN        — single-use scoped token issued by /internal/worker/tokens
 #   DEPARTMENT_ID       — bound department identifier
 #   CUSTOMER_ID         — bound customer identifier
@@ -48,12 +48,12 @@ metadata:
   namespace: default
   labels:
     app: autolearn-worker
-    calypso.io/department: $(DEPARTMENT_ID)
-    calypso.io/customer: $(CUSTOMER_ID)
+    superfield.io/department: $(DEPARTMENT_ID)
+    superfield.io/customer: $(CUSTOMER_ID)
   annotations:
     # Annotation enables IRSA/Workload Identity binding if the cluster uses
     # GKE Workload Identity or AWS IAM Roles for Service Accounts.
-    calypso.io/ephemeral: 'true'
+    superfield.io/ephemeral: 'true'
 automountServiceAccountToken: false
 
 
@@ -72,8 +72,8 @@ metadata:
   namespace: default
   labels:
     app: autolearn-worker
-    calypso.io/department: $(DEPARTMENT_ID)
-    calypso.io/customer: $(CUSTOMER_ID)
+    superfield.io/department: $(DEPARTMENT_ID)
+    superfield.io/customer: $(CUSTOMER_ID)
 rules:
   # Allow reading the per-run input ConfigMap created by the stager (issue #37).
   # The ConfigMap name encodes (department_id, customer_id) so the Role grants
@@ -93,8 +93,8 @@ metadata:
   namespace: default
   labels:
     app: autolearn-worker
-    calypso.io/department: $(DEPARTMENT_ID)
-    calypso.io/customer: $(CUSTOMER_ID)
+    superfield.io/department: $(DEPARTMENT_ID)
+    superfield.io/customer: $(CUSTOMER_ID)
 subjects:
   - kind: ServiceAccount
     name: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
@@ -107,7 +107,7 @@ roleRef:
 
 # ── NetworkPolicy: autolearn worker egress ────────────────────────────────────
 # Allowed egress:
-#   - API gateway (calypso-app) on port 80 — result submission via worker token
+#   - API gateway (superfield-app) on port 80 — result submission via worker token
 #   - Anthropic API on port 443 — Claude CLI inference
 #   - DNS resolution on port 53
 #
@@ -122,22 +122,22 @@ metadata:
   namespace: default
   labels:
     app: autolearn-worker
-    calypso.io/department: $(DEPARTMENT_ID)
-    calypso.io/customer: $(CUSTOMER_ID)
+    superfield.io/department: $(DEPARTMENT_ID)
+    superfield.io/customer: $(CUSTOMER_ID)
 spec:
   podSelector:
     matchLabels:
       app: autolearn-worker
-      calypso.io/department: $(DEPARTMENT_ID)
-      calypso.io/customer: $(CUSTOMER_ID)
+      superfield.io/department: $(DEPARTMENT_ID)
+      superfield.io/customer: $(CUSTOMER_ID)
   policyTypes:
     - Egress
   egress:
-    # Allow outbound to API gateway (calypso-app) on port 80
+    # Allow outbound to API gateway (superfield-app) on port 80
     - to:
         - podSelector:
             matchLabels:
-              app: calypso-app
+              app: superfield-app
       ports:
         - protocol: TCP
           port: 80
@@ -180,8 +180,8 @@ metadata:
   namespace: default
   labels:
     app: autolearn-worker
-    calypso.io/department: $(DEPARTMENT_ID)
-    calypso.io/customer: $(CUSTOMER_ID)
+    superfield.io/department: $(DEPARTMENT_ID)
+    superfield.io/customer: $(CUSTOMER_ID)
 spec:
   # Clean up the Job and its pods 10 minutes after completion.
   ttlSecondsAfterFinished: 600
@@ -191,8 +191,8 @@ spec:
     metadata:
       labels:
         app: autolearn-worker
-        calypso.io/department: $(DEPARTMENT_ID)
-        calypso.io/customer: $(CUSTOMER_ID)
+        superfield.io/department: $(DEPARTMENT_ID)
+        superfield.io/customer: $(CUSTOMER_ID)
     spec:
       # Dedicated service account scoped to this (dept, customer) run.
       serviceAccountName: autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)
@@ -218,7 +218,7 @@ spec:
           # Distroless image: no shell, no package manager.
           # Blueprint: WORKER-C-001 (no-shell-binary-in-image)
           # Image tag is substituted by the gardening cron controller.
-          image: ghcr.io/superfield-ai/calypso-autolearn-worker:$(IMAGE_TAG)
+          image: ghcr.io/superfield-ai/superfield-autolearn-worker:$(IMAGE_TAG)
           env:
             - name: AGENT_TYPE
               value: autolearn

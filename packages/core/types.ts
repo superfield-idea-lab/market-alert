@@ -77,7 +77,7 @@ export interface TranscriptSegment {
   end_s: number;
 }
 
-// Calypso Specific semantic properties mapped from the Entity JSONB
+// Superfield Specific semantic properties mapped from the Entity JSONB
 // Policy note: this starter app stores password hashes inside the generic user
 // entity payload. The target blueprint posture replaces this with passkey-first
 // auth, dedicated auth/audit controls, and stricter separation between identity

@@ -3,7 +3,7 @@
  *
  * Provides a single endpoint:
  *   POST /api/test/session  { username? }
- *   → 201 with Set-Cookie: calypso_auth=<jwt>; __Host-csrf-token=<csrf>
+ *   → 201 with Set-Cookie: superfield_auth=<jwt>; __Host-csrf-token=<csrf>
  *
  * This endpoint creates a user entity in the database and issues a signed
  * session JWT via the same code path used by passkey login/complete. It is the

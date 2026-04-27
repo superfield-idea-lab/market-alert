@@ -21,9 +21,9 @@ describe('demo runtime contract', () => {
       'watch prompt loop',
     ]);
 
-    expect(plan[0]?.commands?.[0]).toContain('k3d cluster create calypso-demo');
+    expect(plan[0]?.commands?.[0]).toContain('k3d cluster create superfield-demo');
     expect(plan[2]?.commands?.[0]).toContain('docker build -f Dockerfile.release');
-    expect(plan[5]?.commands?.[0]).toContain('kubectl rollout status deployment/calypso-app');
+    expect(plan[5]?.commands?.[0]).toContain('kubectl rollout status deployment/superfield-app');
   });
 
   test('supports overriding the host database port for cluster bootstrap', () => {
@@ -36,41 +36,41 @@ describe('demo runtime contract', () => {
   test('generates demo secrets that target the local k3d postgres service', () => {
     const manifests = buildDemoSecretManifests(demoConfig({ interactive: false, port: 58080 }));
 
-    expect(manifests).toContain('name: calypso-secrets');
-    expect(manifests).toContain('name: calypso-api-secrets');
-    expect(manifests).toContain('calypso-dev-postgres');
+    expect(manifests).toContain('name: superfield-secrets');
+    expect(manifests).toContain('name: superfield-api-secrets');
+    expect(manifests).toContain('superfield-dev-postgres');
     expect(manifests).toContain(
-      'postgres://app_rw:app_rw_password@calypso-dev-postgres:5432/calypso_app',
+      'postgres://app_rw:app_rw_password@superfield-dev-postgres:5432/superfield_app',
     );
     expect(manifests).toContain(
-      'postgres://audit_w:audit_w_password@calypso-dev-postgres:5432/calypso_audit',
+      'postgres://audit_w:audit_w_password@superfield-dev-postgres:5432/superfield_audit',
     );
     expect(manifests).toContain(
-      'postgres://analytics_w:analytics_w_password@calypso-dev-postgres:5432/calypso_analytics',
+      'postgres://analytics_w:analytics_w_password@superfield-dev-postgres:5432/superfield_analytics',
     );
   });
 
   test('formats cluster bootstrap port conflicts with actionable guidance', () => {
     const message = describeCommandFailure(
       'cluster bootstrap',
-      ['k3d', 'cluster', 'create', 'calypso-demo', '--port', '5432:5432@loadbalancer', '--wait'],
+      ['k3d', 'cluster', 'create', 'superfield-demo', '--port', '5432:5432@loadbalancer', '--wait'],
       'failed to bind host port 0.0.0.0:5432/tcp: address already in use',
     );
 
     expect(message).toContain('cluster bootstrap failed');
     expect(message).toContain('Host port 5432 is already in use');
-    expect(message).toContain('k3d cluster create calypso-demo');
+    expect(message).toContain('k3d cluster create superfield-demo');
   });
 
   test('formats deploy failures with stderr context', () => {
     const message = describeCommandFailure(
       'deploy',
-      ['kubectl', 'rollout', 'status', 'deployment/calypso-app', '--timeout=180s'],
-      'deployment "calypso-app" exceeded its progress deadline',
+      ['kubectl', 'rollout', 'status', 'deployment/superfield-app', '--timeout=180s'],
+      'deployment "superfield-app" exceeded its progress deadline',
     );
 
     expect(message).toContain('deploy failed');
-    expect(message).toContain('deployment "calypso-app" exceeded its progress deadline');
+    expect(message).toContain('deployment "superfield-app" exceeded its progress deadline');
   });
 
   test('formats health probe failures with the target URL', () => {

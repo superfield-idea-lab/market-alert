@@ -42,7 +42,7 @@ describe('validateClaudeCliPath', () => {
   });
 
   test('throws when the binary is not executable', async () => {
-    const notExec = join(tmpdir(), `calypso-test-not-exec-${Date.now()}.txt`);
+    const notExec = join(tmpdir(), `superfield-test-not-exec-${Date.now()}.txt`);
     writeFileSync(notExec, '#!/bin/sh\necho hi\n');
     chmodSync(notExec, 0o644); // readable but not executable
     try {
@@ -113,7 +113,7 @@ describe('invokeCli (dev stub fallback)', () => {
  * Caller is responsible for cleanup.
  */
 function writeTempScript(name: string, content: string): string {
-  const p = join(tmpdir(), `calypso-test-${name}-${Date.now()}.sh`);
+  const p = join(tmpdir(), `superfield-test-${name}-${Date.now()}.sh`);
   writeFileSync(p, content, { mode: 0o755 });
   return p;
 }

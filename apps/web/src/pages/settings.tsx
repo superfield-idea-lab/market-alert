@@ -224,7 +224,7 @@ export function SettingsPage() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-zinc-900">Install app</p>
               <p className="text-xs text-zinc-500 mt-0.5">
-                Add Calypso to your home screen for a faster experience
+                Add Superfield to your home screen for a faster experience
               </p>
             </div>
           </button>
@@ -296,7 +296,7 @@ export function SettingsPage() {
 
       {isStandalone && (
         <p className="text-sm text-zinc-400 mt-4">
-          You are already running Calypso as an installed app.
+          You are already running Superfield as an installed app.
         </p>
       )}
     </div>

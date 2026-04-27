@@ -1,6 +1,6 @@
 /**
  * @file overview
- * This is the main entrypoint for the Calypso Bun server.
+ * This is the main entrypoint for the Superfield Bun server.
  * It is responsible for handling all incoming HTTP requests, routing them
  * to the appropriate integration or business logic modules, and serving
  * the compiled frontend React application from `apps/web/dist`.
@@ -134,6 +134,9 @@ export const appState: AppState = {
 
 export default {
   port: Number(process.env.PORT) || 31415,
+  // SERVER_HOSTNAME controls the bind address. HOSTNAME is reserved by
+  // Kubernetes (set to the pod name) and must not be used as a bind address.
+  hostname: process.env.SERVER_HOSTNAME ?? '0.0.0.0',
 
   websocket: websocketHandler,
 
@@ -454,8 +457,10 @@ export default {
       if (legalHoldRes) return withTrace(legalHoldRes);
     }
 
-    // Serve static assets — path is relative to this file, not process cwd
-    const webDist = `${import.meta.dir}/../../web/dist`;
+    // Serve static assets. import.meta.dir is the compiled bundle dir (/app/dist)
+    // at runtime, so we derive the path from process.cwd() instead — which is
+    // the repo root in dev and /app in the release container (WORKDIR /app).
+    const webDist = `${process.cwd()}/apps/web/dist`;
     const staticFilePath = `${webDist}${url.pathname === '/' ? '/index.html' : url.pathname}`;
     const file = Bun.file(staticFilePath);
     if (await file.exists()) {

@@ -23,7 +23,7 @@
  * ## Directory layout
  *
  * ```
- * /tmp/calypso-autolearn-<uuid>/
+ * /tmp/superfield-autolearn-<uuid>/
  *   ground-truth.json   — anonymised ground truth (tokenised, never raw PII)
  *   wiki.md             — current wiki markdown for the dept/customer scope
  * ```
@@ -56,7 +56,7 @@ import type { TranscriptSegment } from 'core';
 export const STAGING_BASE_DIR = '/tmp';
 
 /** Prefix for the per-run staging directory name. */
-export const STAGING_DIR_PREFIX = 'calypso-autolearn-';
+export const STAGING_DIR_PREFIX = 'superfield-autolearn-';
 
 /** Filename for the anonymised ground-truth content file. */
 export const GROUND_TRUTH_FILENAME = 'ground-truth.json';
@@ -183,7 +183,7 @@ export class StagingWriteError extends Error {
  * incremental diff.  Deepclean runs always pass `fullGroundTruth: true`
  * (PRD §4.5, issue #41).
  *
- * @param apiBaseUrl     - Base URL of the Calypso API server (no trailing slash).
+ * @param apiBaseUrl     - Base URL of the Superfield API server (no trailing slash).
  * @param scope          - The (dept, customer) scope to fetch.
  * @param fullGroundTruth - When true, include `full=true` in the query string.
  */
@@ -204,7 +204,7 @@ export function buildGroundTruthUrl(
 /**
  * Build the URL for the wiki markdown endpoint.
  *
- * @param apiBaseUrl - Base URL of the Calypso API server (no trailing slash).
+ * @param apiBaseUrl - Base URL of the Superfield API server (no trailing slash).
  * @param scope      - The (dept, customer) scope to fetch.
  */
 export function buildWikiUrl(apiBaseUrl: string, scope: AutolearnScope): string {
@@ -217,7 +217,7 @@ export function buildWikiUrl(apiBaseUrl: string, scope: AutolearnScope): string 
 /**
  * Fetch the anonymised ground truth for the given scope.
  *
- * @param apiBaseUrl      - Base URL of the Calypso API server.
+ * @param apiBaseUrl      - Base URL of the Superfield API server.
  * @param scope           - The (dept, customer) scope to fetch.
  * @param delegatedToken  - Short-lived token authorising the fetch.
  * @param fullGroundTruth - When true, fetches the full corpus (deepclean mode).
@@ -261,7 +261,7 @@ export async function fetchGroundTruth(
 /**
  * Fetch the current wiki markdown for the given scope.
  *
- * @param apiBaseUrl     - Base URL of the Calypso API server.
+ * @param apiBaseUrl     - Base URL of the Superfield API server.
  * @param scope          - The (dept, customer) scope to fetch.
  * @param delegatedToken - Short-lived token authorising the fetch.
  * @returns Wiki markdown as a raw string.
@@ -406,7 +406,7 @@ export function formatGroundTruthForStaging(content: GroundTruthContent): Ground
 // ---------------------------------------------------------------------------
 
 export interface StageAutolearnInputOptions {
-  /** Base URL of the Calypso API server. */
+  /** Base URL of the Superfield API server. */
   apiBaseUrl: string;
   /** The (dept, customer) scope to stage. */
   scope: AutolearnScope;

@@ -416,7 +416,7 @@ test('Direct INSERT into relations by a restricted DB role is denied', async () 
   await sql.unsafe(`CREATE ROLE ${roleName} LOGIN PASSWORD '${rolePassword}'`);
   await sql.unsafe(`REVOKE ALL ON relations FROM ${roleName}`);
   await sql.unsafe(`GRANT SELECT ON relations TO ${roleName}`);
-  await sql.unsafe(`GRANT CONNECT ON DATABASE calypso TO ${roleName}`);
+  await sql.unsafe(`GRANT CONNECT ON DATABASE superfield TO ${roleName}`);
   await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${roleName}`);
 
   const workerUrl = pg.url.replace(

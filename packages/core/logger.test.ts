@@ -13,7 +13,7 @@ const FIXTURES_DIR = resolve(import.meta.dirname, '../../tests/fixtures/pii-payl
 // ---------------------------------------------------------------------------
 
 function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), 'calypso-logger-test-'));
+  return mkdtempSync(join(tmpdir(), 'superfield-logger-test-'));
 }
 
 function readLines(filePath: string): string[] {

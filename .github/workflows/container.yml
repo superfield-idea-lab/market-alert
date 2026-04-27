@@ -71,7 +71,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
@@ -96,7 +95,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
@@ -133,9 +131,9 @@ jobs:
         env:
           POSTGRES_USER: app_rw
           POSTGRES_PASSWORD: app_rw_password
-          POSTGRES_DB: calypso_app
+          POSTGRES_DB: superfield_app
         options: >-
-          --health-cmd "pg_isready -U app_rw -d calypso_app"
+          --health-cmd "pg_isready -U app_rw -d superfield_app"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -145,7 +143,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Download web-dist from release
@@ -190,7 +187,7 @@ jobs:
       - name: Initialize databases
         run: bun run packages/db/init-remote.ts
         env:
-          ADMIN_DATABASE_URL: postgres://app_rw:app_rw_password@localhost:5432/calypso_app
+          ADMIN_DATABASE_URL: postgres://app_rw:app_rw_password@localhost:5432/superfield_app
           APP_RW_PASSWORD: app_rw_password
           AUDIT_W_PASSWORD: audit_w_password
           ANALYTICS_W_PASSWORD: analytics_w_password
@@ -199,12 +196,12 @@ jobs:
       - name: Start app container
         run: |
           docker run -d \
-            --name calypso \
+            --name superfield \
             --network host \
             -v "$PWD/packages/db/schema.sql:/app/dist/schema.sql:ro" \
-            -e DATABASE_URL=postgres://app_rw:app_rw_password@localhost:5432/calypso_app \
-            -e AUDIT_DATABASE_URL=postgres://audit_w:audit_w_password@localhost:5432/calypso_audit \
-            -e ANALYTICS_DATABASE_URL=postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics \
+            -e DATABASE_URL=postgres://app_rw:app_rw_password@localhost:5432/superfield_app \
+            -e AUDIT_DATABASE_URL=postgres://audit_w:audit_w_password@localhost:5432/superfield_audit \
+            -e ANALYTICS_DATABASE_URL=postgres://analytics_w:analytics_w_password@localhost:5432/superfield_analytics \
             -e JWT_SECRET=ci-smoke-test-secret \
             -e PORT=31415 \
             -e RELEASE_TAG=${{ github.ref_name }} \
@@ -222,12 +219,12 @@ jobs:
             sleep 2
           done
           echo "Health check timed out — container logs:"
-          docker logs calypso
+          docker logs superfield
           exit 1
 
       - name: Stop test container
         if: always()
-        run: docker rm -f calypso || true
+        run: docker rm -f superfield || true
 
       - name: Push image
         run: |
@@ -243,7 +240,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx

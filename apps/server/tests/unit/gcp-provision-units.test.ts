@@ -40,8 +40,8 @@ describe('Provision resource functions (MSW fixture replay)', () => {
 
   afterEach(() => {
     delete process.env.GCP_ACCESS_TOKEN;
-    delete process.env.CALYPSO_CLOUD_PROVIDER_HTTP_MODE;
-    delete process.env.CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR;
+    delete process.env.SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE;
+    delete process.env.SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR;
     clearGoogleAccessTokenCache();
     clearGoogleHttpFixtureState();
   });

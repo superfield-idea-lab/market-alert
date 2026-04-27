@@ -43,7 +43,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { usePlatform } from '../../hooks/use-platform';
 
-export const DISMISSED_KEY = 'calypso:pwa-install-dismissed';
+export const DISMISSED_KEY = 'superfield:pwa-install-dismissed';
 
 /** Duration in milliseconds before a dismissed gate reappears (90 days) */
 export const DISMISS_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -226,7 +226,7 @@ export function InstallPrompt() {
           <span className="text-white font-black text-lg">C</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-zinc-900">Install Calypso</p>
+          <p className="text-sm font-semibold text-zinc-900">Install Superfield</p>
           <p className="text-xs text-zinc-500 mt-0.5">
             Add to your home screen for the best experience
           </p>
@@ -261,7 +261,7 @@ export function InstallPrompt() {
             <span className="text-white font-black text-lg">C</span>
           </div>
           <div>
-            <p className="text-sm font-semibold text-zinc-900">Install Calypso</p>
+            <p className="text-sm font-semibold text-zinc-900">Install Superfield</p>
             <p className="text-xs text-zinc-500 mt-0.5">Add to your home screen</p>
           </div>
         </div>
@@ -307,7 +307,7 @@ export function InstallPrompt() {
     const message =
       variant === 'ios-safari' ? (
         <span>
-          Install Calypso{' '}
+          Install Superfield{' '}
           <span className="text-zinc-400" aria-hidden="true">
             -
           </span>{' '}
@@ -319,7 +319,7 @@ export function InstallPrompt() {
           then <span className="font-medium text-zinc-900">&ldquo;Add to Home Screen&rdquo;</span>
         </span>
       ) : (
-        <span>Open in Safari to install Calypso</span>
+        <span>Open in Safari to install Superfield</span>
       );
 
     return (

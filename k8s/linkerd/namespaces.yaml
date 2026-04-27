@@ -6,9 +6,9 @@
 # the Linkerd admission controller to inject the proxy automatically.
 #
 # Namespaces:
-#   calypso-server  — API gateway (calypso-app)
-#   calypso-web     — Frontend (PWA) serving pods
-#   calypso-worker  — Background worker pods (agent-worker, type workers)
+#   superfield-server  — API gateway (superfield-app)
+#   superfield-web     — Frontend (PWA) serving pods
+#   superfield-worker  — Background worker pods (agent-worker, type workers)
 #
 # Apply order:
 #   kubectl apply -f k8s/linkerd/namespaces.yaml
@@ -22,7 +22,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: calypso-server
+  name: superfield-server
   labels:
     # Linkerd sidecar injection at the namespace level.
     # All pods created in this namespace receive a Linkerd proxy sidecar
@@ -34,7 +34,7 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: calypso-web
+  name: superfield-web
   labels:
     linkerd.io/inject: enabled
   annotations:
@@ -43,7 +43,7 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: calypso-worker
+  name: superfield-worker
   labels:
     linkerd.io/inject: enabled
   annotations:

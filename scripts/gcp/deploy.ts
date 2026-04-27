@@ -49,12 +49,12 @@ Required configuration:
   --project / GCP_PROJECT_ID
   --region / GCP_REGION
   --zone / GCP_ZONE
-  --environment / CALYPSO_ENV
+  --environment / SUPERFIELD_ENV
   --vm-name / GCP_VM_NAME
   --alloydb-cluster / GCP_ALLOYDB_CLUSTER
   --alloydb-instance / GCP_ALLOYDB_INSTANCE
-  --tag / CALYPSO_IMAGE_TAG
-  SSH_AUTH_SOCK or CALYPSO_SSH_PRIVATE_KEY_FILE (not required in --talos-mode)
+  --tag / SUPERFIELD_IMAGE_TAG
+  SSH_AUTH_SOCK or SUPERFIELD_SSH_PRIVATE_KEY_FILE (not required in --talos-mode)
 
 Flags:
   --check-only          Validate liveness and stop before deploy.sh
@@ -69,7 +69,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const talosMode = resolveBooleanOption(args, 'talos-mode', ['CALYPSO_TALOS_MODE'], false);
+  const talosMode = resolveBooleanOption(args, 'talos-mode', ['SUPERFIELD_TALOS_MODE'], false);
 
   if (talosMode) {
     requireCommands(['talosctl', 'kubectl', 'bash']);
@@ -80,7 +80,7 @@ export async function main(): Promise<void> {
   const projectId = resolveRequiredOption(args, 'project', ['GCP_PROJECT_ID'], 'GCP project');
   const region = resolveRequiredOption(args, 'region', ['GCP_REGION'], 'GCP region');
   const zone = resolveRequiredOption(args, 'zone', ['GCP_ZONE'], 'GCP zone');
-  const environment = resolveRequiredOption(args, 'environment', ['CALYPSO_ENV'], 'Environment');
+  const environment = resolveRequiredOption(args, 'environment', ['SUPERFIELD_ENV'], 'Environment');
   const vmName = resolveRequiredOption(args, 'vm-name', ['GCP_VM_NAME'], 'VM name');
   const alloyCluster = resolveRequiredOption(
     args,
@@ -94,25 +94,25 @@ export async function main(): Promise<void> {
     ['GCP_ALLOYDB_INSTANCE'],
     'AlloyDB instance',
   );
-  const imageTag = resolveRequiredOption(args, 'tag', ['CALYPSO_IMAGE_TAG'], 'Image tag');
+  const imageTag = resolveRequiredOption(args, 'tag', ['SUPERFIELD_IMAGE_TAG'], 'Image tag');
   const namespace = resolveOption(
     args,
     'namespace',
     ['DEPLOY_NAMESPACE'],
-    `calypso-${environment}`,
+    `superfield-${environment}`,
   )!;
   const serviceAccountName = resolveOption(
     args,
     'service-account',
     ['DEPLOY_SA_NAME'],
-    'calypso-deployer',
+    'superfield-deployer',
   )!;
   const sshUser = resolveOption(args, 'ssh-user', ['DEPLOY_SSH_USER'], 'superfield')!;
   const checkOnly = hasFlag(args, 'check-only');
   const skipHttpCheck = resolveBooleanOption(
     args,
     'skip-http-check',
-    ['CALYPSO_SKIP_HTTP_CHECK'],
+    ['SUPERFIELD_SKIP_HTTP_CHECK'],
     false,
   );
 
@@ -241,7 +241,7 @@ export async function runDeploySsh(config: {
         KUBECONFIG: kubeconfigFile.path,
         DEPLOY_HOST: hostIp,
         DEPLOY_NAMESPACE: namespace,
-        APP_DEPLOYMENT: 'calypso-app',
+        APP_DEPLOYMENT: 'superfield-app',
         APP_CONTAINER_NAME: 'app',
         API_URL: `http://${hostIp}:31415/health`,
       };
@@ -306,7 +306,7 @@ export async function runDeployTalos(config: {
       KUBECONFIG: kubeconfigFile.path,
       DEPLOY_HOST: hostIp,
       DEPLOY_NAMESPACE: namespace,
-      APP_DEPLOYMENT: 'calypso-app',
+      APP_DEPLOYMENT: 'superfield-app',
       APP_CONTAINER_NAME: 'app',
       API_URL: `http://${hostIp}:31415/health`,
     };
@@ -340,14 +340,14 @@ export async function runDeployTalos(config: {
 
 export function runLivenessChecks(kubectlEnv: Record<string, string>, namespace: string): void {
   runCommand(['kubectl', 'get', 'namespace', namespace], { env: kubectlEnv });
-  runCommand(['kubectl', 'get', 'secret', 'calypso-api-secrets', '-n', namespace], {
+  runCommand(['kubectl', 'get', 'secret', 'superfield-api-secrets', '-n', namespace], {
     env: kubectlEnv,
   });
-  runCommand(['kubectl', 'get', 'deployment', 'calypso-app', '-n', namespace], {
+  runCommand(['kubectl', 'get', 'deployment', 'superfield-app', '-n', namespace], {
     env: kubectlEnv,
   });
   runCommand(
-    ['kubectl', 'rollout', 'status', 'deployment/calypso-app', '-n', namespace, '--timeout=60s'],
+    ['kubectl', 'rollout', 'status', 'deployment/superfield-app', '-n', namespace, '--timeout=60s'],
     { env: kubectlEnv },
   );
 }
@@ -420,14 +420,14 @@ export function maybeAnnotateDeployment(
     [
       'kubectl',
       'annotate',
-      'deployment/calypso-app',
+      'deployment/superfield-app',
       '--namespace',
       namespace,
       '--overwrite',
-      `deploy.calypso/actor=${actor}`,
-      `deploy.calypso/run-id=${runId}`,
-      `deploy.calypso/image-tag=${imageTag}`,
-      `deploy.calypso/timestamp=${new Date().toISOString()}`,
+      `deploy.superfield/actor=${actor}`,
+      `deploy.superfield/run-id=${runId}`,
+      `deploy.superfield/image-tag=${imageTag}`,
+      `deploy.superfield/timestamp=${new Date().toISOString()}`,
     ],
     { env: kubectlEnv },
   );

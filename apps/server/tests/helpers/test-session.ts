@@ -21,7 +21,7 @@
  */
 
 export interface TestSession {
-  /** Formatted Cookie header value, e.g. "calypso_auth=<token>; __Host-csrf-token=<csrf>" */
+  /** Formatted Cookie header value, e.g. "superfield_auth=<token>; __Host-csrf-token=<csrf>" */
   cookie: string;
   /** The CSRF token string (for X-CSRF-Token header) */
   csrfToken: string;

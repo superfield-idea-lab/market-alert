@@ -151,8 +151,8 @@ describe('autolearn-worker.yaml — RBAC is scoped to (dept, customer) (acceptan
 
   test('labels encode department and customer', () => {
     // Each K8s resource is labelled with (department, customer) for isolation.
-    expect(workerManifest).toContain('calypso.io/department:');
-    expect(workerManifest).toContain('calypso.io/customer:');
+    expect(workerManifest).toContain('superfield.io/department:');
+    expect(workerManifest).toContain('superfield.io/customer:');
   });
 });
 

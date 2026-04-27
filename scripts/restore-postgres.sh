@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# restore-postgres.sh — Restore a Calypso Postgres backup into a target database.
+# restore-postgres.sh — Restore a Superfield Postgres backup into a target database.
 #
 # Decrypts a backup artifact (produced by backup-postgres.sh / backupDatabase())
 # using the KMS-recovered data key and pipes the cleartext dump through

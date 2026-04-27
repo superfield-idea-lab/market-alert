@@ -47,7 +47,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
@@ -68,7 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
@@ -99,7 +97,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies

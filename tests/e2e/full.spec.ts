@@ -41,7 +41,7 @@ test('app loads and shows passkey login screen', async () => {
 
   await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
-  await playwrightExpect(page.getByRole('heading', { name: 'Calypso' })).toBeVisible();
+  await playwrightExpect(page.getByRole('heading', { name: 'Superfield' })).toBeVisible();
   // Passkey-only UI: no password field
   await playwrightExpect(page.getByPlaceholder('••••••••')).not.toBeVisible();
   // "Sign in with a passkey" button visible in login mode
@@ -90,8 +90,8 @@ test('crm admin can open the CRM tab and create an asset manager', async () => {
 
   await page.context().addCookies([
     {
-      name: 'calypso_auth',
-      value: session.cookie.match(/calypso_auth=([^;]+)/)?.[1] ?? '',
+      name: 'superfield_auth',
+      value: session.cookie.match(/superfield_auth=([^;]+)/)?.[1] ?? '',
       url: env.baseUrl,
     },
   ]);

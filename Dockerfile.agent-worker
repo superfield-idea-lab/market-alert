@@ -1,6 +1,6 @@
 # Dockerfile.agent-worker — Production agent worker image with Claude CLI.
 #
-# This image runs the Calypso agent worker container in Kubernetes. It is
+# This image runs the Superfield agent worker container in Kubernetes. It is
 # purpose-built for self-improving agent workloads where each pod:
 #   - Reads a read-only snapshot of the repository from a volume populated
 #     by the k8s initContainer (git clone at pod start).
@@ -27,7 +27,7 @@
 # Environment variables expected at container startup:
 #   AGENT_DATABASE_URL  — read-only PostgreSQL connection string for the agent role
 #   AGENT_TYPE          — agent type name (e.g. "coding")
-#   API_BASE_URL        — base URL of the Calypso API server
+#   API_BASE_URL        — base URL of the Superfield API server
 #   CLAUDE_CLI_PATH     — path to the Claude CLI binary (default: /usr/local/bin/claude)
 #   CLAUDE_AUTH_FILE    — path for the restored credentials file (default: /tmp/claude-auth/credentials.json)
 #   CODE_MOUNT_PATH     — path to the read-only code volume (default: /repo)

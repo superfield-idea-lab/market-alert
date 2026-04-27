@@ -56,7 +56,9 @@ describe('cookie-config', () => {
     test('dev mode: plain name, SameSite=Strict, no Secure', () => {
       delete process.env.SECURE_COOKIES;
       const header = authCookieHeader('tok123');
-      expect(header).toBe('calypso_auth=tok123; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800');
+      expect(header).toBe(
+        'superfield_auth=tok123; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800',
+      );
     });
 
     test('HTTPS mode: __Host- prefix, Secure, SameSite=Strict', () => {
@@ -65,7 +67,7 @@ describe('cookie-config', () => {
       process.env.SECURE_COOKIES = 'true';
       const header = authCookieHeader('tok123');
       expect(header).toBe(
-        '__Host-calypso_auth=tok123; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800',
+        '__Host-superfield_auth=tok123; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800',
       );
     });
   });
@@ -74,7 +76,7 @@ describe('cookie-config', () => {
     test('dev mode clears plain name', () => {
       delete process.env.SECURE_COOKIES;
       const header = authCookieClearHeader();
-      expect(header).toContain('calypso_auth=;');
+      expect(header).toContain('superfield_auth=;');
       expect(header).toContain('Max-Age=0');
       expect(header).not.toContain('Secure');
     });
@@ -82,7 +84,7 @@ describe('cookie-config', () => {
     test('HTTPS mode clears __Host- name with Secure', () => {
       process.env.SECURE_COOKIES = 'true';
       const header = authCookieClearHeader();
-      expect(header).toContain('__Host-calypso_auth=;');
+      expect(header).toContain('__Host-superfield_auth=;');
       expect(header).toContain('Max-Age=0');
       expect(header).toContain('Secure');
     });
@@ -91,22 +93,22 @@ describe('cookie-config', () => {
   describe('getAuthToken', () => {
     test('returns active cookie in dev mode', () => {
       delete process.env.SECURE_COOKIES;
-      expect(getAuthToken({ calypso_auth: 'dev-tok' })).toBe('dev-tok');
+      expect(getAuthToken({ superfield_auth: 'dev-tok' })).toBe('dev-tok');
     });
 
     test('returns active cookie in HTTPS mode', () => {
       process.env.SECURE_COOKIES = 'true';
-      expect(getAuthToken({ '__Host-calypso_auth': 'secure-tok' })).toBe('secure-tok');
+      expect(getAuthToken({ '__Host-superfield_auth': 'secure-tok' })).toBe('secure-tok');
     });
 
     test('falls back to plain name during transition to HTTPS mode', () => {
       process.env.SECURE_COOKIES = 'true';
-      expect(getAuthToken({ calypso_auth: 'old-tok' })).toBe('old-tok');
+      expect(getAuthToken({ superfield_auth: 'old-tok' })).toBe('old-tok');
     });
 
     test('falls back to __Host- name during transition to dev mode', () => {
       delete process.env.SECURE_COOKIES;
-      expect(getAuthToken({ '__Host-calypso_auth': 'old-secure-tok' })).toBe('old-secure-tok');
+      expect(getAuthToken({ '__Host-superfield_auth': 'old-secure-tok' })).toBe('old-secure-tok');
     });
 
     test('returns undefined when no token present', () => {

@@ -33,7 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Install Bun
@@ -65,8 +64,8 @@ jobs:
             --mode provision
         env:
           GCP_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CALYPSO_CLOUD_PROVIDER_HTTP_MODE: ${{ inputs.record-fixtures && 'record' || 'live' }}
-          CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR: ${{ inputs.record-fixtures && format('{0}/tests/fixtures/cloud-providers/gcp/{1}/doctor', github.workspace, inputs.fixture-scenario) || '' }}
+          SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE: ${{ inputs.record-fixtures && 'record' || 'live' }}
+          SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR: ${{ inputs.record-fixtures && format('{0}/tests/fixtures/cloud-providers/gcp/{1}/doctor', github.workspace, inputs.fixture-scenario) || '' }}
 
       - name: Deploy check-only
         run: |
@@ -82,9 +81,9 @@ jobs:
             --check-only
         env:
           GCP_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CALYPSO_CLOUD_PROVIDER_HTTP_MODE: ${{ inputs.record-fixtures && 'record' || 'live' }}
-          CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR: ${{ inputs.record-fixtures && format('{0}/tests/fixtures/cloud-providers/gcp/{1}/deploy', github.workspace, inputs.fixture-scenario) || '' }}
-          CALYPSO_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE: ${{ inputs.record-fixtures && 'record' || 'live' }}
+          SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR: ${{ inputs.record-fixtures && format('{0}/tests/fixtures/cloud-providers/gcp/{1}/deploy', github.workspace, inputs.fixture-scenario) || '' }}
+          SUPERFIELD_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_NAMESPACE: ${{ secrets.DEPLOY_NAMESPACE }}
           DEPLOY_SA_NAME: ${{ secrets.DEPLOY_SA_NAME }}
 

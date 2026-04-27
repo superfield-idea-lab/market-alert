@@ -17,9 +17,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: calypso
-          POSTGRES_PASSWORD: calypso
-          POSTGRES_DB: calypso
+          POSTGRES_USER: superfield
+          POSTGRES_PASSWORD: superfield
+          POSTGRES_DB: superfield
         ports:
           - 5432:5432
         options: >-
@@ -31,7 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Setup Bun
@@ -46,14 +45,14 @@ jobs:
 
       - name: Run database migrations
         env:
-          DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
+          DATABASE_URL: postgres://superfield:superfield@localhost:5432/superfield
         run: bun run db:migrate
 
       - name: Start production preview server
         env:
-          DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
-          AUDIT_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
-          ANALYTICS_DATABASE_URL: postgres://calypso:calypso@localhost:5432/calypso
+          DATABASE_URL: postgres://superfield:superfield@localhost:5432/superfield
+          AUDIT_DATABASE_URL: postgres://superfield:superfield@localhost:5432/superfield
+          ANALYTICS_DATABASE_URL: postgres://superfield:superfield@localhost:5432/superfield
           JWT_SECRET: test-secret-for-lighthouse-ci
           TEST_MODE: 'true'
           PORT: '5174'

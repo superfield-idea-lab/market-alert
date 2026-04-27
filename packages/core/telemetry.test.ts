@@ -252,8 +252,8 @@ describe('INGESTION_HOPS', () => {
 // ---------------------------------------------------------------------------
 
 describe('scope constants', () => {
-  test('INGESTION_SCOPE is calypso.ingestion', () => {
-    expect(INGESTION_SCOPE).toBe('calypso.ingestion');
+  test('INGESTION_SCOPE is superfield.ingestion', () => {
+    expect(INGESTION_SCOPE).toBe('superfield.ingestion');
   });
 
   test('INGESTION_VERSION is 1.0.0', () => {

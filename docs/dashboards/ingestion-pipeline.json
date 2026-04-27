@@ -60,7 +60,7 @@
       }
     ]
   },
-  "description": "Calypso ingestion pipeline — per-tenant latency histograms and error counters (issue #90)",
+  "description": "Superfield ingestion pipeline — per-tenant latency histograms and error counters (issue #90)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -293,7 +293,7 @@
   "refresh": "30s",
   "schemaVersion": 36,
   "style": "dark",
-  "tags": ["calypso", "ingestion", "otel"],
+  "tags": ["superfield", "ingestion", "otel"],
   "templating": {
     "list": [
       {
@@ -339,8 +339,8 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "Calypso Ingestion Pipeline",
-  "uid": "calypso-ingestion-v1",
+  "title": "Superfield Ingestion Pipeline",
+  "uid": "superfield-ingestion-v1",
   "version": 1,
   "weekStart": ""
 }

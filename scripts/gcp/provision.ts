@@ -48,7 +48,7 @@ interface AlloyInstance {
 }
 
 const helpText = `
-Create or reuse the Google Cloud infrastructure for a Calypso deployment, then
+Create or reuse the Google Cloud infrastructure for a Superfield deployment, then
 delegate host initialization to scripts/init-host.sh in remote-Postgres mode.
 
 When --talos-mode is set, host initialization is delegated to
@@ -60,31 +60,31 @@ Required configuration:
   --project / GCP_PROJECT_ID
   --region / GCP_REGION
   --zone / GCP_ZONE
-  --environment / CALYPSO_ENV
-  --image-tag / CALYPSO_IMAGE_TAG
-  SSH_AUTH_SOCK or CALYPSO_SSH_PRIVATE_KEY_FILE (not required in --talos-mode)
+  --environment / SUPERFIELD_ENV
+  --image-tag / SUPERFIELD_IMAGE_TAG
+  SSH_AUTH_SOCK or SUPERFIELD_SSH_PRIVATE_KEY_FILE (not required in --talos-mode)
 
 Google auth:
   Preferred: GCP_ACCESS_TOKEN or local OAuth cache via GCP_OAUTH_TOKEN_FILE
-  (default ~/.config/calypso/gcp-oauth-token.json).
+  (default ~/.config/superfield/gcp-oauth-token.json).
   Migration fallback: GCP_SERVICE_ACCOUNT_KEY_JSON, GCP_SERVICE_ACCOUNT_KEY_FILE,
   or GOOGLE_APPLICATION_CREDENTIALS. Standard API keys are not sufficient for
   IAM-authorized resource provisioning.
 
 Common optional settings:
-  --vm-name / GCP_VM_NAME                     default: calypso-<env>-vm
-  --network / GCP_NETWORK_NAME               default: calypso-<env>
-  --subnetwork / GCP_SUBNETWORK_NAME         default: calypso-<env>-<region>
+  --vm-name / GCP_VM_NAME                     default: superfield-<env>-vm
+  --network / GCP_NETWORK_NAME               default: superfield-<env>
+  --subnetwork / GCP_SUBNETWORK_NAME         default: superfield-<env>-<region>
   --subnetwork-cidr / GCP_SUBNETWORK_CIDR    default: 10.42.0.0/24
-  --alloydb-cluster / GCP_ALLOYDB_CLUSTER    default: calypso-<env>-db
-  --alloydb-instance / GCP_ALLOYDB_INSTANCE  default: calypso-<env>-primary
-  --ssh-source-ranges / CALYPSO_SSH_SOURCE_RANGES  default: 0.0.0.0/0
-  --app-source-ranges / CALYPSO_APP_SOURCE_RANGES  default: 0.0.0.0/0
-  --non-interactive / CALYPSO_NON_INTERACTIVE default: false
-  --skip-doctor / CALYPSO_SKIP_GCP_DOCTOR    default: false
-  --talos-mode / CALYPSO_TALOS_MODE          default: false
+  --alloydb-cluster / GCP_ALLOYDB_CLUSTER    default: superfield-<env>-db
+  --alloydb-instance / GCP_ALLOYDB_INSTANCE  default: superfield-<env>-primary
+  --ssh-source-ranges / SUPERFIELD_SSH_SOURCE_RANGES  default: 0.0.0.0/0
+  --app-source-ranges / SUPERFIELD_APP_SOURCE_RANGES  default: 0.0.0.0/0
+  --non-interactive / SUPERFIELD_NON_INTERACTIVE default: false
+  --skip-doctor / SUPERFIELD_SKIP_GCP_DOCTOR    default: false
+  --talos-mode / SUPERFIELD_TALOS_MODE          default: false
   --talos-image / GCP_TALOS_IMAGE            Talos custom image URL (required in talos mode)
-  --talos-api-source-ranges / CALYPSO_TALOS_API_SOURCE_RANGES  default: 0.0.0.0/0
+  --talos-api-source-ranges / SUPERFIELD_TALOS_API_SOURCE_RANGES  default: 0.0.0.0/0
 
 Example (standard):
   bun run scripts/gcp/provision.ts \\
@@ -112,7 +112,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const talosMode = resolveBooleanOption(args, 'talos-mode', ['CALYPSO_TALOS_MODE'], false);
+  const talosMode = resolveBooleanOption(args, 'talos-mode', ['SUPERFIELD_TALOS_MODE'], false);
 
   if (talosMode) {
     requireCommands(['talosctl', 'kubectl', 'bash']);
@@ -123,19 +123,19 @@ export async function main(): Promise<void> {
   const projectId = resolveRequiredOption(args, 'project', ['GCP_PROJECT_ID'], 'GCP project');
   const region = resolveRequiredOption(args, 'region', ['GCP_REGION'], 'GCP region');
   const zone = resolveRequiredOption(args, 'zone', ['GCP_ZONE'], 'GCP zone');
-  const environment = resolveRequiredOption(args, 'environment', ['CALYPSO_ENV'], 'Environment');
-  const imageTag = resolveRequiredOption(args, 'image-tag', ['CALYPSO_IMAGE_TAG'], 'Image tag');
+  const environment = resolveRequiredOption(args, 'environment', ['SUPERFIELD_ENV'], 'Environment');
+  const imageTag = resolveRequiredOption(args, 'image-tag', ['SUPERFIELD_IMAGE_TAG'], 'Image tag');
   const networkName = resolveOption(
     args,
     'network',
     ['GCP_NETWORK_NAME'],
-    `calypso-${environment}`,
+    `superfield-${environment}`,
   )!;
   const subnetworkName = resolveOption(
     args,
     'subnetwork',
     ['GCP_SUBNETWORK_NAME'],
-    `calypso-${environment}-${region}`,
+    `superfield-${environment}-${region}`,
   )!;
   const subnetworkCidr = resolveOption(
     args,
@@ -143,7 +143,7 @@ export async function main(): Promise<void> {
     ['GCP_SUBNETWORK_CIDR'],
     '10.42.0.0/24',
   )!;
-  const vmName = resolveOption(args, 'vm-name', ['GCP_VM_NAME'], `calypso-${environment}-vm`)!;
+  const vmName = resolveOption(args, 'vm-name', ['GCP_VM_NAME'], `superfield-${environment}-vm`)!;
   const vmMachineType = resolveOption(
     args,
     'vm-machine-type',
@@ -170,13 +170,13 @@ export async function main(): Promise<void> {
     args,
     'network-tag',
     ['GCP_VM_NETWORK_TAG'],
-    `calypso-${environment}`,
+    `superfield-${environment}`,
   )!;
   const psaRangeName = resolveOption(
     args,
     'psa-range',
     ['GCP_PSA_RANGE_NAME'],
-    `calypso-${environment}-psa`,
+    `superfield-${environment}-psa`,
   )!;
   const psaPrefixLength = Number(
     resolveOption(args, 'psa-prefix-length', ['GCP_PSA_PREFIX_LENGTH'], '16'),
@@ -185,13 +185,13 @@ export async function main(): Promise<void> {
     args,
     'alloydb-cluster',
     ['GCP_ALLOYDB_CLUSTER'],
-    `calypso-${environment}-db`,
+    `superfield-${environment}-db`,
   )!;
   const alloyInstance = resolveOption(
     args,
     'alloydb-instance',
     ['GCP_ALLOYDB_INSTANCE'],
-    `calypso-${environment}-primary`,
+    `superfield-${environment}-primary`,
   )!;
   const alloyDbVersion = resolveOption(
     args,
@@ -223,27 +223,32 @@ export async function main(): Promise<void> {
   const sshSourceRanges = resolveOption(
     args,
     'ssh-source-ranges',
-    ['CALYPSO_SSH_SOURCE_RANGES'],
+    ['SUPERFIELD_SSH_SOURCE_RANGES'],
     '0.0.0.0/0',
   )!;
   const appSourceRanges = resolveOption(
     args,
     'app-source-ranges',
-    ['CALYPSO_APP_SOURCE_RANGES'],
+    ['SUPERFIELD_APP_SOURCE_RANGES'],
     '0.0.0.0/0',
   )!;
-  const skipDoctor = resolveBooleanOption(args, 'skip-doctor', ['CALYPSO_SKIP_GCP_DOCTOR'], false);
+  const skipDoctor = resolveBooleanOption(
+    args,
+    'skip-doctor',
+    ['SUPERFIELD_SKIP_GCP_DOCTOR'],
+    false,
+  );
   const nonInteractive = resolveBooleanOption(
     args,
     'non-interactive',
-    ['CALYPSO_NON_INTERACTIVE'],
+    ['SUPERFIELD_NON_INTERACTIVE'],
     false,
   );
   const talosImage = resolveOption(args, 'talos-image', ['GCP_TALOS_IMAGE'], '')!;
   const talosApiSourceRanges = resolveOption(
     args,
     'talos-api-source-ranges',
-    ['CALYPSO_TALOS_API_SOURCE_RANGES'],
+    ['SUPERFIELD_TALOS_API_SOURCE_RANGES'],
     '0.0.0.0/0',
   )!;
 
@@ -285,7 +290,7 @@ export async function main(): Promise<void> {
     if (talosMode) {
       await ensureFirewallRule(
         projectId,
-        `calypso-${environment}-talos-api`,
+        `superfield-${environment}-talos-api`,
         network.selfLink,
         targetTag,
         ['50000'],
@@ -294,7 +299,7 @@ export async function main(): Promise<void> {
     } else {
       await ensureFirewallRule(
         projectId,
-        `calypso-${environment}-ssh`,
+        `superfield-${environment}-ssh`,
         network.selfLink,
         targetTag,
         ['22'],
@@ -303,7 +308,7 @@ export async function main(): Promise<void> {
     }
     await ensureFirewallRule(
       projectId,
-      `calypso-${environment}-app`,
+      `superfield-${environment}-app`,
       network.selfLink,
       targetTag,
       ['31415'],
@@ -368,14 +373,14 @@ export async function main(): Promise<void> {
 
     const initHostEnv: Record<string, string | undefined> = {
       ...process.env,
-      CALYPSO_IMAGE_TAG: imageTag,
+      SUPERFIELD_IMAGE_TAG: imageTag,
       REMOTE_PG_HOST: alloy.ipAddress,
       REMOTE_PG_PORT: '5432',
       REMOTE_PG_ADMIN_DB: 'postgres',
       REMOTE_PG_ADMIN_USER: postgresUser,
       REMOTE_PG_ADMIN_PASSWORD: postgresPassword,
       REMOTE_PG_SSL: 'require',
-      CALYPSO_NON_INTERACTIVE: nonInteractive ? '1' : process.env.CALYPSO_NON_INTERACTIVE,
+      SUPERFIELD_NON_INTERACTIVE: nonInteractive ? '1' : process.env.SUPERFIELD_NON_INTERACTIVE,
     };
 
     if (talosMode) {
@@ -409,7 +414,7 @@ export async function main(): Promise<void> {
     console.log(`AlloyDB cluster:   ${alloyCluster}`);
     console.log(`AlloyDB instance:  ${alloyInstance}`);
     console.log(`AlloyDB IP:        ${alloy.ipAddress}`);
-    console.log(`Namespace:         calypso-${environment}`);
+    console.log(`Namespace:         superfield-${environment}`);
     if (talosMode) {
       console.log(`Bootstrap mode:    talos`);
     }
@@ -673,7 +678,7 @@ export async function ensureAlloyDb(config: {
             allocatedIpRange: config.psaRangeName,
           },
           labels: {
-            app: 'calypso',
+            app: 'superfield',
             env: config.alloyCluster,
           },
         }),

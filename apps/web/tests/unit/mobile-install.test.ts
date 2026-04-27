@@ -97,6 +97,6 @@ describe('MobileInstallPage module exports', () => {
 
   test('DISMISSED_KEY is re-exported from mobile-install module', async () => {
     const mod = await import('../../src/pages/mobile-install.js');
-    expect(mod.DISMISSED_KEY).toBe('calypso:pwa-install-dismissed');
+    expect(mod.DISMISSED_KEY).toBe('superfield:pwa-install-dismissed');
   });
 });

@@ -18,7 +18,7 @@ describe('Google Cloud provider flow replay coverage', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-gcp-provider-flows-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-gcp-provider-flows-'));
     process.env.GCP_OAUTH_TOKEN_FILE = join(tempDir, 'missing-oauth.json');
     process.env.GCP_SERVICE_ACCOUNT_JSON = makeServiceAccountJson();
     clearGoogleAccessTokenCache();

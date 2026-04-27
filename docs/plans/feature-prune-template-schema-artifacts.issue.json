@@ -1,0 +1,36 @@
+{
+  "title": "feat: prune schema-level template artifacts and non-PRD entity seeds",
+  "phase": "Template cleanup",
+  "issue_kind": "feature",
+  "canonical_docs": [
+    "cleanup-plan.md",
+    "docs/PRD.md",
+    "docs/technical/db-architecture.md",
+    "packages/db/schema.sql"
+  ],
+  "dependencies": [],
+  "motivation": "Schema seeds and queue views still include template-centric entities and worker categories that are outside PRD, increasing drift and migration risk.",
+  "behaviour": "Introduce safe migration steps to retire template entity seeds and queue views not used by PRD workflows.\n\nCode examples:\n\n```sql\n-- template seeds to retire\nINSERT INTO entity_types (type, schema) VALUES\n  ('task', '{}'),\n  ('tag', '{}'),\n  ('channel', '{}'),\n  ('message', '{}');\n```\n\n```sql\nDROP VIEW IF EXISTS task_queue_view_coding;\nDROP VIEW IF EXISTS task_queue_view_analysis;\nDROP VIEW IF EXISTS task_queue_view_code_cleanup;\n```",
+  "scope": {
+    "in": [
+      "Add migration audit/checkpoint steps before destructive schema removal.",
+      "Remove non-PRD entity type seeds and template-only task queue views.",
+      "Update db tests and docs to reflect PRD-aligned schema surface."
+    ],
+    "out": [
+      "Changes to PRD-required schema tables and policy triggers.",
+      "Cross-service refactors unrelated to schema cleanup."
+    ]
+  },
+  "acceptance_criteria": [
+    "Schema no longer seeds non-PRD template entity types.",
+    "Template-only queue views are removed with safe migration sequencing.",
+    "DB docs/tests reflect the cleaned PRD-aligned schema shape."
+  ],
+  "test_plan": [
+    "Run DB migration and schema tests on a fresh database and an existing upgraded database.",
+    "Verify no application path references removed views/entity seeds after migration.",
+    "Run integration smoke tests for wiki/transcription/campaign/compliance flows post-migration."
+  ],
+  "stage": "Specified"
+}

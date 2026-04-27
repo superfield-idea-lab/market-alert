@@ -37,7 +37,7 @@
  *      pending or in-flight (TQ-C-005). UIDs that are already completed can
  *      be re-enqueued if the IMAP flag is reset (e.g. after re-delivery).
  *
- * Reuse `calypso-distribution/apps/server/src/cron/imap-etl-dispatch.ts` as
+ * Reuse `superfield-distribution/apps/server/src/cron/imap-etl-dispatch.ts` as
  * the implementation reference.
  *
  * ## Integration points discovered during scout
@@ -103,6 +103,6 @@ export function registerEmailIngestDispatchJob(
     //      across cron ticks.
     //   3. Greenmail test container startup order: integration tests must
     //      start the Greenmail container before the dispatcher fires. The
-    //      imap-container.ts helper from calypso-distribution handles this.
+    //      imap-container.ts helper from superfield-distribution handles this.
   });
 }

@@ -54,9 +54,9 @@ async function getTestSession(
   }
   const body = (await res.json()) as { user: { id: string; username: string } };
   const setCookieHeader = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookieHeader);
+  const match = /superfield_auth=([^;]+)/.exec(setCookieHeader);
   return {
-    cookie: match ? `calypso_auth=${match[1]}` : '',
+    cookie: match ? `superfield_auth=${match[1]}` : '',
     userId: body.user.id,
   };
 }
@@ -77,11 +77,11 @@ describe('token refresh rotation', () => {
 
     expect(refreshRes.status).toBe(200);
     const newCookieHeader = refreshRes.headers.get('set-cookie') ?? '';
-    expect(newCookieHeader).toContain('calypso_auth=');
+    expect(newCookieHeader).toContain('superfield_auth=');
 
     // The new token value must differ from the old one (new JTI)
-    const newMatch = /calypso_auth=([^;]+)/.exec(newCookieHeader);
-    const oldMatch = /calypso_auth=([^;]+)/.exec(cookie);
+    const newMatch = /superfield_auth=([^;]+)/.exec(newCookieHeader);
+    const oldMatch = /superfield_auth=([^;]+)/.exec(cookie);
     expect(newMatch).toBeTruthy();
     expect(newMatch![1]).not.toBe(oldMatch?.[1] ?? '');
   });
@@ -114,9 +114,9 @@ describe('token refresh rotation', () => {
     expect(refreshRes.status).toBe(200);
 
     const newCookieHeader = refreshRes.headers.get('set-cookie') ?? '';
-    const newMatch = /calypso_auth=([^;]+)/.exec(newCookieHeader);
+    const newMatch = /superfield_auth=([^;]+)/.exec(newCookieHeader);
     expect(newMatch).toBeTruthy();
-    const newCookie = `calypso_auth=${newMatch![1]}`;
+    const newCookie = `superfield_auth=${newMatch![1]}`;
 
     const meRes = await fetch(`${env.baseUrl}/api/auth/me`, {
       headers: { Cookie: newCookie },

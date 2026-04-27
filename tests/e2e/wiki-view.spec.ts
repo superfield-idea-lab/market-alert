@@ -45,8 +45,8 @@ async function getTestSession(base: string, username: string): Promise<string> {
   });
   expect(res.ok).toBe(true);
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const match = /calypso_auth=([^;]+)/.exec(setCookie);
-  return match ? `calypso_auth=${match[1]}` : '';
+  const match = /superfield_auth=([^;]+)/.exec(setCookie);
+  return match ? `superfield_auth=${match[1]}` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -116,14 +116,14 @@ test('wiki-view: history panel lists versions in reverse-chronological order', a
   });
 
   const cookie = await getTestSession(env.baseUrl, 'test-rm');
-  const cookieValue = cookie.replace('calypso_auth=', '');
+  const cookieValue = cookie.replace('superfield_auth=', '');
 
   const context = await browser.newContext({
     baseURL: env.baseUrl,
   });
   await context.addCookies([
     {
-      name: 'calypso_auth',
+      name: 'superfield_auth',
       value: cookieValue,
       domain: 'localhost',
       path: '/',
@@ -206,8 +206,8 @@ test('citation hover: popover content — API returns excerpt for authenticated 
   });
   expect(sessionRes.ok).toBe(true);
   const setCookie = sessionRes.headers.get('set-cookie') ?? '';
-  const cookieMatch = /calypso_auth=([^;]+)/.exec(setCookie);
-  const cookie = cookieMatch ? `calypso_auth=${cookieMatch[1]}` : '';
+  const cookieMatch = /superfield_auth=([^;]+)/.exec(setCookie);
+  const cookie = cookieMatch ? `superfield_auth=${cookieMatch[1]}` : '';
 
   // Create a source entity and a corpus chunk.
   const sourceRes = await fetch(`${env.baseUrl}/api/test/session`, {

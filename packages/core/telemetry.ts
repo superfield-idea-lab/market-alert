@@ -1,7 +1,7 @@
 /**
  * @file telemetry.ts
  *
- * OpenTelemetry SDK wiring for the Calypso ingestion pipeline.
+ * OpenTelemetry SDK wiring for the Superfield ingestion pipeline.
  *
  * ## Design
  *
@@ -83,7 +83,7 @@ export { SpanStatusCode };
 // ---------------------------------------------------------------------------
 
 /** Instrumentation scope name for the ingestion pipeline. */
-export const INGESTION_SCOPE = 'calypso.ingestion';
+export const INGESTION_SCOPE = 'superfield.ingestion';
 
 /** Instrumentation scope version. */
 export const INGESTION_VERSION = '1.0.0';

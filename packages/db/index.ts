@@ -7,10 +7,10 @@ import { buildSslOptions } from './ssl';
 export { buildSslOptions } from './ssl';
 
 const DEFAULT_DATABASE_URLS = {
-  app: 'postgres://app_rw:app_rw_password@localhost:5432/calypso_app',
-  audit: 'postgres://audit_w:audit_w_password@localhost:5432/calypso_audit',
-  analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/calypso_analytics',
-  dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/calypso_dictionary',
+  app: 'postgres://app_rw:app_rw_password@localhost:5432/superfield_app',
+  audit: 'postgres://audit_w:audit_w_password@localhost:5432/superfield_audit',
+  analytics: 'postgres://analytics_w:analytics_w_password@localhost:5432/superfield_analytics',
+  dictionary: 'postgres://dict_rw:dict_rw_password@localhost:5432/superfield_dictionary',
 } as const;
 
 export interface DatabaseUrls {

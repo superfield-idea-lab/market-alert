@@ -15,14 +15,14 @@
 #
 # Prerequisites
 # -------------
-#   - calypso-agent-worker-secret must be created by the operator (see secrets.example.yaml).
-#   - calypso-app Deployment must be running (NetworkPolicy allows egress to it).
+#   - superfield-agent-worker-secret must be created by the operator (see secrets.example.yaml).
+#   - superfield-app Deployment must be running (NetworkPolicy allows egress to it).
 #
 # Apply order (after genesis db-init-job completes):
 #   kubectl apply -f k8s/agent-worker.yaml
 #
 # To scale the worker:
-#   kubectl scale deployment calypso-agent-worker --replicas=3
+#   kubectl scale deployment superfield-agent-worker --replicas=3
 
 # ── ServiceAccount ────────────────────────────────────────────────────────────
 # Dedicated ServiceAccount for the agent worker.  No cluster-level permissions
@@ -32,15 +32,15 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: calypso-agent-worker
+  name: superfield-agent-worker
   labels:
-    app: calypso-agent-worker
+    app: superfield-agent-worker
 
 
 # ── NetworkPolicy: agent worker egress ───────────────────────────────────────
 # Restricts outbound traffic from agent worker pods.
 # Allowed egress:
-#   - API gateway (calypso-app) on port 80 — task claim and result submission
+#   - API gateway (superfield-app) on port 80 — task claim and result submission
 #   - Anthropic API on port 443 — Claude CLI authentication and inference
 #   - Git repository host on port 443 — initContainer code clone
 #   - DNS resolution on port 53
@@ -50,21 +50,21 @@ metadata:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: calypso-agent-worker-egress
+  name: superfield-agent-worker-egress
   labels:
-    app: calypso-agent-worker
+    app: superfield-agent-worker
 spec:
   podSelector:
     matchLabels:
-      app: calypso-agent-worker
+      app: superfield-agent-worker
   policyTypes:
     - Egress
   egress:
-    # Allow outbound to API gateway (calypso-app) on port 80
+    # Allow outbound to API gateway (superfield-app) on port 80
     - to:
         - podSelector:
             matchLabels:
-              app: calypso-app
+              app: superfield-app
       ports:
         - protocol: TCP
           port: 80
@@ -92,22 +92,22 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calypso-agent-worker
+  name: superfield-agent-worker
   labels:
-    app: calypso-agent-worker
+    app: superfield-agent-worker
     agent-type: claude
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-agent-worker
+      app: superfield-agent-worker
   template:
     metadata:
       labels:
-        app: calypso-agent-worker
+        app: superfield-agent-worker
         agent-type: claude
     spec:
-      serviceAccountName: calypso-agent-worker
+      serviceAccountName: superfield-agent-worker
 
       # Run all containers as non-root.
       # Blueprint: WORKER-T-007 (container-shell-access) — non-root reduces blast radius.
@@ -133,7 +133,7 @@ spec:
             - name: REPO_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-agent-worker-secret
+                  name: superfield-agent-worker-secret
                   key: REPO_URL
           volumeMounts:
             - name: code-volume
@@ -149,7 +149,7 @@ spec:
         - name: worker
           # Image tag is set via deploy.sh or kubectl set image.
           # Blueprint: WORKER-C-001 (no-shell-binary-in-image) — distroless image.
-          image: ghcr.io/<owner>/calypso-agent-worker:latest
+          image: ghcr.io/<owner>/superfield-agent-worker:latest
           env:
             - name: AGENT_TYPE
               value: 'claude'
@@ -157,20 +157,20 @@ spec:
             - name: AGENT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-agent-worker-secret
+                  name: superfield-agent-worker-secret
                   key: AGENT_DATABASE_URL
             # API gateway base URL for task claim and result submission.
             - name: API_BASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-agent-worker-secret
+                  name: superfield-agent-worker-secret
                   key: API_BASE_URL
             # Encryption key for decrypting the Claude credential bundle from DB.
             # Blueprint: WORKER-T-009 (vendor-api-key-leak) — key from Secret, not image.
             - name: ENCRYPTION_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-agent-worker-secret
+                  name: superfield-agent-worker-secret
                   key: ENCRYPTION_MASTER_KEY
             # Claude CLI binary path (copied into image at Dockerfile.agent-worker build).
             - name: CLAUDE_CLI_PATH

@@ -1,4 +1,4 @@
-# deploy.yml — GitOps deploy workflow for Calypso
+# deploy.yml — GitOps deploy workflow for Superfield
 #
 # Deployment is always an explicit human action via workflow_dispatch.
 # Release (release.yml) and deploy are separate concerns:
@@ -56,7 +56,6 @@ jobs:
       # ── 2. Checkout repository (deploy.sh lives here) ───────────────────────
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       # ── 3. Install Bun ──────────────────────────────────────────────────────

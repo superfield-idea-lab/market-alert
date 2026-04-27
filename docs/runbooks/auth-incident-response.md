@@ -137,7 +137,7 @@ One or more of:
 
    ```bash
    curl -X DELETE https://api.staging.superfield.ai/api/admin/worker-credentials/<AGENT_TYPE> \
-     -H "Cookie: calypso_auth=<superuser-token>"
+     -H "Cookie: superfield_auth=<superuser-token>"
    ```
 
 3. **Issue a new credential bundle** for the affected agent type.
@@ -213,7 +213,7 @@ One or more of:
 
    ```bash
    curl -X POST https://api.staging.superfield.ai/api/admin/users/<ADMIN_USER_ID>/require-reapproval \
-     -H "Cookie: calypso_auth=<second-admin-token>" \
+     -H "Cookie: superfield_auth=<second-admin-token>" \
      -H "X-CSRF-Token: <csrf>"
    ```
 
@@ -221,7 +221,7 @@ One or more of:
 
    ```bash
    curl -X POST https://api.staging.superfield.ai/api/admin/approvals/<REQUEST_ID>/approve \
-     -H "Cookie: calypso_auth=<approver-token>"
+     -H "Cookie: superfield_auth=<approver-token>"
    ```
 
 3. **Review the audit log** for all actions taken by the compromised account.
@@ -304,7 +304,7 @@ the canonical implementation.
 
 2. **Force all clients to re-authenticate** by clearing session cookies.
 
-   If the application sets a server-controlled `calypso_auth` cookie, a signed
+   If the application sets a server-controlled `superfield_auth` cookie, a signed
    deployment of a cookie-clearing response on the CDN or reverse proxy
    achieves this. Otherwise, key rotation (Option A) is the correct path.
 
@@ -313,7 +313,7 @@ the canonical implementation.
    ```bash
    # Use a known-valid session cookie from before the invalidation
    curl -i https://api.staging.superfield.ai/api/auth/me \
-     -H "Cookie: calypso_auth=<old-token>"
+     -H "Cookie: superfield_auth=<old-token>"
    # Expected: HTTP 401
    ```
 

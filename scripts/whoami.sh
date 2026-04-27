@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# whoami.sh — report current Calypso deployment state without making changes
+# whoami.sh — report current Superfield deployment state without making changes
 #
 # Usage:
 #   bash scripts/whoami.sh [<env>]
 #
 # <env> is the deployment environment label (default: "demo").
-# The Kubernetes namespace checked is "calypso-<env>".
+# The Kubernetes namespace checked is "superfield-<env>".
 #
 # Output example:
-#   Namespace:  calypso-demo
+#   Namespace:  superfield-demo
 #   Image tag:  ghcr.io/dot-matrix-labs/calypso-starter-ts:v1.2.3
 #   Domain:     (NodePort — no ingress domain)
 #   DB mode:    local
-#   Secrets:    calypso-api-secrets ✓ (all keys present)
+#   Secrets:    superfield-api-secrets ✓ (all keys present)
 #
 # Secret values are never printed — only presence is checked.
 
 set -euo pipefail
 
 ENV_LABEL="${1:-demo}"
-NAMESPACE="calypso-${ENV_LABEL}"
+NAMESPACE="superfield-${ENV_LABEL}"
 REPO="ghcr.io/dot-matrix-labs/calypso-starter-ts"
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
@@ -29,8 +29,8 @@ echo "Namespace:  ${NAMESPACE}"
 # ── Image tag ─────────────────────────────────────────────────────────────────
 
 IMAGE=""
-if kubectl get deployment calypso-app --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
-  IMAGE=$(kubectl get deployment calypso-app \
+if kubectl get deployment superfield-app --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
+  IMAGE=$(kubectl get deployment superfield-app \
     --namespace="${NAMESPACE}" \
     -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
 fi
@@ -60,9 +60,9 @@ fi
 DB_MODE="unknown"
 if kubectl get statefulset postgres --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
   DB_MODE="local"
-elif kubectl get secret calypso-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
+elif kubectl get secret superfield-api-secrets --namespace="${NAMESPACE}" &>/dev/null 2>&1; then
   # Check if DATABASE_URL points to an external host (not 'postgres' service)
-  DB_URL=$(kubectl get secret calypso-api-secrets \
+  DB_URL=$(kubectl get secret superfield-api-secrets \
     --namespace="${NAMESPACE}" \
     -o jsonpath='{.data.DATABASE_URL}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
   if echo "${DB_URL}" | grep -q "@postgres:"; then
@@ -103,9 +103,9 @@ check_secret() {
   fi
 }
 
-check_secret "calypso-api-secrets" \
+check_secret "superfield-api-secrets" \
   "DATABASE_URL" "AUDIT_DATABASE_URL" "ANALYTICS_DATABASE_URL" "JWT_SECRET" "ENCRYPTION_MASTER_KEY"
-check_secret "calypso-db-secrets" \
+check_secret "superfield-db-secrets" \
   "APP_RW_PASSWORD" "AUDIT_W_PASSWORD" "ANALYTICS_W_PASSWORD"
 
 # ── Pod status summary ────────────────────────────────────────────────────────

@@ -154,7 +154,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
@@ -167,18 +166,18 @@ jobs:
           file: Dockerfile
           push: false
           load: true
-          tags: calypso-server:ci-check
+          tags: superfield-server:ci-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Assert /bin/sh absent in server image
         run: |
-          echo "=== Distroless check: calypso-server ==="
-          if docker run --rm --entrypoint="" calypso-server:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
-            echo "FAIL: /bin/sh found in calypso-server image — not distroless"
+          echo "=== Distroless check: superfield-server ==="
+          if docker run --rm --entrypoint="" superfield-server:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in superfield-server image — not distroless"
             exit 1
           fi
-          echo "OK: /bin/sh absent from calypso-server image"
+          echo "OK: /bin/sh absent from superfield-server image"
 
       - name: Build worker image (Dockerfile.worker)
         # The worker Dockerfile requires a codex binary at codex-binary/codex.
@@ -195,18 +194,18 @@ jobs:
           file: Dockerfile.worker
           push: false
           load: true
-          tags: calypso-worker:ci-check
+          tags: superfield-worker:ci-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Assert /bin/sh absent in worker image
         run: |
-          echo "=== Distroless check: calypso-worker ==="
-          if docker run --rm --entrypoint="" calypso-worker:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
-            echo "FAIL: /bin/sh found in calypso-worker image — not distroless"
+          echo "=== Distroless check: superfield-worker ==="
+          if docker run --rm --entrypoint="" superfield-worker:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in superfield-worker image — not distroless"
             exit 1
           fi
-          echo "OK: /bin/sh absent from calypso-worker image"
+          echo "OK: /bin/sh absent from superfield-worker image"
 
       - name: Build web+server release image (Dockerfile.release)
         uses: docker/build-push-action@v6
@@ -215,18 +214,18 @@ jobs:
           file: Dockerfile.release
           push: false
           load: true
-          tags: calypso-release:ci-check
+          tags: superfield-release:ci-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Assert /bin/sh absent in release image
         run: |
-          echo "=== Distroless check: calypso-release ==="
-          if docker run --rm --entrypoint="" calypso-release:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
-            echo "FAIL: /bin/sh found in calypso-release image — not distroless"
+          echo "=== Distroless check: superfield-release ==="
+          if docker run --rm --entrypoint="" superfield-release:ci-check /bin/sh -c "echo shell-present" 2>/dev/null; then
+            echo "FAIL: /bin/sh found in superfield-release image — not distroless"
             exit 1
           fi
-          echo "OK: /bin/sh absent from calypso-release image"
+          echo "OK: /bin/sh absent from superfield-release image"
 
       - name: Summary
         run: |

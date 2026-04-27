@@ -7,7 +7,7 @@
         "user": "postgres"
       },
       "labels": {
-        "app": "calypso",
+        "app": "superfield",
         "env": "test-cluster"
       },
       "networkConfig": {

@@ -9,8 +9,8 @@
  *
  * Architecture notes
  * ------------------
- * The cron dispatcher follows the calypso-distribution pattern established
- * in `calypso-distribution/apps/server/src/cron/imap-etl-dispatch.ts`:
+ * The cron dispatcher follows the superfield-distribution pattern established
+ * in `superfield-distribution/apps/server/src/cron/imap-etl-dispatch.ts`:
  *
  *   - Cron = producer (inserts task rows).
  *   - Worker = consumer (claims and executes tasks via task-queue API).

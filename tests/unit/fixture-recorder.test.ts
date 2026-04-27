@@ -114,7 +114,7 @@ describe('fixture recorder — real HTTP round-trip', () => {
     });
     baseUrl = srv.baseUrl;
     stop = srv.stop;
-    tempDir = mkdtempSync(join(tmpdir(), 'calypso-fixture-recorder-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'superfield-fixture-recorder-'));
   });
 
   afterAll(async () => {

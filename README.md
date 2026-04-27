@@ -4,8 +4,5 @@ An autolearning knowledge base — a system that continuously ingests, indexes, 
 
 Core project documentation lives in [docs/README.md](docs/README.md).
 
-Blueprint documentation is sourced from the `./calypso-blueprint` git submodule. Agent scripts live in the `.agents` git submodule. After a fresh clone, initialise both submodules:
-
-```sh
-git submodule update --init
-```
+Blueprint documentation and agent workflows are vendored directly in this
+repository under `./calypso-blueprint` and `./.agents`.

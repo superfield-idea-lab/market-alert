@@ -1,7 +1,7 @@
-# Deployment + Service for the Calypso application container.
+# Deployment + Service for the Superfield application container.
 #
 # Image tag is set at deploy time via deploy.sh — never hardcoded here.
-# All environment variables are sourced from the `calypso-secrets` Secret.
+# All environment variables are sourced from the `superfield-secrets` Secret.
 #
 # Health probes:
 #   livenessProbe  → GET /health/live  (process alive; DEPLOY-C-030)
@@ -17,29 +17,29 @@
 #   kubectl apply -f k8s/secrets.yaml
 #   kubectl apply -f k8s/postgres.yaml
 #   kubectl apply -f k8s/db-init-job.yaml
-#   kubectl wait --for=condition=complete job/calypso-db-init
+#   kubectl wait --for=condition=complete job/superfield-db-init
 #   kubectl apply -f k8s/app.yaml
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calypso-app
+  name: superfield-app
   labels:
-    app: calypso-app
+    app: superfield-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-app
+      app: superfield-app
   template:
     metadata:
       labels:
-        app: calypso-app
+        app: superfield-app
     spec:
       containers:
         - name: app
-          # Image tag is set via deploy.sh: kubectl set image deployment/calypso-app app=ghcr.io/<owner>/calypso-starter-ts:<tag>
-          image: ghcr.io/<owner>/calypso-starter-ts:latest
+          # Image tag is set via deploy.sh: kubectl set image deployment/superfield-app app=ghcr.io/<owner>/superfield-starter-ts:<tag>
+          image: ghcr.io/<owner>/superfield-starter-ts:latest
           ports:
             - containerPort: 31415
           env:
@@ -48,34 +48,39 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: DATABASE_URL
             - name: AUDIT_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: AUDIT_DATABASE_URL
             - name: ANALYTICS_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: ANALYTICS_DATABASE_URL
+            - name: DICTIONARY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: superfield-secrets
+                  key: DICTIONARY_DATABASE_URL
             - name: SUBSTACK_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: SUBSTACK_API_KEY
                   optional: true
             - name: BLOOMBERG_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: BLOOMBERG_API_KEY
                   optional: true
             - name: YAHOO_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: calypso-secrets
+                  name: superfield-secrets
                   key: YAHOO_API_KEY
                   optional: true
           livenessProbe:
@@ -105,12 +110,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: calypso-app
+  name: superfield-app
   labels:
-    app: calypso-app
+    app: superfield-app
 spec:
   selector:
-    app: calypso-app
+    app: superfield-app
   ports:
     - name: http
       protocol: TCP

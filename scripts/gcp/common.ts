@@ -485,7 +485,7 @@ export function extractNatIp(instance: {
 }
 
 export function createTempFile(prefix: string, contents: string, mode = 0o600): TempFile {
-  const dir = mkdtempSync(join(tmpdir(), 'calypso-gcp-'));
+  const dir = mkdtempSync(join(tmpdir(), 'superfield-gcp-'));
   const path = join(dir, prefix);
   writeFileSync(path, contents, { mode });
   chmodSync(path, mode);
@@ -511,10 +511,10 @@ export function ensureSshAuthMaterial(): SshAuthMaterial {
     };
   }
 
-  const fromFile = process.env.CALYPSO_SSH_PRIVATE_KEY_FILE;
+  const fromFile = process.env.SUPERFIELD_SSH_PRIVATE_KEY_FILE;
   if (fromFile) {
     if (!existsSync(fromFile)) {
-      throw new Error(`CALYPSO_SSH_PRIVATE_KEY_FILE does not exist: ${fromFile}`);
+      throw new Error(`SUPERFIELD_SSH_PRIVATE_KEY_FILE does not exist: ${fromFile}`);
     }
     return {
       mode: 'key-file',
@@ -524,7 +524,7 @@ export function ensureSshAuthMaterial(): SshAuthMaterial {
   }
 
   throw new Error(
-    'SSH authentication requires either an agent identity via SSH_AUTH_SOCK or CALYPSO_SSH_PRIVATE_KEY_FILE as a local fallback',
+    'SSH authentication requires either an agent identity via SSH_AUTH_SOCK or SUPERFIELD_SSH_PRIVATE_KEY_FILE as a local fallback',
   );
 }
 
@@ -534,10 +534,10 @@ export function derivePublicKey(privateKeyPath: string): string {
 }
 
 export function resolveAdminPublicKey(sshAuth: SshAuthMaterial): string {
-  const fromFile = process.env.CALYPSO_SSH_PUBLIC_KEY_FILE;
+  const fromFile = process.env.SUPERFIELD_SSH_PUBLIC_KEY_FILE;
   if (fromFile) {
     if (!existsSync(fromFile)) {
-      throw new Error(`CALYPSO_SSH_PUBLIC_KEY_FILE does not exist: ${fromFile}`);
+      throw new Error(`SUPERFIELD_SSH_PUBLIC_KEY_FILE does not exist: ${fromFile}`);
     }
     return readFileSync(fromFile, 'utf8').trim();
   }
@@ -755,7 +755,7 @@ export function resolveOAuthTokenFilePath(): string {
   if (fromEnv) {
     return fromEnv;
   }
-  return join(homedir(), '.config', 'calypso', 'gcp-oauth-token.json');
+  return join(homedir(), '.config', 'superfield', 'gcp-oauth-token.json');
 }
 
 export function writeLocalOAuthCredentialFile(
@@ -807,7 +807,7 @@ function base64Url(value: string | Uint8Array): string {
 }
 
 function resolveCloudProviderHttpMode(): CloudProviderHttpMode {
-  const rawMode = process.env.CALYPSO_CLOUD_PROVIDER_HTTP_MODE?.trim().toLowerCase();
+  const rawMode = process.env.SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE?.trim().toLowerCase();
   if (!rawMode) {
     return 'live';
   }
@@ -815,15 +815,15 @@ function resolveCloudProviderHttpMode(): CloudProviderHttpMode {
     return rawMode;
   }
   throw new Error(
-    `CALYPSO_CLOUD_PROVIDER_HTTP_MODE must be one of live, record, or replay; received "${rawMode}"`,
+    `SUPERFIELD_CLOUD_PROVIDER_HTTP_MODE must be one of live, record, or replay; received "${rawMode}"`,
   );
 }
 
 function resolveCloudProviderFixtureDir(): string {
-  const fixtureDir = process.env.CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR;
+  const fixtureDir = process.env.SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR;
   if (!fixtureDir) {
     throw new Error(
-      'CALYPSO_CLOUD_PROVIDER_FIXTURE_DIR is required when cloud-provider HTTP mode is record or replay',
+      'SUPERFIELD_CLOUD_PROVIDER_FIXTURE_DIR is required when cloud-provider HTTP mode is record or replay',
     );
   }
   return fixtureDir;

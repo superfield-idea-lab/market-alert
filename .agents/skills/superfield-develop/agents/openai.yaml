@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-develop'
+  short_description: 'Carry one selected Plan issue through merge'
+policy:
+  allow_implicit_invocation: false

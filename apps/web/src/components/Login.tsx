@@ -32,7 +32,7 @@ export const Login: React.FC = () => {
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col justify-center items-center font-sans">
       <div className="bg-white p-8 rounded-2xl shadow-sm border border-zinc-200 w-full max-w-md">
-        <h1 className="text-3xl font-bold text-zinc-900 mb-2 text-center">Calypso</h1>
+        <h1 className="text-3xl font-bold text-zinc-900 mb-2 text-center">Superfield</h1>
         <p className="text-zinc-500 text-center mb-8">
           {isRegister ? 'Create an account with a passkey' : 'Sign in with your passkey'}
         </p>

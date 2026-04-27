@@ -32,7 +32,7 @@ LINKERD_VERSION="${LINKERD_VERSION:-2.14.10}"
 KUBECONTEXT="${KUBECONTEXT:-}"
 
 # Application namespaces that need their sidecars rolled after the control-plane upgrade.
-MESHED_NAMESPACES=(calypso-server calypso-web calypso-worker)
+MESHED_NAMESPACES=(superfield-server superfield-web superfield-worker)
 
 log() { echo "[linkerd-upgrade] $*"; }
 err() { echo "[linkerd-upgrade] ERROR: $*" >&2; exit 1; }

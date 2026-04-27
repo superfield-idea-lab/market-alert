@@ -16,10 +16,10 @@
  */
 
 /** Plain cookie name used in dev mode. */
-export const COOKIE_NAME_PLAIN = 'calypso_auth';
+export const COOKIE_NAME_PLAIN = 'superfield_auth';
 
 /** __Host- prefixed cookie name used in HTTPS mode. */
-export const COOKIE_NAME_SECURE = '__Host-calypso_auth';
+export const COOKIE_NAME_SECURE = '__Host-superfield_auth';
 
 /** Whether secure cookie mode is active. */
 export function isSecureCookies(): boolean {
@@ -34,8 +34,8 @@ export function getAuthCookieName(): string {
 /**
  * Build the Set-Cookie header value for the auth JWT token.
  *
- * HTTPS mode: `__Host-calypso_auth=<token>; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800`
- * Dev mode:   `calypso_auth=<token>; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`
+ * HTTPS mode: `__Host-superfield_auth=<token>; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=604800`
+ * Dev mode:   `superfield_auth=<token>; HttpOnly; Path=/; SameSite=Strict; Max-Age=604800`
  *
  * SameSite=Strict is used in both modes to enforce strict session cookie posture
  * as required by the Phase 1 security foundation (issue #14, AUTH blueprint).

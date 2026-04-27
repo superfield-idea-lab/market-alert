@@ -146,8 +146,8 @@ describe('StagingWriteError', () => {
   });
 
   test('includes path in message', () => {
-    const err = new StagingWriteError('/tmp/calypso-autolearn-xyz/ground-truth.json');
-    expect(err.message).toContain('/tmp/calypso-autolearn-xyz/ground-truth.json');
+    const err = new StagingWriteError('/tmp/superfield-autolearn-xyz/ground-truth.json');
+    expect(err.message).toContain('/tmp/superfield-autolearn-xyz/ground-truth.json');
   });
 });
 
@@ -196,7 +196,7 @@ describe('writeStagingFile', () => {
   });
 
   test('throws StagingWriteError when directory does not exist', async () => {
-    const filePath = '/tmp/calypso-nonexistent-dir/file.txt';
+    const filePath = '/tmp/superfield-nonexistent-dir/file.txt';
     await expect(writeStagingFile(filePath, 'data')).rejects.toBeInstanceOf(StagingWriteError);
   });
 });
@@ -213,7 +213,9 @@ describe('cleanupStagingDir', () => {
   });
 
   test('is idempotent — does not throw if directory does not exist', async () => {
-    await expect(cleanupStagingDir('/tmp/calypso-autolearn-does-not-exist')).resolves.not.toThrow();
+    await expect(
+      cleanupStagingDir('/tmp/superfield-autolearn-does-not-exist'),
+    ).resolves.not.toThrow();
   });
 });
 

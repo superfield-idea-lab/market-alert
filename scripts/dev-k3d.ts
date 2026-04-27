@@ -7,7 +7,7 @@
  * ENV-C-016: pnpm db:migrate is run as a separate step after the cluster is up,
  *            identically in dev and CI.
  *
- * Based on calypso-distribution/scripts/local-demo.ts topology.
+ * Based on superfield-distribution/scripts/local-demo.ts topology.
  *
  * Usage:
  *   bun run scripts/dev-k3d.ts            # start or reuse cluster
@@ -17,7 +17,7 @@
 
 import { join } from 'path';
 
-const CLUSTER_NAME = 'calypso-dev';
+const CLUSTER_NAME = 'superfield-dev';
 const NAMESPACE = 'default';
 const KUBECONFIG_PATH = join(import.meta.dir, '..', '.k3d-kubeconfig');
 const REPO_ROOT = join(import.meta.dir, '..');
@@ -75,7 +75,7 @@ function postgresReady(): boolean {
       'kubectl',
       'rollout',
       'status',
-      'statefulset/calypso-dev-postgres',
+      'statefulset/superfield-dev-postgres',
       '-n',
       NAMESPACE,
       '--timeout=120s',
@@ -158,7 +158,7 @@ async function main() {
   console.log(`\nk3d cluster '${CLUSTER_NAME}' is ready.`);
   console.log(`  KUBECONFIG: ${KUBECONFIG_PATH}`);
   console.log(
-    '  Postgres Service: calypso-dev-postgres:5432 (accessible via localhost:5432 through loadbalancer)',
+    '  Postgres Service: superfield-dev-postgres:5432 (accessible via localhost:5432 through loadbalancer)',
   );
   console.log('\n  Run pnpm db:migrate to apply the baseline migration.');
 }

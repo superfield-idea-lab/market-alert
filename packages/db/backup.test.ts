@@ -3,8 +3,8 @@
  *
  * Spins up a single real ephemeral Postgres container with two isolated
  * databases:
- *   - `calypso_app`   — the seeded source database
- *   - `calypso_restore` — the scratch restore-target database
+ *   - `superfield_app`   — the seeded source database
+ *   - `superfield_restore` — the scratch restore-target database
  *
  * This single-container approach avoids the cleanup-sentinel race condition
  * that occurs when two containers are started in the same test process.
@@ -62,8 +62,8 @@ const TEST_PASSWORDS = {
   email_ingest: 'email_ingest_test_pw',
 };
 
-const SOURCE_DB = 'calypso_app';
-const RESTORE_DB = 'calypso_restore';
+const SOURCE_DB = 'superfield_app';
+const RESTORE_DB = 'superfield_restore';
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {
   const u = new URL(adminUrl);
@@ -134,7 +134,7 @@ beforeAll(async () => {
   `;
 
   // Create the backup store directory.
-  backupDir = mkdtempSync(join(tmpdir(), 'calypso-backup-test-'));
+  backupDir = mkdtempSync(join(tmpdir(), 'superfield-backup-test-'));
 }, 120_000);
 
 afterAll(async () => {
@@ -187,7 +187,7 @@ describe('restoreDatabase', () => {
       throw new Error('backupDatabase test must run before restoreDatabase tests');
     }
 
-    // Restore into the RESTORE_DB (calypso_restore) on the same Postgres.
+    // Restore into the RESTORE_DB (superfield_restore) on the same Postgres.
     const targetAdminUrl = dbUrl(pg.url, RESTORE_DB);
     await restoreDatabase(encFilePath, metaFilePath, targetAdminUrl);
 

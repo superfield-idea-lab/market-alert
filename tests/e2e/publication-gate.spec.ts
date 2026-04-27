@@ -46,8 +46,8 @@ async function getTestSession(username: string): Promise<{ cookie: string; userI
   if (!res.ok) throw new Error(`test-session failed: ${res.status}`);
   const body = (await res.json()) as { user: { id: string } };
   const setCookie = res.headers.get('set-cookie') ?? '';
-  const m = /calypso_auth=([^;]+)/.exec(setCookie);
-  return { cookie: m ? `calypso_auth=${m[1]}` : '', userId: body.user.id };
+  const m = /superfield_auth=([^;]+)/.exec(setCookie);
+  return { cookie: m ? `superfield_auth=${m[1]}` : '', userId: body.user.id };
 }
 
 async function seedDraft(
@@ -206,10 +206,12 @@ describe('TP-1: approve flow (browser)', () => {
 
     const page = await browser.newPage();
     try {
-      const cookieValue = cookie.replace('calypso_auth=', '');
+      const cookieValue = cookie.replace('superfield_auth=', '');
       await page
         .context()
-        .addCookies([{ name: 'calypso_auth', value: cookieValue, domain: 'localhost', path: '/' }]);
+        .addCookies([
+          { name: 'superfield_auth', value: cookieValue, domain: 'localhost', path: '/' },
+        ]);
 
       // Intercept the draft review API to return controlled data
       await page.route(`**/api/wiki/drafts/${draftId}`, async (route) => {

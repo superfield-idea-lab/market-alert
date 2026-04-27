@@ -19,7 +19,7 @@
  *   The readiness probe must not block boot: if DB is not ready, readiness
  *   returns 503 but liveness still returns 200.
  * - k8s manifests must reference /health/live for livenessProbe and
- *   /health/ready for readinessProbe (calypso-distribution/deploy/base/).
+ *   /health/ready for readinessProbe (superfield-distribution/deploy/base/).
  * - Deep check is expensive (queries DB); not suitable for k8s probes, but
  *   used by CI smoke test and the golden-path e2e test.
  *

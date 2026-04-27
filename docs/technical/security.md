@@ -158,8 +158,8 @@ sidecars. It adds mTLS with zero application-code changes and supports distroles
 workload images (the sidecar uses its own init container for iptables rules; no
 shell in the workload container is required).
 
-**Namespace injection:** The three application namespaces (`calypso-server`,
-`calypso-web`, `calypso-worker`) carry `linkerd.io/inject: enabled`. Every pod
+**Namespace injection:** The three application namespaces (`superfield-server`,
+`superfield-web`, `superfield-worker`) carry `linkerd.io/inject: enabled`. Every pod
 created in these namespaces receives a Linkerd proxy sidecar automatically unless
 explicitly opted out.
 

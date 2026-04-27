@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "url": "https://compute.googleapis.com/compute/v1/projects/superfield-492115/zones/us-central1-a/instances/calypso-demo-vm"
+    "url": "https://compute.googleapis.com/compute/v1/projects/superfield-492115/zones/us-central1-a/instances/superfield-demo-vm"
   },
   "response": {
     "body": {

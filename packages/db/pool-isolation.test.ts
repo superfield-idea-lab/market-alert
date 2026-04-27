@@ -39,10 +39,10 @@ const TEST_PASSWORDS = {
 
 // Database names provisioned by runInitRemote
 const DB_NAMES = {
-  app: 'calypso_app',
-  audit: 'calypso_audit',
-  analytics: 'calypso_analytics',
-  dictionary: 'calypso_dictionary',
+  app: 'superfield_app',
+  audit: 'superfield_audit',
+  analytics: 'superfield_analytics',
+  dictionary: 'superfield_dictionary',
 };
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {
@@ -100,7 +100,7 @@ afterAll(async () => {
 describe('app_rw cross-pool isolation', () => {
   test('app_rw cannot SELECT from kb_audit tables — blocked at the database layer', async () => {
     // app_rw holds no CONNECT privilege on the audit database.
-    // Attempting to connect as app_rw to calypso_audit must fail.
+    // Attempting to connect as app_rw to superfield_audit must fail.
     const appRwAuditSql = postgres(
       makeRoleUrl(pg.url, DB_NAMES.audit, 'app_rw', TEST_PASSWORDS.app),
       { max: 1, connect_timeout: 5 },

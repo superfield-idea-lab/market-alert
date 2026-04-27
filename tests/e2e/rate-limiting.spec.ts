@@ -65,8 +65,8 @@ async function getTestSession(
   let authCookie = '';
   let csrfToken = '';
   for (const h of setCookieHeaders) {
-    const authMatch = /calypso_auth=([^;]+)/.exec(h);
-    if (authMatch) authCookie = `calypso_auth=${authMatch[1]}`;
+    const authMatch = /superfield_auth=([^;]+)/.exec(h);
+    if (authMatch) authCookie = `superfield_auth=${authMatch[1]}`;
     const csrfMatch = /(?:csrf-token|__Host-csrf-token)=([^;]+)/.exec(h);
     if (csrfMatch) csrfToken = csrfMatch[1];
   }
@@ -94,13 +94,13 @@ async function getSuperuserSession(): Promise<{ cookie: string; userId: string }
     });
     const body2 = (await fallback.json()) as { user: { id: string } };
     const h2 = fallback.headers.get('set-cookie') ?? '';
-    const m2 = /calypso_auth=([^;]+)/.exec(h2);
-    return { cookie: m2 ? `calypso_auth=${m2[1]}` : '', userId: body2.user.id };
+    const m2 = /superfield_auth=([^;]+)/.exec(h2);
+    return { cookie: m2 ? `superfield_auth=${m2[1]}` : '', userId: body2.user.id };
   }
   const body = (await res.json()) as { user: { id: string } };
   const h = res.headers.get('set-cookie') ?? '';
-  const m = /calypso_auth=([^;]+)/.exec(h);
-  return { cookie: m ? `calypso_auth=${m[1]}` : '', userId: body.user.id };
+  const m = /superfield_auth=([^;]+)/.exec(h);
+  return { cookie: m ? `superfield_auth=${m[1]}` : '', userId: body.user.id };
 }
 
 // ---------------------------------------------------------------------------

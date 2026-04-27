@@ -25,7 +25,7 @@ import { PII_FIELD_NAMES } from './scrub-pii';
 const FIXTURES_DIR = resolve(import.meta.dirname, '../../tests/fixtures/pii-payloads');
 
 function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), 'calypso-logger-int-test-'));
+  return mkdtempSync(join(tmpdir(), 'superfield-logger-int-test-'));
 }
 
 function parseLines(filePath: string): Record<string, unknown>[] {

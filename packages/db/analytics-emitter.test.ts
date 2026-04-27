@@ -50,8 +50,8 @@ const TEST_PASSWORDS = {
 };
 
 const DB_NAMES = {
-  app: 'calypso_app',
-  analytics: 'calypso_analytics',
+  app: 'superfield_app',
+  analytics: 'superfield_analytics',
 };
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {
@@ -269,7 +269,7 @@ describe('queryBdmCampaignEvents — reads from kb_analytics only (TP-2 / AC-3)'
 describe('analytics_w cross-pool isolation — cannot reach kb_app (TP-3 / AC-4)', () => {
   test('analytics_w cannot connect to kb_app — blocked at the database layer', async () => {
     // analytics_w holds no CONNECT privilege on the app database.
-    // Attempting to connect as analytics_w to calypso_app must fail.
+    // Attempting to connect as analytics_w to superfield_app must fail.
     const analyticsWAppSql = postgres(
       makeRoleUrl(pg.url, DB_NAMES.app, 'analytics_w', TEST_PASSWORDS.analytics),
       { max: 1, connect_timeout: 5 },

@@ -16,5 +16,5 @@
       "embedding": ["./packages/embedding/index.ts"]
     }
   },
-  "exclude": ["node_modules", "apps/web/tests/component", "apps/web/src/sw.ts", "studio"]
+  "exclude": ["node_modules", "apps/web/tests/component", "apps/web/src/sw.ts"]
 }

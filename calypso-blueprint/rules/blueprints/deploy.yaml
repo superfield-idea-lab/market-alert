@@ -1,0 +1,1435 @@
+meta:
+  domain: DEPLOY
+  title: Deployment Blueprint
+  version: 1
+  requires:
+    - ENV
+  vision: |
+    Deployment is the moment a codebase becomes a system. Code that passes every test and satisfies
+    every requirement is worthless if it cannot be started, kept running, observed when it
+    misbehaves, and recovered when it fails. Most deployment complexity exists to manage the gap
+    between the development environment and the production environment. When that gap is eliminated
+    — when the development host, the test environment, and the deployment target are the exact same
+    containerized runtime — deployment reduces to its essential operations: build, containerize, and
+    orchestrate.
+
+    The deployment strategy for agent-built software has two fundamental requirements that
+    traditional deployments lack. First, an AI agent must be able to diagnose a production issue by
+    reading logs, not by watching dashboards or receiving pages. Second, human-convenience tooling
+    like hot-reloading (vite dev) optimizes for incremental human thought, but agents write full
+    files and prefer exact reproduction. By building the code exactly as it will run in production
+    and running it in a background container for dev previews, we eliminate hybrid environment bugs
+    and drastically reduce the toolchain complexity across environments.
+
+    The cost of ignoring this blueprint is a system that works in development and fails in
+    production in ways no one can diagnose. Environments that drift. Errors that repeat ten thousand
+    times and fill the disk while the root cause remains invisible. Deployments that require tribal
+    knowledge that no agent can access. Containerized deployment is not overhead — it is the
+    discipline that makes the system identically operable by any agent in any session, from local
+    dev to enterprise Kubernetes.
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Threats
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-T-001
+    hash: "95e47760b8bd"
+    name: container-crash-no-restart
+    type: threat
+    description: >
+      Application container crashes and is not restarted. The container
+      orchestrator must restart crashed containers automatically to protect
+      service availability.
+    links:
+      - {target: f4deae0ff5d3, rel: depends_on}
+      - {target: b9d1a6dddde4, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-002
+    hash: "6e3e5055d803"
+    name: disk-exhaustion-from-unrotated-logs
+    type: threat
+    description: >
+      Server runs out of disk space due to unrotated logs. Log retention
+      policies must prevent disk exhaustion to protect host stability.
+    links:
+      - {target: 41353c4858b0, rel: depends_on}
+      - {target: 1b33ad831887, rel: depends_on}
+      - {target: e6680f845e61, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-003
+    hash: "c4bfd726ae7b"
+    name: invisible-browser-errors
+    type: threat
+    description: >
+      Errors occur in the browser and are never reported to the server.
+      Browser errors must be captured and forwarded to the server to maintain
+      observability completeness.
+    links:
+      - {target: aef55d669b45, rel: depends_on}
+      - {target: 2a36bd9bbcb2, rel: depends_on}
+      - {target: 09455ddf1dff, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-004
+    hash: "ad236a691d87"
+    name: context-window-filled-by-duplicate-errors
+    type: threat
+    description: >
+      Agent reads logs to diagnose an issue but the context window fills with
+      duplicate errors. Deduplicated error summaries must exist alongside
+      chronological logs to preserve diagnostic efficiency.
+    links:
+      - {target: 4b71998780a6, rel: depends_on}
+      - {target: a9c435b04f11, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-005
+    hash: "5a00e2a1d857"
+    name: manual-deploy-steps-block-agent
+    type: threat
+    description: >
+      Deployment requires manual steps that an agent cannot perform. The full
+      deploy process must be scriptable and non-interactive to preserve
+      deployment autonomy.
+    links:
+      - {target: 123eab1a292b, rel: depends_on}
+      - {target: 26419e6cc6ce, rel: depends_on}
+      - {target: bd28ad6f0308, rel: depends_on}
+      - {target: f5ee26f6798a, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-006
+    hash: "cccd2dd3451e"
+    name: secrets-committed-to-repo
+    type: threat
+    description: >
+      Environment variables containing secrets are committed to the
+      repository. Production secrets must never be in version control to
+      protect secret integrity.
+    links:
+      - {target: 584e64645b8f, rel: depends_on}
+      - {target: 3f7f5f443afe, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-007
+    hash: "f7384a169540"
+    name: deploy-with-failing-tests
+    type: threat
+    description: >
+      A deploy happens with failing tests. CI must gate all deployments to
+      ensure deployment safety.
+    links:
+      - {target: 9f4aeb9be1e8, rel: depends_on}
+      - {target: cb07dc6a3f20, rel: depends_on}
+      - {target: 765231ae4d6c, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-008
+    hash: "330716dd7d97"
+    name: unreachable-server-no-diagnosis
+    type: threat
+    description: >
+      The server is unreachable and no one knows why. The container
+      orchestrator and health checks must report status to provide network
+      observability.
+    links:
+      - {target: 98a04633e13c, rel: depends_on}
+      - {target: d65e70a5425b, rel: depends_on}
+      - {target: b4adb303f4a9, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-009
+    hash: "b08792cb7a13"
+    name: previous-version-unavailable-for-rollback
+    type: threat
+    description: >
+      A rollback is needed but the previous version is not available.
+      Previous builds must be recoverable from version control to maintain
+      rollback capability.
+    links:
+      - {target: 4913a0616eea, rel: depends_on}
+      - {target: 30358b6f4470, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-T-010
+    hash: "a1b2c3d4e5f6"
+    name: migration-applied-rollback-destroys-data
+    type: threat
+    description: >
+      A database migration has been applied to an environment. Rolling back the
+      application to a prior image does not undo the schema change. If the prior
+      code is incompatible with the new schema, the system is broken. If a
+      destructive down-migration is run to undo the schema, data may be lost.
+      Rollback capability depends entirely on schema forward-compatibility being
+      verified before the release was promoted.
+    links:
+      - {target: 7c658e789c07, rel: depends_on}
+      - {target: b1d2e3f4a5c6, rel: depends_on}
+    deprecated: false
+
+  # ---------------------------------------------------------------------------
+  # Principles
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-P-001
+    hash: "f4deae0ff5d3"
+    name: containers-are-the-great-unifier
+    type: principle
+    description: >
+      All application processes must be packaged as immutable container images,
+      deployed to a container orchestrator, and restarted on crash. Containers
+      are used exclusively across dev, test, and all runtime environments.
+      Production containers must be distroless, stripped of package managers,
+      shells, and all OS-level tools not required to run the application. The
+      choice of orchestration vendor (or DIY orchestration) is an implementation
+      detail; what matters is the capability: automatic restart, health-gated
+      rollout, environment-isolated rollback, and declarative configuration.
+    links:
+      - {target: cebbff0e956c, rel: refines}
+      - {target: 95e47760b8bd, rel: mitigates}
+      - {target: 89b9897e5bfc, rel: refines}
+      - {target: e889c6c25ede, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-002
+    hash: "9d33a458e91a"
+    name: no-incremental-hot-reloading-dev-servers
+    type: principle
+    description: >
+      Do not use tools like vite dev for hot-reloadable on-the-fly servers.
+      Build the code with the runtime and deploy it in a background container
+      exactly as if it were production. This enforces environment parity from
+      the first line of code. Agents do not benefit from hot-reloading.
+    links:
+      - {target: cebbff0e956c, rel: refines}
+      - {target: 2a5c123b62fc, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-003
+    hash: "41353c4858b0"
+    name: logs-are-for-machines-first
+    type: principle
+    description: >
+      Every log entry must be structured, timestamped, and traceable. A
+      chronological log file is the complete record. A deduplicated summary
+      file is the diagnostic entry point. Log formats are designed for
+      parsing, not for terminal reading.
+    links:
+      - {target: 4b71998780a6, rel: refines}
+      - {target: 6e3e5055d803, rel: mitigates}
+      - {target: ad236a691d87, rel: mitigates}
+    deprecated: false
+
+  - number: DEPLOY-P-004
+    hash: "55b6ac786a19"
+    name: traces-span-the-full-stack
+    type: principle
+    description: >
+      A single user action generates a trace that follows the request from
+      browser through API server to database and back. Every component tags
+      its work with the same trace ID. Reconstructing any workflow is a
+      filter by trace ID, not a timestamp correlation exercise.
+    links:
+      - {target: fffb29a3e0a6, rel: refines}
+      - {target: 2d45f6788919, rel: refines}
+      - {target: 5ead7b43c21d, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-005
+    hash: "123eab1a292b"
+    name: deployment-is-a-build-not-a-ceremony
+    type: principle
+    description: >
+      Deploying a new version means building the code, stopping the old
+      process, starting the new process, and verifying health. These steps
+      are scripted, idempotent, and non-interactive. No SSH, no manual file
+      copy, no memorized command sequences.
+    links:
+      - {target: 5a00e2a1d857, rel: mitigates}
+      - {target: 26419e6cc6ce, rel: refines}
+      - {target: bd28ad6f0308, rel: refines}
+      - {target: f5ee26f6798a, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-006
+    hash: "9f4aeb9be1e8"
+    name: releases-from-tagged-main-commits-only
+    type: principle
+    description: >
+      A release begins from a commit already on main, not from an arbitrary
+      branch tip. That commit must have all required CI checks green before
+      receiving a release tag. Tag format is semver plus six-digit PR hash
+      for traceability. A tag on an unqualified commit is a process violation.
+    links:
+      - {target: f7384a169540, rel: mitigates}
+      - {target: cb07dc6a3f20, rel: refines}
+      - {target: 765231ae4d6c, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-007
+    hash: "7c658e789c07"
+    name: schema-upgrades-forward-compatible
+    type: principle
+    description: >
+      Database migrations and application rollout do not become visible to
+      every running component at the same instant. New application code must
+      be compatible with both the previous and new schema during the rollout
+      window. A thorough schema-upgrade compatibility check using plausible
+      fixtures is required before a release may proceed.
+    links:
+      - {target: 4913a0616eea, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-P-008
+    hash: "4913a0616eea"
+    name: rollouts-are-ordered-and-health-gated
+    type: principle
+    description: >
+      Once a release is built and published, rollout follows a strict
+      sequence: database migrations, frontend rollout, worker rollout, static
+      web rollout last. Each phase must prove health before the next begins.
+      A failed phase triggers an eager automatic rollback of that phase's
+      workloads to the previous image revision before entering a blocked
+      state for human review. Rollback is the default response to any health
+      check failure — the system must never remain in a degraded state while
+      waiting for human intervention.
+    links:
+      - {target: 7c658e789c07, rel: depends_on}
+      - {target: b08792cb7a13, rel: mitigates}
+      - {target: 98a04633e13c, rel: refines}
+      - {target: 1a2b3c4d5e6f, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-010
+    hash: "b2c3d4e5f6a1"
+    name: migrations-are-forward-only
+    type: principle
+    description: >
+      Database migrations are irreversible operations. Once a migration is
+      applied to an environment, the schema cannot be automatically reverted by
+      a container rollback. Rolling back the application image to a prior
+      version is only safe if the prior code was proven compatible with the new
+      schema before promotion (see DEPLOY-P-007). Destructive down-migrations
+      that discard data are never run as part of an automated rollback.
+      If a migration makes rollback impossible, the release must be corrected
+      forward with a new migration, not reverted.
+    links:
+      - {target: a1b2c3d4e5f6, rel: mitigates}
+      - {target: 7c658e789c07, rel: refines}
+      - {target: 4913a0616eea, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-011
+    hash: "c3d4e5f6a1b2"
+    name: three-environment-promotion-model
+    type: principle
+    description: >
+      Every project operates three runtime environments with identical container
+      topology but distinct promotion semantics. Demo receives automated
+      rollouts from active development branches and exists to verify that
+      current work runs end-to-end. Stage receives automated rollouts from
+      release-candidate tags and exists to validate the upcoming production
+      release under realistic conditions. Production is the stable operating
+      environment and receives only human-triggered rollouts. The codebase and
+      container images are identical across environments; only secrets,
+      configuration, and the rollout trigger differ.
+    links:
+      - {target: e6f7a2b3c4d5, rel: refines}
+      - {target: d4e5f6a1b2c3, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-012
+    hash: "d4e5f6a1b2c3"
+    name: production-deployments-are-human-triggered
+    type: principle
+    description: >
+      No automated system may initiate a rollout to the production environment.
+      A production deployment is triggered exclusively by a human operator
+      issuing an authenticated request — typically a configuration patch or
+      workload spec update — to the orchestration service's control API. CI
+      pipelines may prepare and validate release artifacts but must never
+      directly apply them to production. This preserves a mandatory human
+      decision point between a verified artifact and a live production change.
+    links:
+      - {target: 5a00e2a1d857, rel: refines}
+      - {target: c3d4e5f6a1b2, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-013
+    hash: "e5f6a1b2c3d4"
+    name: orchestration-service-has-kms
+    type: principle
+    description: >
+      The container orchestration service must operate its own key management
+      system (KMS), used to encrypt secrets at rest within the cluster. The KMS
+      root key is derived from a mnemonic word list that the administrator holds
+      offline — one per environment (demo, stage, prod). This mnemonic is the
+      recovery material for the environment; it is never stored on the host.
+      During initial cluster bootstrapping (the one permitted SSH step), the
+      administrator derives the root key from the mnemonic and provisions it
+      into the k3s EncryptionConfiguration. All Kubernetes Secrets are encrypted
+      at rest using this key. All subsequent operations use the orchestration
+      control API — no SSH access is required or permitted. The private container
+      image registry credential (organization key) is also provisioned as a
+      Kubernetes Secret at this initialization step. The reference orchestration
+      service is k3s — a lightweight, CNCF-certified Kubernetes distribution
+      that ships as a single binary with built-in containerd, networking, and
+      storage.
+    links:
+      - {target: 584e64645b8f, rel: refines}
+      - {target: bd28ad6f0308, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-014
+    hash: "f6a1b2c3d4e5"
+    name: rollbacks-are-environment-isolated
+    type: principle
+    description: >
+      A rollback in one environment has no effect on any other environment.
+      Each environment — demo, stage, production — maintains its own workload
+      state independently. Rolling back stage to a prior image version does not
+      alter the production deployment, and vice versa. The orchestration service
+      enforces this through environment-scoped namespaces or equivalent
+      isolation primitives. This also means the rollback target (prior image
+      digest) must be available in the registry for that specific environment;
+      purging old images from the registry removes the rollback option.
+    links:
+      - {target: b08792cb7a13, rel: mitigates}
+      - {target: 4913a0616eea, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-015
+    hash: "1a2b3c4d5e6f"
+    name: health-check-taxonomy
+    type: principle
+    description: >
+      Health checks are not a single concept. Every deployed workload must
+      implement four distinct health check types, each serving a different
+      consumer and failure mode:
+
+      Liveness — is the process alive? A binary signal consumed by the
+      orchestrator. Failure means the process has crashed or deadlocked and
+      must be restarted. Implementation: a lightweight endpoint or signal
+      that confirms the process event loop is responsive. Must not check
+      dependencies.
+
+      Readiness — can the process accept traffic? Consumed by the
+      orchestrator's load balancer to include or exclude the workload from
+      the service mesh. Failure removes the workload from traffic rotation
+      but does not restart it. Implementation: confirms the process has
+      completed startup, loaded configuration, and is prepared to serve.
+
+      Deep health — are all transitive dependencies healthy? Consumed by
+      monitoring and by the rollout health gate. Checks database
+      connectivity, queue connectivity, external API reachability, and any
+      other dependency the workload requires to function correctly. Failure
+      during a rollout triggers eager rollback.
+
+      Smoke — does a representative user flow succeed end-to-end? Consumed
+      by the rollout verification step after all workloads in a phase are
+      updated. Exercises real application behavior: HTTP request → server
+      handler → database query → response. Failure triggers eager rollback.
+    links:
+      - {target: 4913a0616eea, rel: refines}
+      - {target: 98a04633e13c, rel: refines}
+      - {target: d65e70a5425b, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-016
+    hash: "2b3c4d5e6f1a"
+    name: eager-rollback-is-default
+    type: principle
+    description: >
+      When any health check fails during a rollout phase, the orchestration
+      service must immediately and automatically restore the previous workload
+      revision for that phase. This happens before any human is notified, before
+      any blocked state is entered, and without waiting for operator approval.
+      The rollback is the first response, not the last resort. After the
+      rollback completes and health is restored, the system enters a blocked
+      state for human investigation. If the rollback itself fails (previous
+      revision also unhealthy), the system enters a critical blocked state
+      requiring immediate human intervention. Eager rollback protects
+      production availability at the cost of rolling back changes that might
+      have eventually stabilized — this trade-off is deliberate.
+    links:
+      - {target: 4913a0616eea, rel: refines}
+      - {target: b08792cb7a13, rel: mitigates}
+      - {target: 1a2b3c4d5e6f, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-017
+    hash: "3c4d5e6f1a2b"
+    name: disaster-recovery-snapshot-at-release
+    type: principle
+    description: >
+      Before any migration is applied to any environment, a point-in-time
+      snapshot of the database is taken and labeled with the release tag and
+      environment name. This snapshot is independent of the managed database
+      service's continuous backup — it is an explicit, labeled recovery point
+      that the team can restore to without navigating a managed service's
+      point-in-time recovery interface under pressure. Belt and suspenders:
+      the managed service backup covers continuous recovery, the explicit
+      snapshot covers discrete release recovery. The snapshot is verified
+      accessible before the migration proceeds.
+    links:
+      - {target: b2c3d4e5f6a1, rel: refines}
+      - {target: a1b2c3d4e5f6, rel: mitigates}
+      - {target: b08792cb7a13, rel: mitigates}
+    deprecated: false
+
+  - number: DEPLOY-P-018
+    hash: "4d5e6f1a2b3c"
+    name: image-signing-and-verification
+    type: principle
+    description: >
+      Every container image published by the release pipeline must be
+      cryptographically signed at build time. The orchestration service must
+      enforce a policy that only images with a valid signature from the
+      project's signing key may be admitted to run. An unsigned or
+      tampered image is rejected before it starts, regardless of whether
+      its digest matches a known value. This protects against a compromised
+      registry serving malicious images and against supply chain attacks
+      that substitute images between build and deploy. The signing key is
+      stored in CI secrets and the verification key is provisioned into the
+      orchestration service at initialization alongside the KMS root key
+      and registry credential.
+    links:
+      - {target: e5f6a1b2c3d4, rel: refines}
+      - {target: e0bfaa2d54c3, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-P-009
+    hash: "584e64645b8f"
+    name: secrets-are-runtime-configuration
+    type: principle
+    description: >
+      Secrets are stored as Kubernetes Secrets, encrypted at rest by the cluster
+      KMS, and injected into containers as environment variables at pod startup.
+      Secrets are scoped per workload — each deployment mounts only the Secret
+      object it needs. Database containers receive encryption keys but not API
+      keys; API containers receive API keys and connection strings but not
+      encryption master keys. No .env files are used in any environment. Test
+      credentials in CI use inline environment variables in workflow definitions.
+    links:
+      - {target: cccd2dd3451e, rel: mitigates}
+      - {target: 3f7f5f443afe, rel: refines}
+      - {target: 5286b4639f51, rel: refines}
+    deprecated: false
+
+  # ---------------------------------------------------------------------------
+  # Design Patterns
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-D-001
+    hash: "cebbff0e956c"
+    name: immutable-distroless-container-builds
+    type: design_pattern
+    description: >
+      Every deployment, including local dev previews, starts by building an
+      immutable container image encapsulating the exact runtime, dependencies,
+      and compiled assets. Production artifacts use multi-stage builds copying
+      into a distroless base image with no shell or OS utilities. Trade-off:
+      slower than hot-reloading but guarantees mechanical reproducibility and
+      zero-trust security.
+    problem: |
+      Applications behave differently in development, test, and production environments due to
+      host-level drift, installed dependencies, or missing system libraries. Furthermore, standard
+      container images contain shells and package managers that drastically expand the attack
+      surface.
+    solution: |
+      Every deployment — including local development previews — starts by building an immutable
+      container image. The container encapsulates the exact runtime, dependencies, and compiled
+      application assets. For the final production artifact, we implement a multi-stage build that
+      copies the compiled application into a "distroless" base image. This final image contains
+      only the application and its runtime, omitting the shell and OS utilities entirely.
+    tradeoffs: |
+      Building a container image for every local change is slower than a hot-reloading development
+      server, and debugging distroless images requires more structured logging since you cannot exec
+      into a shell. This is a deliberate trade-off: human convenience is discarded in favor of
+      perfect mechanical reproducibility and zero-trust security.
+    links:
+      - {target: f4deae0ff5d3, rel: refines}
+      - {target: 9d33a458e91a, rel: refines}
+      - {target: 89b9897e5bfc, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-D-002
+    hash: "4b71998780a6"
+    name: dual-log-architecture
+    type: design_pattern
+    description: >
+      Maintain two log outputs: a chronological log with every event in full
+      detail, and a unique error log with deduplicated error categories
+      including count and most recent timestamp. The agent reads the unique
+      log first to understand the error landscape, then consults the
+      chronological log for specifics. Trade-off: two files to manage but
+      high diagnostic benefit.
+    problem: |
+      A chronological log file is complete but overwhelming. An agent diagnosing an issue must read
+      potentially thousands of lines, most of which are duplicates of the same error. The
+      signal-to-noise ratio makes log-based diagnosis expensive in tokens and time.
+    solution: |
+      Maintain two log outputs: a chronological log (every event, in order, with full detail — the
+      complete record) and a unique error log (a deduplicated set of error categories currently
+      affecting the system, each appearing once with a count and the most recent timestamp). The
+      agent reads the unique log first to understand the error landscape, then consults the
+      chronological log for specific trace IDs or time ranges.
+    tradeoffs: |
+      Two log files to manage and rotate. The unique log requires deduplication logic (hashing error
+      signatures). The implementation cost is low; the diagnostic benefit is high.
+    links:
+      - {target: 41353c4858b0, rel: refines}
+      - {target: ad236a691d87, rel: mitigates}
+      - {target: a9c435b04f11, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-D-003
+    hash: "aef55d669b45"
+    name: browser-to-server-error-forwarding
+    type: design_pattern
+    description: >
+      The browser catches all unhandled errors and forwards them to a server
+      endpoint via HTTP POST, including error message, stack trace, user
+      context, and trace ID. The server logs browser errors alongside its
+      own, creating a unified health view. The endpoint must be rate-limited
+      and payload-size-limited. Errors during network outage are acceptable
+      losses since the outage itself is detectable.
+    problem: |
+      Errors that occur in the browser — unhandled promise rejections, React error boundaries, DOM
+      exceptions — are invisible to the server. The server logs show a healthy system while users
+      experience failures.
+    solution: |
+      The browser application catches all unhandled errors and forwards them to a server endpoint
+      via HTTP POST. The error payload includes the error message, stack trace, user context, and
+      the current trace ID. The server logs these browser errors alongside its own errors, creating
+      a unified view of system health.
+    tradeoffs: |
+      Adds network traffic for error reporting. Errors that occur when the network is down cannot
+      be forwarded (acceptable — the network being down is itself a detectable condition). The error
+      endpoint must be protected against abuse (rate limiting, payload size limits).
+    links:
+      - {target: c4bfd726ae7b, rel: mitigates}
+      - {target: 2a36bd9bbcb2, rel: refines}
+      - {target: 09455ddf1dff, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-D-004
+    hash: "fffb29a3e0a6"
+    name: trace-id-propagation
+    type: design_pattern
+    description: >
+      Generate a unique trace ID at the start of every user-initiated action.
+      Propagate it through every layer: browser, API request header, server
+      handler, database query tag, response header, back to browser. Every
+      log entry includes the trace ID. Middleware is implemented once in the
+      server framework and once in the browser HTTP client so individual
+      handlers need not manage it.
+    problem: |
+      A user reports "it did not work." The developer must reconstruct what happened: which API
+      calls were made, what the server did, what the database returned. Without a shared identifier
+      across all components, reconstruction requires timestamp correlation across multiple log files
+      — which is slow, imprecise, and sometimes impossible.
+    solution: |
+      Generate a unique trace ID at the start of every user-initiated action (page load, form
+      submission, API call). Pass this ID through every layer: browser → API request header →
+      server handler → database query tag → response header → browser. Every log entry includes the
+      trace ID. Reconstructing a workflow is a single filter operation.
+    tradeoffs: |
+      Requires discipline to propagate the trace ID through every layer. Missing propagation in one
+      component breaks the chain. Mitigation: the trace ID middleware is implemented once in the
+      server framework and once in the browser HTTP client — individual handlers do not need to
+      manage it.
+    links:
+      - {target: 55b6ac786a19, rel: refines}
+      - {target: 2d45f6788919, rel: refines}
+      - {target: 5ead7b43c21d, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-D-006
+    hash: "5e6f1a2b3c4d"
+    name: deployment-audit-record
+    type: design_pattern
+    description: >
+      Every deployment event — rollout, rollback, migration, abort — produces
+      a structured audit record. The minimum record contains: timestamp,
+      operator identity (human or CI service account), release tag, target
+      environment, phase, outcome (success/failure/rollback), duration, and
+      image digest. Trade-off: extra write per deployment event, trivial
+      cost for complete accountability.
+    problem: |
+      Enterprise compliance requires answering: who deployed what version, to
+      which environment, at what time, and what was the outcome. Application
+      logs capture runtime behavior but not the deployment act itself.
+    solution: |
+      Every deployment event writes a structured JSON record to an append-only
+      file at a well-known path (deployments.jsonl). This file is the
+      always-available source of truth — it exists from the first deployment
+      and does not depend on the application database. When the application
+      database exists, the record is dual-written to a deployment_audit table
+      for query convenience. The file is authoritative; the table is a
+      materialized view.
+    tradeoffs: |
+      Early-stage projects have no database to query audit records from. The
+      file-based approach works from day one and requires no infrastructure.
+      The database dual-write is added when the DATA blueprint is implemented,
+      not before.
+    links:
+      - {target: 4913a0616eea, rel: refines}
+      - {target: 123eab1a292b, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-D-005
+    hash: "a2b3c4d5e6f7"
+    name: automated-ci-rollouts-to-non-production
+    type: design_pattern
+    description: >
+      CI workflows may automatically trigger rollouts to demo and stage based
+      on branch name or tag name patterns. Demo receives a rollout on push to
+      any active development branch. Stage receives a rollout when a
+      release-candidate tag is pushed. Production never receives an automated
+      rollout — the CI workflow must explicitly exclude production as a valid
+      target. This pattern provides continuous environment feedback without
+      removing the mandatory human gate before production. Trade-off: demo
+      and stage are noisier and may be temporarily broken; this is by design.
+    problem: |
+      Development feedback loops require that recent code is visible in a running
+      environment quickly. Requiring a manual deployment step for every branch
+      push creates friction and delays defect discovery.
+    solution: |
+      Define two CI trigger patterns: one that deploys to demo on any development
+      branch push, and one that deploys to stage on release-candidate tag push.
+      Both use the same CI pipeline as production but target different environment
+      namespaces. The CI credential for these workflows is scoped to demo and
+      stage namespaces only — it cannot reach the production namespace.
+    tradeoffs: |
+      Demo may be deployed to frequently and may be unstable; this is acceptable
+      because demo exists for verification, not reliability. Stage is more
+      controlled but can still be automatically overwritten. Production is
+      completely insulated from automated changes.
+    links:
+      - {target: c3d4e5f6a1b2, rel: refines}
+      - {target: d4e5f6a1b2c3, rel: refines}
+      - {target: 765231ae4d6c, rel: refines}
+    deprecated: false
+
+  # ---------------------------------------------------------------------------
+  # Architectures
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-A-001
+    hash: "89b9897e5bfc"
+    name: single-app-container-on-host
+    type: architecture
+    description: >
+      A single immutable app container runs on the development host via
+      Docker or Podman, serving both API routes and built static assets. Logs
+      go to stdout/stderr. Secrets are injected from k8s Secrets at pod
+      start. Appropriate for local dev and preview environments. Slightly
+      slower iteration but guarantees production-identical packaging.
+    diagram: |
+      ┌─────────────────────────────────────────────┐
+      │  Development Host                           │
+      │                                             │
+      │  ┌───────────────────────────────────────┐  │
+      │  │  Container Engine (Docker/Podman)     │  │
+      │  │                                       │  │
+      │  │  ┌─────────────────────────────────┐  │  │
+      │  │  │  App Container (Immutable)      │  │  │
+      │  │  │  - Serves API routes            │  │  │
+      │  │  │  - Serves static assets (built) │  │  │
+      │  │  │  - Writes chronological log     │  │  │
+      │  │  │  - Writes unique error log      │  │  │
+      │  │  └─────────────────────────────────┘  │  │
+      │  └───────────────────────────────────────┘  │
+      │                                             │
+      │  Secrets ← k8s Secrets (env vars at pod start) │
+      │  Container Logs ← stdout/stderr             │
+      └─────────────────────────────────────────────┘
+    when_appropriate: |
+      Local development and preview environments. The runtime serves both API and static assets
+      from a background container. No vite dev, no hot reloading on the host.
+    tradeoffs: |
+      Slightly slower iteration loop compared to traditional local dev, but guarantees the code
+      running is identical to production packaging.
+    links:
+      - {target: f4deae0ff5d3, rel: refines}
+      - {target: cebbff0e956c, rel: refines}
+      - {target: 9d33a458e91a, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-A-002
+    hash: "e889c6c25ede"
+    name: multi-environment-container-orchestration
+    type: architecture
+    description: >
+      A container orchestration service manages three isolated environments
+      (demo, stage, production), each with its own namespace or equivalent
+      isolation boundary, its own secrets, and its own workload state. The
+      orchestration service provides: TLS-terminating ingress, workload
+      replication, automatic restart on crash, health-gated rolling updates,
+      per-environment rollback, and a KMS for secrets at rest. The specific
+      orchestration vendor (or DIY equivalent) is an implementation choice;
+      the required capabilities are vendor-independent. See implementation
+      docs for vendor-specific configuration. Trade-off: orchestration service
+      operational overhead, justified by declarative APIs that agents can
+      operate without SSH access after initialization.
+    diagram: |
+      ┌──────────────────────────────────────────────────────────┐
+      │  Container Orchestration Service                         │
+      │                                                          │
+      │  ┌─────────────┐  ┌─────────────┐  ┌────────────────┐  │
+      │  │  demo ns    │  │  stage ns   │  │  production ns │  │
+      │  │  auto-roll  │  │  auto-roll  │  │  human-trigger │  │
+      │  └─────────────┘  └─────────────┘  └────────────────┘  │
+      │                                                          │
+      │  ┌──────────────────────────────────────────────────┐   │
+      │  │  Ingress (TLS + routing)                         │   │
+      │  └──────────────────────────────────────────────────┘   │
+      │                                                          │
+      │  KMS (seeded at init via SSH)                           │
+      │  Registry credential (org key, provisioned at init)     │
+      └──────────────────────────────────────────────────────────┘
+    when_appropriate: |
+      Any multi-environment deployment. Each namespace is independently
+      rollable and rollback-capable. The orchestration service is the only
+      system that may apply workload changes; agents and CI interact with it
+      exclusively through its control API.
+    tradeoffs: |
+      Orchestration service adds operational overhead. The initialization
+      step requires SSH to seed the KMS and provision registry credentials.
+      All subsequent operations are API-driven and require no SSH access.
+    links:
+      - {target: f4deae0ff5d3, rel: refines}
+      - {target: 765231ae4d6c, rel: refines}
+      - {target: c3d4e5f6a1b2, rel: refines}
+      - {target: e5f6a1b2c3d4, rel: refines}
+      - {target: f6a1b2c3d4e5, rel: refines}
+    deprecated: false
+
+  - number: DEPLOY-A-003
+    hash: "765231ae4d6c"
+    name: ci-driven-container-deploy-pipeline
+    type: architecture
+    description: >
+      CI builds the app bundle, layers it onto a base image, pushes to the
+      container registry with an immutable digest, then patches the workload
+      spec in the target environment via the orchestration service's control
+      API (authenticated, narrow-scoped credentials). The orchestration service
+      waits for the rollout to reach healthy status; on failure it automatically
+      restores the previous workload revision. CI may trigger automated rollouts
+      to demo (on development branch push) and stage (on release-candidate tag)
+      but must never trigger a production rollout. Production rollouts are
+      triggered exclusively by a human operator patching the production workload
+      spec directly. CI credentials are scoped to patch workload configuration
+      only; they cannot create, delete, or modify environment namespaces.
+    diagram: |
+      ┌─────────────────────────────────────────────────────────┐
+      │  CI Platform                                            │
+      │                                                         │
+      │  Branch push / RC tag                                   │
+      │       │                                                 │
+      │       ▼                                                 │
+      │  All test workflows pass                                │
+      │       │                                                 │
+      │       ▼                                                 │
+      │  Deploy workflow (demo or stage only):                  │
+      │    1. Build app bundle                                  │
+      │    2. Layer bundle onto base image                      │
+      │    3. Push image → receive immutable digest             │
+      │    4. Patch workload spec with new image digest         │
+      │       via orchestration control API                     │
+      │    5. Poll rollout health endpoint (timeout)            │
+      │    6. On failure: restore previous revision via API     │
+      │       │                                                 │
+      │       ▼                                                 │
+      │  Deployment complete (demo or stage)                    │
+      │                                                         │
+      │  Production: human operator patches workload spec       │
+      │  directly via authenticated control API call            │
+      └─────────────────────────────────────────────────────────┘
+    when_appropriate: |
+      All non-production deployments are CI-driven. Production deployments
+      follow the same technical pipeline but require a human to issue the
+      control API patch. Every container type (frontend, worker, static-web)
+      follows this pipeline. No SSH access to nodes is required after init.
+    tradeoffs: |
+      Requires an orchestration service with a narrow-scoped service account
+      for CI. The restore-previous-revision step is automatic on failure.
+      Previous image digests must be retained in the registry for the restore
+      to succeed; image purge policies must account for this.
+    links:
+      - {target: 9f4aeb9be1e8, rel: refines}
+      - {target: 4913a0616eea, rel: refines}
+      - {target: f7384a169540, rel: mitigates}
+      - {target: cb07dc6a3f20, rel: refines}
+      - {target: e65b8926fb2d, rel: refines}
+      - {target: e0bfaa2d54c3, rel: refines}
+      - {target: d4e5f6a1b2c3, rel: refines}
+      - {target: c3d4e5f6a1b2, rel: refines}
+    deprecated: false
+
+  # ---------------------------------------------------------------------------
+  # Checklist
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-C-001
+    hash: "3a7b8dab73da"
+    name: dockerfile-created
+    type: checklist
+    description: >
+      Dockerfile or container manifest created and application starts via
+      container runtime.
+    links:
+      - {target: f4deae0ff5d3, rel: verifies}
+      - {target: cebbff0e956c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-002
+    hash: "b9d1a6dddde4"
+    name: orchestrator-auto-restart
+    type: checklist
+    description: >
+      Container orchestrator (K8s or local Docker) restarts containers
+      automatically after crash.
+    links:
+      - {target: 95e47760b8bd, rel: verifies}
+      - {target: f4deae0ff5d3, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-003
+    hash: "3f7f5f443afe"
+    name: secrets-injected-securely
+    type: checklist
+    description: >
+      Secrets injected via scoped k8s Secrets (not baked into image, no .env
+      files). Each workload mounts only its own Secret object.
+    links:
+      - {target: cccd2dd3451e, rel: verifies}
+      - {target: 584e64645b8f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-004
+    hash: "5286b4639f51"
+    name: test-env-committed
+    type: checklist
+    description: >
+      No .env files used; all secrets managed via scoped k8s Secrets encrypted
+      at rest by KMS. Test credentials in CI passed as inline environment
+      variables.
+    links:
+      - {target: 584e64645b8f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-005
+    hash: "681125756d40"
+    name: stdout-stderr-captured
+    type: checklist
+    description: >
+      Stdout/stderr captured by container engine; logs accessible via
+      standard container tools.
+    links:
+      - {target: 41353c4858b0, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-006
+    hash: "969f83c41da9"
+    name: structured-log-entries
+    type: checklist
+    description: >
+      Application process writes structured log entries to standard
+      output/error.
+    links:
+      - {target: 41353c4858b0, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-007
+    hash: "2d45f6788919"
+    name: trace-id-propagated
+    type: checklist
+    description: >
+      Trace ID generated and propagated from browser through server to
+      response header.
+    links:
+      - {target: 55b6ac786a19, rel: verifies}
+      - {target: fffb29a3e0a6, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-008
+    hash: "2a36bd9bbcb2"
+    name: browser-error-forwarding-implemented
+    type: checklist
+    description: >
+      Browser error forwarding implemented; unhandled browser errors appear
+      in server logs.
+    links:
+      - {target: c4bfd726ae7b, rel: verifies}
+      - {target: aef55d669b45, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-009
+    hash: "98a04633e13c"
+    name: health-endpoint-returns-200
+    type: checklist
+    description: >
+      Health endpoint (/health) returns 200 when the application is running.
+    links:
+      - {target: 330716dd7d97, rel: verifies}
+      - {target: 4913a0616eea, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-010
+    hash: "a9c435b04f11"
+    name: uniques-log-implemented
+    type: checklist
+    description: >
+      uniques.log implemented with deduplicated error categories and counts.
+    links:
+      - {target: ad236a691d87, rel: verifies}
+      - {target: 4b71998780a6, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-011
+    hash: "1b33ad831887"
+    name: log-rotation-configured
+    type: checklist
+    description: >
+      Log rotation configured with 14-day retention verified.
+    links:
+      - {target: 6e3e5055d803, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-012
+    hash: "26419e6cc6ce"
+    name: deploy-script-idempotent
+    type: checklist
+    description: >
+      Deploy script exists and is idempotent (running twice has no side
+      effects).
+    links:
+      - {target: 123eab1a292b, rel: verifies}
+      - {target: 5a00e2a1d857, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-013
+    hash: "cb07dc6a3f20"
+    name: ci-deploy-workflow-gated
+    type: checklist
+    description: >
+      CI deploy workflow created; deploys only after all test suites pass.
+    links:
+      - {target: f7384a169540, rel: verifies}
+      - {target: 9f4aeb9be1e8, rel: verifies}
+      - {target: 765231ae4d6c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-014
+    hash: "30358b6f4470"
+    name: rollback-procedure-tested
+    type: checklist
+    description: >
+      Rollback procedure tested: revert to previous commit, restart, and
+      verify health.
+    links:
+      - {target: b08792cb7a13, rel: verifies}
+      - {target: 4913a0616eea, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-015
+    hash: "e65b8926fb2d"
+    name: ci-service-account-kubeconfig
+    type: checklist
+    description: >
+      CI service account kubeconfig (KUBE_CONFIG) stored in GitHub Secrets,
+      generated via scripts/setup-ci-deployer.sh.
+    links:
+      - {target: 765231ae4d6c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-016
+    hash: "e0bfaa2d54c3"
+    name: immutable-image-digest-verified
+    type: checklist
+    description: >
+      Deployment verified to use immutable image digest (not mutable tag)
+      in kubectl get deployment output.
+    links:
+      - {target: 765231ae4d6c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-017
+    hash: "a4907601abd3"
+    name: disk-usage-monitoring
+    type: checklist
+    description: >
+      Disk usage monitoring configured; alert when log volume exceeds
+      threshold.
+    links:
+      - {target: 6e3e5055d803, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-018
+    hash: "ab5db7cd8374"
+    name: env-vars-documented
+    type: checklist
+    description: >
+      All environment variables documented in docs/ with descriptions (not
+      values).
+    links:
+      - {target: 584e64645b8f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-019
+    hash: "bd28ad6f0308"
+    name: zero-manual-ssh-steps-post-init
+    type: checklist
+    description: >
+      Zero manual SSH steps required for any deploy or operational action after
+      initial cluster setup. SSH is permitted only during the one-time
+      orchestration initialization step (KMS seeding and registry credential
+      provisioning). All subsequent operations use the orchestration control API.
+    links:
+      - {target: 123eab1a292b, rel: verifies}
+      - {target: 5a00e2a1d857, rel: verifies}
+      - {target: f5ee26f6798a, rel: verifies}
+      - {target: e5f6a1b2c3d4, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-020
+    hash: "d65e70a5425b"
+    name: health-check-includes-dependencies
+    type: checklist
+    description: >
+      Health check includes dependency status (database, external APIs
+      reachable).
+    links:
+      - {target: 330716dd7d97, rel: verifies}
+      - {target: 98a04633e13c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-021
+    hash: "5ead7b43c21d"
+    name: trace-id-search-works
+    type: checklist
+    description: >
+      Given a trace ID, all related log entries can be retrieved in one
+      query.
+    links:
+      - {target: 55b6ac786a19, rel: verifies}
+      - {target: fffb29a3e0a6, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-022
+    hash: "4905666fc7a6"
+    name: browser-error-rate-tracked
+    type: checklist
+    description: >
+      Browser error rate tracked; anomalous spikes trigger alerts.
+    links:
+      - {target: c4bfd726ae7b, rel: verifies}
+      - {target: aef55d669b45, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-023
+    hash: "d365a1009d3f"
+    name: backup-strategy-exists
+    type: checklist
+    description: >
+      Backup strategy for application data exists (database dumps, uploaded
+      files).
+    links:
+      - {target: b08792cb7a13, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-024
+    hash: "e9edcb824436"
+    name: disaster-recovery-tested
+    type: checklist
+    description: >
+      Disaster recovery tested: fresh host provisioned and application
+      deployed from scratch.
+    links:
+      - {target: b08792cb7a13, rel: verifies}
+      - {target: d365a1009d3f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-025
+    hash: "b3c4d5e6f7a2"
+    name: orchestration-kms-initialized
+    type: checklist
+    description: >
+      Orchestration service KMS initialized and root key seeded during cluster
+      bootstrapping via SSH. Subsequent secret operations use the control API only.
+    links:
+      - {target: e5f6a1b2c3d4, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-026
+    hash: "c4d5e6f7a2b3"
+    name: registry-auth-key-provisioned-at-init
+    type: checklist
+    description: >
+      GitHub organization credential for pulling private container images
+      provisioned into the orchestration service during initialization. Workload
+      definitions do not embed registry credentials.
+    links:
+      - {target: e5f6a1b2c3d4, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-027
+    hash: "d5e6f7a2b3c4"
+    name: prod-deployment-requires-human-action
+    type: checklist
+    description: >
+      Verified that no CI workflow or automated system can trigger a production
+      rollout. Production deployment requires a human to issue an authenticated
+      patch to the orchestration control API. CI credentials are scoped to
+      demo and stage namespaces only.
+    links:
+      - {target: d4e5f6a1b2c3, rel: verifies}
+      - {target: a2b3c4d5e6f7, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-028
+    hash: "e6f7a2b3c4d5"
+    name: rollback-verified-environment-isolated
+    type: checklist
+    description: >
+      Verified that rolling back stage does not alter production, and vice
+      versa. Each environment's workload state is independently managed by
+      the orchestration service.
+    links:
+      - {target: f6a1b2c3d4e5, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-029
+    hash: "b1d2e3f4a5c6"
+    name: migration-rollback-strategy-documented
+    type: checklist
+    description: >
+      Migration rollback strategy documented for each migration: confirm
+      prior application code is forward-compatible with the new schema, or
+      document that the migration is irreversible and a fix-forward migration
+      is required on failure.
+    links:
+      - {target: b2c3d4e5f6a1, rel: verifies}
+      - {target: a1b2c3d4e5f6, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-030
+    hash: "f1a2b3c4d5e6"
+    name: liveness-check-configured
+    type: checklist
+    description: >
+      Every workload has a liveness check configured in the orchestration
+      service. The check confirms the process event loop is responsive. It
+      does not check dependencies.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-031
+    hash: "a3b4c5d6e7f8"
+    name: readiness-check-configured
+    type: checklist
+    description: >
+      Every workload has a readiness check configured. Failure removes the
+      workload from traffic rotation without restarting it. Confirms startup
+      is complete and the process can serve requests.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-032
+    hash: "b4c5d6e7f8a9"
+    name: deep-health-check-implemented
+    type: checklist
+    description: >
+      A deep health endpoint exists that verifies all transitive dependencies
+      (database, queues, external APIs). Used by rollout health gates and
+      monitoring. Failure during rollout triggers eager rollback.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: verifies}
+      - {target: d65e70a5425b, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-033
+    hash: "c5d6e7f8a9b0"
+    name: smoke-test-suite-exists
+    type: checklist
+    description: >
+      A smoke test suite exercises representative user flows end-to-end
+      (HTTP request → handler → database → response). Run after each rollout
+      phase. Failure triggers eager rollback.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: verifies}
+      - {target: 2b3c4d5e6f1a, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-034
+    hash: "d6e7f8a9b0c1"
+    name: dr-snapshot-taken-before-migration
+    type: checklist
+    description: >
+      Verified that a labeled database snapshot is taken before every
+      migration, in every environment. Snapshot is labeled with release tag
+      and environment name. Snapshot accessibility is confirmed before the
+      migration proceeds.
+    links:
+      - {target: 3c4d5e6f1a2b, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-035
+    hash: "e7f8a9b0c1d2"
+    name: deployment-audit-record-written
+    type: checklist
+    description: >
+      Every deployment event writes a structured JSON record to
+      deployments.jsonl. When the application database exists, the record
+      is dual-written to deployment_audit table.
+    links:
+      - {target: 5e6f1a2b3c4d, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-036
+    hash: "f8a9b0c1d2e3"
+    name: image-signing-configured
+    type: checklist
+    description: >
+      Container images are cryptographically signed at build time. The
+      orchestration service enforces an admission policy rejecting unsigned
+      or tampered images. Signing key in CI secrets; verification key
+      provisioned at orchestration init.
+    links:
+      - {target: 4d5e6f1a2b3c, rel: verifies}
+    deprecated: false
+
+  - number: DEPLOY-C-037
+    hash: "a9b0c1d2e3f4"
+    name: eager-rollback-verified
+    type: checklist
+    description: >
+      Verified that a failed health check during rollout automatically
+      restores the previous workload revision before entering blocked state.
+      Tested by deliberately failing a health check in a non-production
+      environment and confirming automatic restoration.
+    links:
+      - {target: 2b3c4d5e6f1a, rel: verifies}
+    deprecated: false
+
+  # ---------------------------------------------------------------------------
+  # Antipatterns
+  # ---------------------------------------------------------------------------
+  - number: DEPLOY-X-001
+    hash: "2a5c123b62fc"
+    name: hybrid-environments
+    type: antipattern
+    description: >
+      Developing with hot-reloading dev servers (vite dev) locally but
+      deploying compiled containers in production. This guarantees
+      environment drift and works-on-my-machine bugs. Agents do not benefit
+      from hot-reloading. Build the container. Run the container.
+    links:
+      - {target: 9d33a458e91a, rel: contradicts}
+      - {target: cebbff0e956c, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-002
+    hash: "458559ea02e9"
+    name: process-babysitting
+    type: antipattern
+    description: >
+      Starting the application with bun run in a tmux pane and hoping it
+      does not crash. When it does, no one notices until a user reports
+      downtime. The container orchestrator eliminates this class of failure.
+    links:
+      - {target: 95e47760b8bd, rel: depends_on}
+      - {target: f4deae0ff5d3, rel: contradicts}
+      - {target: b9d1a6dddde4, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-003
+    hash: "e6680f845e61"
+    name: log-and-pray
+    type: antipattern
+    description: >
+      Writing logs to a file without configuring rotation, retention, or
+      aggregation. The volume fills up, the container crashes because it
+      cannot write. Rely on container stdout and cluster-level log
+      aggregation instead.
+    links:
+      - {target: 6e3e5055d803, rel: depends_on}
+      - {target: 1b33ad831887, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-004
+    hash: "b4adb303f4a9"
+    name: dashboard-only-observability
+    type: antipattern
+    description: >
+      Building a monitoring dashboard that a human must watch. An AI agent
+      cannot watch a dashboard. Observability for agent-operated systems
+      means structured logs and error summaries fetchable via CLI tools over
+      the cluster namespace.
+    links:
+      - {target: 41353c4858b0, rel: contradicts}
+      - {target: 330716dd7d97, rel: depends_on}
+    deprecated: false
+
+  - number: DEPLOY-X-005
+    hash: "f5ee26f6798a"
+    name: manual-deploy-rituals
+    type: antipattern
+    description: >
+      A deployment requiring a sequence of commands run from memory.
+      Scripted container builds and declarative Kubernetes applies are
+      repeatable, auditable, and agent-executable.
+    links:
+      - {target: 123eab1a292b, rel: contradicts}
+      - {target: 5a00e2a1d857, rel: depends_on}
+      - {target: bd28ad6f0308, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-006
+    hash: "09455ddf1dff"
+    name: silent-browser-errors
+    type: antipattern
+    description: >
+      Catching browser errors in console.error and assuming someone will see
+      them. No one sees browser console output in production. Errors not
+      forwarded to the server do not exist from the system's perspective.
+    links:
+      - {target: c4bfd726ae7b, rel: depends_on}
+      - {target: aef55d669b45, rel: contradicts}
+      - {target: 2a36bd9bbcb2, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-007
+    hash: "b0c1d2e3f4a5"
+    name: delayed-rollback
+    type: antipattern
+    description: >
+      Waiting for a human to decide whether to roll back after a health
+      check failure. Every second the system remains in a degraded state,
+      users are affected. The rollback must happen automatically and
+      immediately. The human investigates after availability is restored,
+      not before.
+    links:
+      - {target: 2b3c4d5e6f1a, rel: contradicts}
+      - {target: 4913a0616eea, rel: contradicts}
+    deprecated: false
+
+  - number: DEPLOY-X-008
+    hash: "c1d2e3f4a5b6"
+    name: single-health-check
+    type: antipattern
+    description: >
+      Implementing one /health endpoint that checks everything — process
+      alive, dependencies connected, disk space, load average. When the
+      database is temporarily unreachable, the orchestrator restarts the
+      process, which does not fix the database. When the process deadlocks,
+      the load balancer continues routing traffic because the dependency
+      check still passes from a cached connection. Separate liveness,
+      readiness, and deep health checks serve different consumers and
+      trigger different responses.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: contradicts}
+      - {target: 98a04633e13c, rel: contradicts}
+    deprecated: false

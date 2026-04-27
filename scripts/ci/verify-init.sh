@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# verify-init.sh — post-init verification for a calypso deployment.
+# verify-init.sh — post-init verification for a superfield deployment.
 #
 # Verifies that init-host.sh left the cluster and database in a correct state.
 # Runnable locally or from CI as a discrete step.
 #
 # Required env:
-#   NAMESPACE           — k8s namespace (e.g. calypso-demo)
+#   NAMESPACE           — k8s namespace (e.g. superfield-demo)
 #   DB_MODE             — "local" or "remote"
 #
 # Optional (local mode only):
@@ -22,11 +22,11 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:?NAMESPACE is required}"
 DB_MODE="${DB_MODE:-local}"
 
-# ── 1. calypso-db-init-secret must be deleted ─────────────────────────────────
+# ── 1. superfield-db-init-secret must be deleted ─────────────────────────────────
 
-echo "==> Verify: calypso-db-init-secret deleted"
-if kubectl get secret calypso-db-init-secret --namespace="${NAMESPACE}" 2>/dev/null; then
-  echo "ERROR: calypso-db-init-secret still exists!" >&2
+echo "==> Verify: superfield-db-init-secret deleted"
+if kubectl get secret superfield-db-init-secret --namespace="${NAMESPACE}" 2>/dev/null; then
+  echo "ERROR: superfield-db-init-secret still exists!" >&2
   exit 1
 fi
 echo "    OK — deleted."
@@ -34,7 +34,7 @@ echo "    OK — deleted."
 # ── 2. No admin credentials in long-lived secrets ─────────────────────────────
 
 echo "==> Verify: no ADMIN_DATABASE_URL in long-lived secrets"
-for secret in calypso-api-secrets calypso-db-secrets; do
+for secret in superfield-api-secrets superfield-db-secrets; do
   if kubectl get secret "${secret}" --namespace="${NAMESPACE}" 2>/dev/null; then
     keys=$(kubectl get secret "${secret}" --namespace="${NAMESPACE}" \
       -o jsonpath='{.data}' 2>/dev/null \
@@ -63,14 +63,14 @@ fi
 
 # ── 4. Extract connection URLs ────────────────────────────────────────────────
 
-echo "==> Extract connection URLs from calypso-api-secrets"
-DATABASE_URL=$(kubectl get secret calypso-api-secrets -n "${NAMESPACE}" \
+echo "==> Extract connection URLs from superfield-api-secrets"
+DATABASE_URL=$(kubectl get secret superfield-api-secrets -n "${NAMESPACE}" \
   -o jsonpath='{.data.DATABASE_URL}' | base64 -d)
-AUDIT_DATABASE_URL=$(kubectl get secret calypso-api-secrets -n "${NAMESPACE}" \
+AUDIT_DATABASE_URL=$(kubectl get secret superfield-api-secrets -n "${NAMESPACE}" \
   -o jsonpath='{.data.AUDIT_DATABASE_URL}' | base64 -d)
-ANALYTICS_DATABASE_URL=$(kubectl get secret calypso-api-secrets -n "${NAMESPACE}" \
+ANALYTICS_DATABASE_URL=$(kubectl get secret superfield-api-secrets -n "${NAMESPACE}" \
   -o jsonpath='{.data.ANALYTICS_DATABASE_URL}' | base64 -d)
-JWT_SECRET=$(kubectl get secret calypso-api-secrets -n "${NAMESPACE}" \
+JWT_SECRET=$(kubectl get secret superfield-api-secrets -n "${NAMESPACE}" \
   -o jsonpath='{.data.JWT_SECRET}' | base64 -d)
 export DATABASE_URL AUDIT_DATABASE_URL ANALYTICS_DATABASE_URL JWT_SECRET
 echo "    DATABASE_URL=${DATABASE_URL//:*@/:***@}"
@@ -101,15 +101,15 @@ echo "    migrate OK"
 echo "==> Verify tables"
 docker run --rm --network=host postgres:16-alpine \
   psql "${DATABASE_URL}" -c "\dt" | grep -E "entity_types|entities"
-echo "    calypso_app tables OK"
+echo "    superfield_app tables OK"
 
 docker run --rm --network=host postgres:16-alpine \
   psql "${AUDIT_DATABASE_URL}" -c "\dt" | grep "audit_events"
-echo "    calypso_audit tables OK"
+echo "    superfield_audit tables OK"
 
 docker run --rm --network=host postgres:16-alpine \
   psql "${ANALYTICS_DATABASE_URL}" -c "\dt" | grep -E "analytics_events|audit_replica"
-echo "    calypso_analytics tables OK"
+echo "    superfield_analytics tables OK"
 
 # ── 7. Verify audit_w INSERT grant ───────────────────────────────────────────
 

@@ -1,0 +1,40 @@
+{
+  "title": "feat: remove demo-mode auth bypass and DEMO_MODE bootstrap paths",
+  "phase": "Template cleanup",
+  "issue_kind": "feature",
+  "canonical_docs": [
+    "cleanup-plan.md",
+    "docs/PRD.md",
+    "apps/server/src/api/passkey.ts",
+    "apps/server/src/index.ts",
+    "apps/server/src/seed/demo-personas.ts",
+    "apps/server/src/seed/demo-data.ts",
+    "apps/server/src/cron/demo-health-check.ts"
+  ],
+  "dependencies": [],
+  "motivation": "Demo-only auth shortcuts and seeded runtime data/heartbeat jobs are outside PRD scope and introduce unnecessary security and operational noise.",
+  "behaviour": "Remove demo-login endpoint and DEMO_MODE seed/bootstrap hooks from startup wiring; preserve explicit test-only gates used by CI.\n\nCode examples:\n\n```ts\n// remove demo auth bypass\nif (req.method === 'POST' && url.pathname === '/api/auth/demo-login') {\n  // ...\n}\n```\n\n```ts\n// remove demo startup wiring\nawait seedDemoPersonas({ sql });\nawait seedDemoData({ sql });\nstartDemoHealthCheck({ sql });\n```",
+  "scope": {
+    "in": [
+      "Delete `/api/auth/demo-login` handler path and related tests.",
+      "Remove DEMO_MODE persona/sample-data seed modules from startup flow.",
+      "Remove demo health-check cron job and associated task queue churn.",
+      "Update docs that currently instruct DEMO_MODE usage for product runtime."
+    ],
+    "out": [
+      "Removal of TEST_MODE-only endpoints used for CI harnesses.",
+      "Changes to production passkey flow semantics."
+    ]
+  },
+  "acceptance_criteria": [
+    "No `/api/auth/demo-login` endpoint remains callable.",
+    "Server startup no longer executes demo persona/data seeding or demo health-check cron hooks.",
+    "Authentication and startup paths align with production-like behavior and PRD scope."
+  ],
+  "test_plan": [
+    "Run server auth/startup tests and ensure passkey + test-mode flows still pass.",
+    "Start server with and without DEMO_MODE env; verify demo hooks no longer run.",
+    "Validate docs references to DEMO_MODE are removed or explicitly marked legacy/non-product."
+  ],
+  "stage": "Specified"
+}

@@ -8,7 +8,7 @@
  *
  * Greenmail provides a lightweight self-contained mail server supporting
  * IMAP4, SMTP, and POP3. It is the canonical test IMAP server referenced in
- * the implementation plan (calypso-distribution/packages/db/imap-container.ts
+ * the implementation plan (superfield-distribution/packages/db/imap-container.ts
  * pattern).
  *
  * Port mapping:
@@ -32,7 +32,7 @@
  * Blueprint ref: ENV-X-009 (tests never run against a cluster database —
  * same principle applies to IMAP: use ephemeral containers on random ports).
  *
- * Calypso-distribution reference: packages/db/imap-container.ts
+ * Superfield-distribution reference: packages/db/imap-container.ts
  */
 
 import { addProcess, removeProcess } from './cleanup';

@@ -13,7 +13,7 @@
  *
  * Security model
  * ---------------
- * - Bearer session JWT (standard calypso_auth cookie) — the RM is already
+ * - Bearer session JWT (standard superfield_auth cookie) — the RM is already
  *   logged in when they record a meeting on the PWA.
  * - customer_id is caller-supplied and scoped by the session's tenant_id.
  * - Transcript body is encrypted with AES-256-GCM before the entity row

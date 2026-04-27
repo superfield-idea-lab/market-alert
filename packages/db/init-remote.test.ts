@@ -20,8 +20,8 @@ describe('init-remote helpers', () => {
 
   it('retargets the admin URL to a specific database', () => {
     expect(
-      dbUrl('postgres://admin:secret@example.com:5432/postgres?sslmode=require', 'calypso_app'),
-    ).toBe('postgres://admin:secret@example.com:5432/calypso_app?sslmode=require');
+      dbUrl('postgres://admin:secret@example.com:5432/postgres?sslmode=require', 'superfield_app'),
+    ).toBe('postgres://admin:secret@example.com:5432/superfield_app?sslmode=require');
   });
 
   it('derives SSL options from DB_SSL and DB_CA_CERT', () => {
@@ -88,10 +88,10 @@ describe('init-remote helpers', () => {
         },
       },
       databases: {
-        app: 'calypso_app',
-        audit: 'calypso_audit',
-        analytics: 'calypso_analytics',
-        dictionary: 'calypso_dictionary',
+        app: 'superfield_app',
+        audit: 'superfield_audit',
+        analytics: 'superfield_analytics',
+        dictionary: 'superfield_dictionary',
       },
     });
   });

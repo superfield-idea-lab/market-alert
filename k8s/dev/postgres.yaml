@@ -10,25 +10,25 @@
 # Apply order (handled by scripts/dev-k3d.ts):
 #   kubectl apply -f k8s/dev/dev-secrets.yaml
 #   kubectl apply -f k8s/dev/postgres.yaml
-#   kubectl rollout status statefulset/calypso-dev-postgres
+#   kubectl rollout status statefulset/superfield-dev-postgres
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: calypso-dev-postgres
+  name: superfield-dev-postgres
   labels:
-    app: calypso-dev-postgres
+    app: superfield-dev-postgres
     env: dev
 spec:
-  serviceName: calypso-dev-postgres
+  serviceName: superfield-dev-postgres
   replicas: 1
   selector:
     matchLabels:
-      app: calypso-dev-postgres
+      app: superfield-dev-postgres
   template:
     metadata:
       labels:
-        app: calypso-dev-postgres
+        app: superfield-dev-postgres
         env: dev
     spec:
       containers:
@@ -40,17 +40,17 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 configMapKeyRef:
-                  name: calypso-dev-config
+                  name: superfield-dev-config
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 configMapKeyRef:
-                  name: calypso-dev-config
+                  name: superfield-dev-config
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
-                  name: calypso-dev-config
+                  name: superfield-dev-config
                   key: POSTGRES_DB
           livenessProbe:
             exec:
@@ -95,13 +95,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: calypso-dev-postgres
+  name: superfield-dev-postgres
   labels:
-    app: calypso-dev-postgres
+    app: superfield-dev-postgres
     env: dev
 spec:
   selector:
-    app: calypso-dev-postgres
+    app: superfield-dev-postgres
   ports:
     - name: postgres
       protocol: TCP
