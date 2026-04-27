@@ -64,6 +64,7 @@ jobs:
           APP_RW_PASSWORD: app_rw_password
           AUDIT_W_PASSWORD: audit_w_password
           ANALYTICS_W_PASSWORD: analytics_w_password
+          DICT_RW_PASSWORD: dict_rw_password
           AGENT_EMAIL_INGEST_PASSWORD: agent_email_ingest_password
 
       - name: Start app container
@@ -75,6 +76,7 @@ jobs:
             -e DATABASE_URL=postgres://app_rw:app_rw_password@localhost:5432/superfield_app \
             -e AUDIT_DATABASE_URL=postgres://audit_w:audit_w_password@localhost:5432/superfield_audit \
             -e ANALYTICS_DATABASE_URL=postgres://analytics_w:analytics_w_password@localhost:5432/superfield_analytics \
+            -e DICTIONARY_DATABASE_URL=postgres://dict_rw:dict_rw_password@localhost:5432/superfield_dictionary \
             -e JWT_SECRET=ci-smoke-test-secret \
             -e PORT=31415 \
             -e RELEASE_TAG=nightly \
@@ -95,25 +97,31 @@ jobs:
           docker logs superfield
           exit 1
 
-      - name: Smoke test -- register, login, list tasks
+      - name: Smoke test -- health probes
         run: |
           BASE=http://localhost:31415
 
-          # Register a smoke-test user
-          REGISTER=$(curl -sf -X POST "$BASE/api/auth/register" \
+          # Liveness probe — process is running
+          LIVE=$(curl -sf "$BASE/health/live")
+          echo "Liveness response: $LIVE"
+
+          # Readiness probe — server can serve traffic
+          READY=$(curl -sf "$BASE/health/ready")
+          echo "Readiness response: $READY"
+
+          # Deep health check — all subsystems healthy
+          DEEP=$(curl -sf "$BASE/health/deep")
+          echo "Deep health response: $DEEP"
+
+          # Confirm that password-based auth endpoints correctly return 410
+          AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" \
             -H 'Content-Type: application/json' \
             -d '{"username":"nightly_smoke","password":"smoke-pass-123"}')
-          echo "Register response: $REGISTER"
-
-          # Login and capture the auth cookie
-          LOGIN_RESPONSE=$(curl -sf -c /tmp/smoke_cookies.txt -X POST "$BASE/api/auth/login" \
-            -H 'Content-Type: application/json' \
-            -d '{"username":"nightly_smoke","password":"smoke-pass-123"}')
-          echo "Login response: $LOGIN_RESPONSE"
-
-          # List tasks using the auth cookie
-          TASKS=$(curl -sf -b /tmp/smoke_cookies.txt "$BASE/api/tasks")
-          echo "Tasks response: $TASKS"
+          echo "Auth/login status (expect 410): $AUTH_STATUS"
+          if [ "$AUTH_STATUS" != "410" ]; then
+            echo "ERROR: expected 410 from removed password-auth endpoint, got $AUTH_STATUS"
+            exit 1
+          fi
 
       - name: Stop and remove container
         if: always()
