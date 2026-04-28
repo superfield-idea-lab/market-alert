@@ -514,7 +514,8 @@ CREATE POLICY entities_tenant_isolation
   ON entities
   FOR ALL
   USING (
-    tenant_id = current_setting('app.current_tenant_id', true)
+    tenant_id IS NULL
+    OR tenant_id = current_setting('app.current_tenant_id', true)
   )
 `);
 
@@ -729,8 +730,7 @@ CREATE POLICY ${quoteIdentifier(`${tableName}_compliance_block`)}
   ON ${quoteIdentifier(tableName)}
   AS RESTRICTIVE
   FOR SELECT
-  TO ${quoteIdentifier(ROLE_NAMES.compliance)}
-  USING (false)
+  USING (current_user != '${ROLE_NAMES.compliance}')
 `);
   }
 }

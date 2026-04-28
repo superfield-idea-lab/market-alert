@@ -6,6 +6,7 @@
  *
  * Usage:
  *   bun run demo
+ *   bun run demo --no-tunnel    # skip cloudflared (used by CI smoke)
  *   bun run demo --status
  *   bun run demo --delete
  *
@@ -545,11 +546,31 @@ async function buildDemoImage(config: DemoConfig): Promise<string> {
     kubeconfigPath: config.kubeconfigPath,
     phase: 'image build',
   });
-  await run(['k3d', 'image', 'import', '-c', config.clusterName, imageRef], {
+
+  // k3d image import uses a tarball written to a shared volume then read by
+  // `ctr` inside the node. On CI the file is gone by the time ctr opens it
+  // (race with volume cleanup). Pipe docker save directly into containerd
+  // instead, matching the same approach used for the postgres image.
+  const nodeName = `k3d-${config.clusterName}-server-0`;
+  console.log(`[demo] Importing ${imageRef} into ${nodeName} via docker save pipe.`);
+  const save = Bun.spawn(['docker', 'save', imageRef], {
     cwd: REPO_ROOT,
-    kubeconfigPath: config.kubeconfigPath,
-    phase: 'image import',
+    stdout: 'pipe',
+    stderr: 'inherit',
   });
+  const ctr = Bun.spawn(
+    ['docker', 'exec', '-i', nodeName, 'ctr', '-n', 'k8s.io', 'images', 'import', '-'],
+    {
+      cwd: REPO_ROOT,
+      stdin: save.stdout,
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  );
+  const [saveExit, ctrExit] = await Promise.all([save.exited, ctr.exited]);
+  if (saveExit !== 0) throw new Error(`docker save exited ${saveExit}`);
+  if (ctrExit !== 0) throw new Error(`ctr images import exited ${ctrExit}`);
+
   return imageRef;
 }
 
@@ -686,6 +707,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const statusOnly = args.includes('--status');
   const shouldDelete = args.includes('--delete');
+  const noTunnel = args.includes('--no-tunnel');
 
   const portArg = args.find((a) => a.startsWith('--port='));
   const explicitPort = portArg ? Number(portArg.split('=')[1]) : undefined;
@@ -726,7 +748,11 @@ async function main(): Promise<void> {
   }
 
   // Fail fast before spending time on cluster/image work.
-  checkCloudflared();
+  // Skip the cloudflared check when --no-tunnel is set (CI smoke runs against
+  // localhost only and never starts a tunnel).
+  if (!noTunnel) {
+    checkCloudflared();
+  }
 
   const config = demoConfig({ port: explicitPort });
 
@@ -871,14 +897,18 @@ async function main(): Promise<void> {
       );
     }
 
-    console.log('[demo] Starting cloudflared tunnel…');
-    const tunnel = await startCloudflaredTunnel(config.port);
-    cloudflaredChild = tunnel.child;
-    console.log(`[demo] Public URL: ${tunnel.url}`);
-    console.log(
-      '[demo] Note: Cloudflare quick tunnels show a browser-integrity warning page on first visit.',
-    );
-    console.log('[demo] Click "Click to continue" (or wait a few seconds) to reach the app.');
+    if (noTunnel) {
+      console.log('[demo] --no-tunnel set; skipping cloudflared tunnel.');
+    } else {
+      console.log('[demo] Starting cloudflared tunnel…');
+      const tunnel = await startCloudflaredTunnel(config.port);
+      cloudflaredChild = tunnel.child;
+      console.log(`[demo] Public URL: ${tunnel.url}`);
+      console.log(
+        '[demo] Note: Cloudflare quick tunnels show a browser-integrity warning page on first visit.',
+      );
+      console.log('[demo] Click "Click to continue" (or wait a few seconds) to reach the app.');
+    }
 
     await runInteractiveLoop(config);
   } finally {

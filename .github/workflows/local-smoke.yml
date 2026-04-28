@@ -1,0 +1,87 @@
+name: Local Smoke
+
+# Boots the demo via `bun run demo --no-tunnel` (k3d + real manifests + seeded
+# demo users) and runs Playwright smoke checks against the live cluster on
+# localhost. This is the only workflow that exercises the actual deployment
+# path end-to-end, so it must run on every PR that could affect the demo.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPERFIELD_DEMO_PORT: '31480'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Boot demo cluster
+        run: |
+          set -o pipefail
+          nohup bun run demo --no-tunnel > demo.log 2>&1 &
+          echo $! > demo.pid
+
+      - name: Wait for demo health
+        run: |
+          for i in $(seq 1 180); do
+            if curl -sf "http://localhost:${SUPERFIELD_DEMO_PORT}/health/live" > /dev/null; then
+              echo "Demo is healthy after ${i} attempt(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Demo never became healthy on port ${SUPERFIELD_DEMO_PORT}"
+          tail -300 demo.log || true
+          exit 1
+
+      - name: Run smoke spec
+        env:
+          SMOKE_BASE_URL: http://localhost:${{ env.SUPERFIELD_DEMO_PORT }}
+        run: bun --bun vitest run --config tests/smoke/vitest.config.ts
+
+      - name: Upload demo log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-log
+          path: demo.log
+
+      - name: Teardown demo cluster
+        if: always()
+        run: |
+          if [ -f demo.pid ]; then
+            kill -TERM "$(cat demo.pid)" 2>/dev/null || true
+            # Give the demo script time to delete its own k3d cluster.
+            for i in $(seq 1 30); do
+              if ! kill -0 "$(cat demo.pid)" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+          fi
+          # Best-effort sweep: delete any leftover superfield-demo-* clusters.
+          bun run demo --delete || true
