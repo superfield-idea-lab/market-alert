@@ -48,9 +48,9 @@ export async function handleDemoSessionRequest(
           AND properties->>'role' IS NOT NULL
         ORDER BY
           CASE properties->>'role'
-            WHEN 'superuser' THEN 0
-            WHEN 'crm_admin' THEN 1
-            WHEN 'compliance_officer' THEN 2
+            WHEN 'superuser'       THEN 0
+            WHEN 'account_manager' THEN 1
+            WHEN 'supervisor'      THEN 2
             ELSE 3
           END,
           properties->>'username'
@@ -139,9 +139,8 @@ export async function handleDemoSessionRequest(
       const isSuperadmin = u.role === 'superuser';
       const accessFlags = {
         isSuperadmin,
-        isCrmAdmin: isSuperadmin || u.role === 'crm_admin',
-        isComplianceOfficer: isSuperadmin || u.role === 'compliance_officer',
-        isBdm: u.role === 'bdm',
+        isAccountManager: isSuperadmin || u.role === 'account_manager',
+        isSupervisor: isSuperadmin || u.role === 'supervisor',
       };
 
       const token = await signJwt({ id: u.id, username: u.username });

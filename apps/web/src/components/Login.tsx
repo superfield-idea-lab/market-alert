@@ -30,10 +30,9 @@ interface DemoUser {
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  superuser: 'Superadmin',
-  crm_admin: 'CRM Admin',
-  compliance_officer: 'Compliance Officer',
-  bdm: 'BDM',
+  superuser: 'Superuser',
+  account_manager: 'Account Manager',
+  supervisor: 'Supervisor',
 };
 
 function roleLabel(role: string): string {
@@ -175,10 +174,10 @@ export const Login: React.FC = () => {
                     disabled={demoLoading !== null}
                     className="w-full flex items-center justify-between px-4 py-3 bg-zinc-50 hover:bg-indigo-50 border border-zinc-200 hover:border-indigo-300 rounded-lg text-sm transition-colors disabled:opacity-50"
                   >
-                    <span className="font-medium text-zinc-800 truncate">{u.username}</span>
-                    <span className="ml-3 shrink-0 text-xs text-zinc-400 bg-white border border-zinc-200 rounded px-2 py-0.5">
-                      {demoLoading === u.id ? 'Signing in…' : roleLabel(u.role)}
+                    <span className="font-medium text-zinc-800">
+                      {demoLoading === u.id ? 'Signing in…' : `Sign in as ${roleLabel(u.role)}`}
                     </span>
+                    <span className="ml-3 shrink-0 text-xs text-zinc-400">{u.username}</span>
                   </button>
                 ))}
               </div>
