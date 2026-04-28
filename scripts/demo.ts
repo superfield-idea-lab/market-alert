@@ -115,7 +115,9 @@ export function demoConfig(
     (process.env.SUPERFIELD_DEMO_DB_PORT
       ? Number(process.env.SUPERFIELD_DEMO_DB_PORT)
       : randomPort());
-  const port = input.port ?? Number(process.env.SUPERFIELD_DEMO_PORT ?? 58080);
+  const port =
+    input.port ??
+    (process.env.SUPERFIELD_DEMO_PORT ? Number(process.env.SUPERFIELD_DEMO_PORT) : randomPort());
 
   return {
     clusterName,
@@ -170,7 +172,7 @@ export function buildDemoPlan(config: DemoConfig): DemoPlanStep[] {
       name: 'rollout',
       commands: [
         'kubectl rollout status deployment/superfield-app --timeout=180s',
-        `curl -sf http://127.0.0.1:${config.port}/health/live`,
+        `curl -sf http://localhost:${config.port}/health/live`,
       ],
     },
     {
@@ -208,8 +210,16 @@ export function buildDemoSecretManifests(_config: DemoConfig): string {
     DICTIONARY_DATABASE_URL: `postgres://dict_rw:${DEMO_DB_PASSWORDS.dictionary}@${DB_HOST}:5432/superfield_dictionary`,
   };
 
+  // DEMO_MODE activates ephemeral TLS cert generation and quick-login endpoints
+  // in the server. RP_ID and ORIGIN are derived dynamically from request headers
+  // so passkeys work whether accessed via localhost or a *.superfield.co subdomain.
+  const passkeyEnv = {
+    DEMO_MODE: 'true',
+  };
+
   const appSecrets = {
     ...dbUrls,
+    ...passkeyEnv,
     BLOOMBERG_API_KEY: '',
     JWT_SECRET: DEMO_DB_PASSWORDS.jwtSecret,
     SUBSTACK_API_KEY: '',
@@ -220,6 +230,7 @@ export function buildDemoSecretManifests(_config: DemoConfig): string {
 
   const apiSecrets = {
     ...dbUrls,
+    ...passkeyEnv,
     BLOOMBERG_API_KEY: '',
     JWT_SECRET: DEMO_DB_PASSWORDS.jwtSecret,
     SUBSTACK_API_KEY: '',
@@ -327,6 +338,87 @@ async function run(command: string[], opts: RunOptions): Promise<void> {
   if (exitCode !== 0) {
     throw new Error(describeCommandFailure(opts.phase, command, stderr));
   }
+}
+
+// ---------------------------------------------------------------------------
+// cloudflared helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify cloudflared is available on the PATH and fail fast with install
+ * instructions if not.
+ */
+export function checkCloudflared(): void {
+  const result = Bun.spawnSync(['cloudflared', 'version'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      'cloudflared is not installed or not on PATH.\n' +
+        'Install it and retry:\n' +
+        '  macOS:  brew install cloudflare/cloudflare/cloudflared\n' +
+        '  Linux:  https://pkg.cloudflare.com/\n' +
+        '  Other:  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/',
+    );
+  }
+}
+
+/**
+ * Start a cloudflared quick tunnel pointing at the given local HTTP port.
+ * Resolves with the assigned public https:// URL once cloudflared prints it.
+ * The returned process must be killed on teardown.
+ */
+export function startCloudflaredTunnel(
+  localPort: number,
+  timeoutMs = 30_000,
+): Promise<{ url: string; child: ReturnType<typeof Bun.spawn> }> {
+  return new Promise((resolve, reject) => {
+    const child = Bun.spawn(
+      ['cloudflared', 'tunnel', '--url', `http://localhost:${localPort}`, '--no-autoupdate'],
+      { stdout: 'ignore', stderr: 'pipe' },
+    );
+
+    const deadline = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* best effort */
+      }
+      reject(new Error('Timed out waiting for cloudflared to assign a tunnel URL (30s)'));
+    }, timeoutMs);
+
+    let resolved = false;
+    let buffer = '';
+
+    const readLoop = async () => {
+      const reader = child.stderr!.getReader();
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          process.stderr.write(chunk);
+          if (!resolved) {
+            buffer += chunk;
+            const match = buffer.match(/https:\/\/[^\s]+\.trycloudflare\.com/);
+            if (match) {
+              resolved = true;
+              clearTimeout(deadline);
+              resolve({ url: match[0], child });
+            }
+          }
+        }
+      } catch (err) {
+        if (!resolved) reject(err);
+      } finally {
+        reader.releaseLock();
+      }
+    };
+
+    readLoop();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -523,12 +615,12 @@ async function refreshOnce(config: DemoConfig): Promise<string> {
   const imageRef = await buildDemoImage(config);
   await deployDemoImage(config, imageRef);
   try {
-    await waitForHealth(`http://127.0.0.1:${config.port}/health/live`);
+    await waitForHealth(`http://localhost:${config.port}/health/live`);
   } catch (error) {
     throw new Error(
       describeProbeFailure(
         'deploy readiness',
-        `http://127.0.0.1:${config.port}/health/live`,
+        `http://localhost:${config.port}/health/live`,
         error,
       ),
       { cause: error },
@@ -539,7 +631,13 @@ async function refreshOnce(config: DemoConfig): Promise<string> {
 
 async function runInteractiveLoop(config: DemoConfig): Promise<void> {
   if (!config.interactive) {
-    console.log(`  Local URL: http://127.0.0.1:${config.port}/health/live`);
+    console.log(`  Local URL: http://localhost:${config.port}/`);
+    // Non-interactive: keep the cluster alive until SIGINT/SIGTERM.
+    console.log('  (non-interactive mode — press Ctrl-C or send SIGTERM to stop)');
+    await new Promise<void>((resolve) => {
+      process.once('SIGINT', resolve);
+      process.once('SIGTERM', resolve);
+    });
     return;
   }
 
@@ -570,6 +668,9 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const statusOnly = args.includes('--status');
   const shouldDelete = args.includes('--delete');
+
+  const portArg = args.find((a) => a.startsWith('--port='));
+  const explicitPort = portArg ? Number(portArg.split('=')[1]) : undefined;
 
   if (statusOnly) {
     const clusters = listDemoClusters();
@@ -606,16 +707,25 @@ async function main(): Promise<void> {
     return;
   }
 
-  const config = demoConfig();
+  // Fail fast before spending time on cluster/image work.
+  checkCloudflared();
 
-  // Track the port-forward child process so teardown can kill it.
+  const config = demoConfig({ port: explicitPort });
+
+  // Track child processes so teardown can kill them.
   let portForward: ReturnType<typeof startPortForward> | null = null;
+  let cloudflaredChild: ReturnType<typeof Bun.spawn> | null = null;
   let cleanupDone = false;
 
   async function teardown(reason?: string) {
     if (cleanupDone) return;
     cleanupDone = true;
     if (reason) console.log(`\n[demo] ${reason}`);
+    try {
+      cloudflaredChild?.kill();
+    } catch {
+      // best effort
+    }
     try {
       portForward?.kill();
     } catch {
@@ -670,6 +780,13 @@ async function main(): Promise<void> {
       },
     );
 
+    console.log('[demo] Pre-loading postgres:16-alpine into k3d containerd.');
+    await run(['k3d', 'image', 'import', '-c', config.clusterName, 'postgres:16-alpine'], {
+      cwd: REPO_ROOT,
+      kubeconfigPath: config.kubeconfigPath,
+      phase: 'database bootstrap',
+    });
+
     console.log('[demo] Applying dev Postgres manifests.');
     await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml')], {
       cwd: REPO_ROOT,
@@ -706,18 +823,23 @@ async function main(): Promise<void> {
 
     portForward = startPortForward(config);
     try {
-      await waitForHealth(`http://127.0.0.1:${config.port}/health/live`);
+      await waitForHealth(`http://localhost:${config.port}/health/live`);
     } catch (error) {
       throw new Error(
         describeProbeFailure(
           'deploy readiness',
-          `http://127.0.0.1:${config.port}/health/live`,
+          `http://localhost:${config.port}/health/live`,
           error,
         ),
         { cause: error },
       );
     }
-    console.log(`[demo] Demo URL: http://127.0.0.1:${config.port}/health/live`);
+
+    console.log('[demo] Starting cloudflared tunnel…');
+    const tunnel = await startCloudflaredTunnel(config.port);
+    cloudflaredChild = tunnel.child;
+    console.log(`[demo] Public URL: ${tunnel.url}`);
+
     await runInteractiveLoop(config);
   } finally {
     await teardown();

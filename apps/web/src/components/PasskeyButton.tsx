@@ -65,7 +65,14 @@ export const RegisterPasskeyButton: React.FC<RegisterPasskeyButtonProps> = ({
   const [message, setMessage] = useState('');
 
   if (!browserSupportsWebAuthn()) {
-    return <p className="text-sm text-zinc-400">This browser does not support passkeys.</p>;
+    const insecure = typeof window !== 'undefined' && !window.isSecureContext;
+    return (
+      <p className="text-sm text-amber-600">
+        {insecure
+          ? 'Passkeys require a secure connection. Open this page via https:// or http://localhost instead of an IP address.'
+          : 'This browser does not support passkeys.'}
+      </p>
+    );
   }
 
   const handleRegister = async () => {
@@ -172,7 +179,14 @@ export const PasskeyLoginButton: React.FC<PasskeyLoginButtonProps> = ({ onSucces
   const [message, setMessage] = useState('');
 
   if (!browserSupportsWebAuthn()) {
-    return null;
+    const insecure = typeof window !== 'undefined' && !window.isSecureContext;
+    return (
+      <p className="text-sm text-amber-600">
+        {insecure
+          ? 'Passkeys require a secure connection. Open this page via https:// or http://localhost instead of an IP address.'
+          : 'This browser does not support passkeys.'}
+      </p>
+    );
   }
 
   const handleLogin = async () => {

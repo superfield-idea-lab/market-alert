@@ -42,6 +42,10 @@ spec:
           image: ghcr.io/<owner>/superfield-starter-ts:latest
           ports:
             - containerPort: 31415
+          envFrom:
+            - secretRef:
+                name: superfield-secrets
+                optional: true
           env:
             - name: PORT
               value: '31415'

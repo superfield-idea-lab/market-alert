@@ -1,9 +1,9 @@
 /**
- * Login — passkey-only authentication UI.
+ * Login — passkey-only authentication UI with optional demo quick-login.
  *
- * This component implements the passkey-only auth flow required by the Phase 1
- * security foundation (issue #14, AUTH blueprint). No password field exists here
- * or anywhere else in the auth flow.
+ * When the server is running with DEMO_MODE=true, a "Demo accounts" section
+ * appears below the passkey controls showing one-click login buttons for the
+ * pre-seeded accounts (superadmin, etc.).
  *
  * Registration flow:
  *   1. User enters their chosen username.
@@ -19,15 +19,91 @@
  *   4. On success the server issues a session cookie and the user is logged in.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { PasskeyLoginButton, RegisterPasskeyButton } from './PasskeyButton';
+
+interface DemoUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  superuser: 'Superadmin',
+  crm_admin: 'CRM Admin',
+  compliance_officer: 'Compliance Officer',
+  bdm: 'BDM',
+};
+
+function roleLabel(role: string): string {
+  return ROLE_LABEL[role] ?? role;
+}
 
 export const Login: React.FC = () => {
   const { setUser } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
+  const [demoUsers, setDemoUsers] = useState<DemoUser[]>([]);
+  const [demoLoading, setDemoLoading] = useState<string | null>(null);
+  const [demoNewUsername, setDemoNewUsername] = useState('');
+  const [demoMode, setDemoMode] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/demo/users', { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) return null;
+        setDemoMode(true);
+        return res.json();
+      })
+      .then((data: DemoUser[] | null) => {
+        if (Array.isArray(data) && data.length > 0) setDemoUsers(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  const callDemoSession = async (payload: { userId?: string; username?: string }) => {
+    const res = await fetch('/api/demo/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const body = await res.json();
+      throw new Error(body.error ?? 'Demo login failed');
+    }
+    return res.json();
+  };
+
+  const handleDemoLogin = async (userId: string) => {
+    setDemoLoading(userId);
+    setError('');
+    try {
+      const data = await callDemoSession({ userId });
+      setUser(data.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Demo login failed');
+    } finally {
+      setDemoLoading(null);
+    }
+  };
+
+  const handleDemoCreate = async () => {
+    const name = demoNewUsername.trim();
+    if (!name) return;
+    setDemoLoading('__new__');
+    setError('');
+    try {
+      const data = await callDemoSession({ username: name });
+      setUser(data.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Demo registration failed');
+    } finally {
+      setDemoLoading(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col justify-center items-center font-sans">
@@ -82,6 +158,53 @@ export const Login: React.FC = () => {
             {isRegister ? 'Already have an account? Sign In' : 'Need an account? Register'}
           </button>
         </div>
+
+        {demoMode && (
+          <div className="mt-8 pt-6 border-t border-zinc-100 space-y-4">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider text-center">
+              Demo accounts
+            </p>
+
+            {demoUsers.length > 0 && (
+              <div className="space-y-2">
+                {demoUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => handleDemoLogin(u.id)}
+                    disabled={demoLoading !== null}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-zinc-50 hover:bg-indigo-50 border border-zinc-200 hover:border-indigo-300 rounded-lg text-sm transition-colors disabled:opacity-50"
+                  >
+                    <span className="font-medium text-zinc-800 truncate">{u.username}</span>
+                    <span className="ml-3 shrink-0 text-xs text-zinc-400 bg-white border border-zinc-200 rounded px-2 py-0.5">
+                      {demoLoading === u.id ? 'Signing in…' : roleLabel(u.role)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="New account username"
+                value={demoNewUsername}
+                onChange={(e) => setDemoNewUsername(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleDemoCreate()}
+                disabled={demoLoading !== null}
+                className="flex-1 px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={handleDemoCreate}
+                disabled={demoLoading !== null || !demoNewUsername.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+              >
+                {demoLoading === '__new__' ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

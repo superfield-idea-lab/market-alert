@@ -67,25 +67,31 @@ const DEFAULT_ORIGIN = 'http://localhost:5174';
  * URL parsing errors fall back to localhost defaults.
  */
 export function getRpConfig(req: Request): { rpId: string; origin: string } {
-  // Env vars take precedence when both are set
-  const envRpId = process.env.RP_ID;
-  const envOrigin = process.env.ORIGIN;
-  if (envRpId && envOrigin) {
-    return { rpId: envRpId, origin: envOrigin };
-  }
-
-  // Try Origin header first, then Referer
+  // Derive origin from the incoming request so it stays accurate regardless of
+  // how the demo is accessed (localhost, *.superfield.co, etc.).
   const headerValue = req.headers.get('origin') ?? req.headers.get('referer');
+  let derivedRpId = DEFAULT_RP_ID;
+  let derivedOrigin = DEFAULT_ORIGIN;
   if (headerValue) {
     try {
       const parsed = new URL(headerValue);
-      return { rpId: parsed.hostname, origin: parsed.origin };
+      derivedRpId = parsed.hostname;
+      derivedOrigin = parsed.origin;
     } catch {
       // URL parsing failed — fall through to defaults
     }
   }
 
-  return { rpId: DEFAULT_RP_ID, origin: DEFAULT_ORIGIN };
+  // RP_ID env var pins the relying-party domain independently of the origin.
+  // Set to e.g. "superfield.co" so any *.superfield.co subdomain shares one
+  // credential namespace.  When absent, the hostname from the request is used.
+  const rpId = process.env.RP_ID ?? derivedRpId;
+
+  // ORIGIN env var overrides the expected origin for cert verification.
+  // When absent (the normal demo case), derive it from the request.
+  const origin = process.env.ORIGIN ?? derivedOrigin;
+
+  return { rpId, origin };
 }
 
 export async function handlePasskeyRequest(

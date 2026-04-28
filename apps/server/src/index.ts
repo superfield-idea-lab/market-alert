@@ -38,6 +38,7 @@ import {
   handleTestIngestionTokenRequest,
   isTestMode,
 } from './api/test-session';
+import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
@@ -240,6 +241,12 @@ export default {
     if (url.pathname.startsWith('/api/auth')) {
       const authRes = await handleAuthRequest(req, url, appState);
       if (authRes) return withTrace(authRes);
+    }
+
+    // Demo quick-login — available only when DEMO_MODE=true. Never enabled in production.
+    if (isDemoMode() && url.pathname.startsWith('/api/demo/')) {
+      const demoRes = await handleDemoSessionRequest(req, url, appState);
+      if (demoRes) return demoRes;
     }
 
     // Test-only session backdoor and rate-limit probe — available only when TEST_MODE=true.
