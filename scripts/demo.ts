@@ -210,11 +210,17 @@ export function buildDemoSecretManifests(_config: DemoConfig): string {
     DICTIONARY_DATABASE_URL: `postgres://dict_rw:${DEMO_DB_PASSWORDS.dictionary}@${DB_HOST}:5432/superfield_dictionary`,
   };
 
-  // DEMO_MODE activates ephemeral TLS cert generation and quick-login endpoints
-  // in the server. RP_ID and ORIGIN are derived dynamically from request headers
-  // so passkeys work whether accessed via localhost or a *.superfield.co subdomain.
+  // DEMO_MODE activates quick-login endpoints in the server.
+  // SECURE_COOKIES=true is always set because the demo is always served over
+  // HTTPS via cloudflared — this gives the auth cookie the __Host- prefix and
+  // Secure flag, matching the hardcoded Secure flag on the CSRF cookie. Without
+  // it the auth cookie lacks Secure while the CSRF cookie has it, causing some
+  // browsers to silently drop the session cookie on HTTPS origins.
+  // RP_ID and ORIGIN are derived dynamically from request headers so passkeys
+  // work whether accessed via localhost or a *.superfield.co subdomain.
   const passkeyEnv = {
     DEMO_MODE: 'true',
+    SECURE_COOKIES: 'true',
   };
 
   const appSecrets = {
@@ -374,8 +380,20 @@ export function startCloudflaredTunnel(
   timeoutMs = 30_000,
 ): Promise<{ url: string; child: ReturnType<typeof Bun.spawn> }> {
   return new Promise((resolve, reject) => {
+    // --config /dev/null prevents cloudflared from loading ~/.cloudflared/config.yml.
+    // A user-level config that specifies a named tunnel with a catch-all
+    // `http_status:404` ingress rule will otherwise intercept every request to
+    // the quick-tunnel URL and return 404 before the request reaches the app.
     const child = Bun.spawn(
-      ['cloudflared', 'tunnel', '--url', `http://localhost:${localPort}`, '--no-autoupdate'],
+      [
+        'cloudflared',
+        'tunnel',
+        '--config',
+        '/dev/null',
+        '--url',
+        `http://localhost:${localPort}`,
+        '--no-autoupdate',
+      ],
       { stdout: 'ignore', stderr: 'pipe' },
     );
 
@@ -780,12 +798,30 @@ async function main(): Promise<void> {
       },
     );
 
+    // Pull postgres:16-alpine directly into the k3d node's containerd rather than
+    // going through docker save → ctr import. The tarball path fails with
+    // "content digest not found" because docker save includes multi-arch manifest
+    // list references for blobs that were never fetched locally. Pulling via
+    // `ctr -n k8s.io images pull` inside the node bypasses that entirely.
     console.log('[demo] Pre-loading postgres:16-alpine into k3d containerd.');
-    await run(['k3d', 'image', 'import', '-c', config.clusterName, 'postgres:16-alpine'], {
-      cwd: REPO_ROOT,
-      kubeconfigPath: config.kubeconfigPath,
-      phase: 'database bootstrap',
-    });
+    await run(
+      [
+        'docker',
+        'exec',
+        `k3d-${config.clusterName}-server-0`,
+        'ctr',
+        '-n',
+        'k8s.io',
+        'images',
+        'pull',
+        'docker.io/library/postgres:16-alpine',
+      ],
+      {
+        cwd: REPO_ROOT,
+        kubeconfigPath: config.kubeconfigPath,
+        phase: 'database bootstrap',
+      },
+    );
 
     console.log('[demo] Applying dev Postgres manifests.');
     await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml')], {
@@ -839,6 +875,10 @@ async function main(): Promise<void> {
     const tunnel = await startCloudflaredTunnel(config.port);
     cloudflaredChild = tunnel.child;
     console.log(`[demo] Public URL: ${tunnel.url}`);
+    console.log(
+      '[demo] Note: Cloudflare quick tunnels show a browser-integrity warning page on first visit.',
+    );
+    console.log('[demo] Click "Click to continue" (or wait a few seconds) to reach the app.');
 
     await runInteractiveLoop(config);
   } finally {
