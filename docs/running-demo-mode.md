@@ -76,10 +76,13 @@ application code. Its lifecycle is distinct from `bun run dev`:
 3. Apply `k8s/dev/dev-secrets.yaml` and `k8s/dev/postgres.yaml`.
 4. Wait for `statefulset/superfield-dev-postgres` to roll out.
 5. Run `packages/db/init-remote.ts` against the host-mapped Postgres instance.
-6. Build `Dockerfile.release` from the current workspace and import the image into k3d.
+6. Build the release image once from the current workspace using the unified Dockerfile, then push it to the cluster-local registry.
 7. Render demo secrets plus `k8s/app.yaml`, apply them, and wait for `deployment/superfield-app`.
-8. Port-forward `deployment/superfield-app` to the local demo port and wait for `/health/live`.
-9. In an interactive terminal, prompt for Enter-to-redeploy or `q` to quit.
+8. Port-forward `deployment/superfield-app` to the local demo port, verify `/health/live` and `/` on localhost, and exec into the pod to confirm the app responds on its own loopback address.
+9. If cloudflared is enabled, start a quick tunnel and verify the public URL renders the same app shell.
+10. In an interactive terminal, prompt for Enter-to-redeploy or `q` to quit.
+
+Demo output is prefixed with homogeneous `[demo:<stage>]` log lines so cluster bootstrap, database bootstrap, image build, readiness checks, and teardown are easier to scan.
 
 `bun run demo --status` and `bun run demo --delete` only inspect or tear down the
 demo cluster. They do not rebuild the image or apply manifests.
@@ -104,5 +107,5 @@ The only readiness gate in the bootstrap script is the Postgres StatefulSet roll
 That means:
 
 - Postgres must be ready before the script exits successfully.
-- The script does not assert readiness for the application container or any ingress.
-- The script does not validate the `8080` load balancer mapping during startup.
+- The script now asserts readiness for the application container on localhost, from inside the pod, and through the cloudflared tunnel when tunnel mode is enabled.
+- The script validates the application shell, not just `/health/live`, before reporting success.

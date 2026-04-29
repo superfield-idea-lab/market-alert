@@ -17,7 +17,7 @@ describe('demo runtime contract', () => {
       'image build',
       'image push',
       'manifest apply',
-      'rollout',
+      'readiness checks',
       'watch prompt loop',
     ]);
 
@@ -32,6 +32,9 @@ describe('demo runtime contract', () => {
     expect(plan[3]?.commands?.[0]).toContain('docker push');
     expect(plan[3]?.commands?.[0]).toContain('localhost:');
     expect(plan[5]?.commands?.[0]).toContain('kubectl rollout status deployment/superfield-app');
+    expect(plan[5]?.commands?.[1]).toContain('kubectl exec deployment/superfield-app -- bun -e');
+    expect(plan[5]?.commands?.[2]).toContain('curl -sf http://localhost:58080/health/live');
+    expect(plan[5]?.commands?.[3]).toContain('curl -sf http://localhost:58080/');
   });
 
   test('image build uses localhost registry ref and push plan references cluster-internal host', () => {
