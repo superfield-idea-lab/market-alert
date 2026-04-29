@@ -14,8 +14,12 @@ PGPORT="${PGPORT:-5432}"
 SENTINEL_FILE="/tmp/.seed-done"
 
 # ---------------------------------------------------------------------------
-# 1. Wait for PostgreSQL TCP
+# 1. Refresh workspace links, then wait for PostgreSQL TCP
 # ---------------------------------------------------------------------------
+echo "[entrypoint] Refreshing workspace dependencies..."
+bun install --frozen-lockfile --ignore-scripts
+echo "[entrypoint] Workspace dependencies ready."
+
 echo "[entrypoint] Waiting for PostgreSQL at ${PGHOST}:${PGPORT}..."
 timeout=60
 elapsed=0

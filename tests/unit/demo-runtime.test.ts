@@ -15,21 +15,40 @@ describe('demo runtime contract', () => {
       'cluster bootstrap',
       'database bootstrap',
       'image build',
-      'image import',
+      'image push',
       'manifest apply',
       'rollout',
       'watch prompt loop',
     ]);
 
-    expect(plan[0]?.commands?.[0]).toContain('k3d cluster create superfield-demo');
-    expect(plan[2]?.commands?.[0]).toContain('docker build -f Dockerfile.release');
+    // Cluster bootstrap creates registry then cluster with registry attached
+    expect(plan[0]?.commands?.[0]).toContain('k3d registry create');
+    expect(plan[0]?.commands?.[1]).toContain('k3d cluster create superfield-demo');
+    expect(plan[0]?.commands?.[1]).toContain('--registry-use');
+    // Image build uses unified Dockerfile with --target release (no more -f Dockerfile.release)
+    expect(plan[2]?.commands?.[0]).toContain('docker build --target release');
+    expect(plan[2]?.commands?.[0]).not.toContain('Dockerfile.release');
+    // Image push replaces the former image import
+    expect(plan[3]?.commands?.[0]).toContain('docker push');
+    expect(plan[3]?.commands?.[0]).toContain('localhost:');
     expect(plan[5]?.commands?.[0]).toContain('kubectl rollout status deployment/superfield-app');
+  });
+
+  test('image build uses localhost registry ref and push plan references cluster-internal host', () => {
+    const config = demoConfig({ interactive: false, port: 58080 });
+    const plan = buildDemoPlan(config);
+    const hostRegistryRef = `localhost:${config.registryPort}`;
+    // docker build and push use the host-side localhost:<port>
+    expect(plan[2]?.commands?.[0]).toContain(hostRegistryRef);
+    expect(plan[3]?.commands?.[0]).toContain(hostRegistryRef);
+    // The cluster-internal ref is noted in the push step
+    expect(plan[3]?.commands?.[1]).toContain(config.registryInternalHost);
   });
 
   test('supports overriding the host database port for cluster bootstrap', () => {
     const plan = buildDemoPlan(demoConfig({ interactive: false, port: 58080, dbPort: 55432 }));
 
-    expect(plan[0]?.commands?.[0]).toContain('--port 55432:5432@loadbalancer');
+    expect(plan[0]?.commands?.[1]).toContain('--port 55432:5432@loadbalancer');
     expect(plan[1]?.commands?.[3]).toContain('localhost:55432');
   });
 

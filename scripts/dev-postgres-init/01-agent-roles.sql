@@ -10,7 +10,7 @@
 --
 -- The agent_email_ingest role gets:
 --   - LOGIN with a known dev password
---   - CONNECT on calypso_app
+--   - CONNECT on superfield_app
 --   - USAGE on public schema
 --   - SELECT on task_queue_view_email_ingest only (no INSERT/UPDATE/DELETE)
 --
@@ -41,4 +41,4 @@ END
 $$;
 
 -- Grant CONNECT on the app database to the email_ingest agent role
-GRANT CONNECT ON DATABASE calypso_app TO agent_email_ingest;
+GRANT CONNECT ON DATABASE superfield_app TO agent_email_ingest;

@@ -33,6 +33,10 @@ export interface DemoConfig {
   kubeconfigPath: string;
   namespace: string;
   port: number;
+  registryName: string;
+  registryPort: number;
+  /** Internal hostname used in k8s manifests (k3d-<registryName>:<port>). */
+  registryInternalHost: string;
   repoRoot: string;
 }
 
@@ -52,6 +56,7 @@ const CLUSTER_PREFIX = 'superfield-demo';
 const NAMESPACE = 'default';
 const IMAGE_REPO = 'superfield-demo-app';
 const DB_HOST = 'superfield-dev-postgres';
+const REGISTRY_NAME_SUFFIX = 'registry';
 const MODULE_DIR =
   typeof import.meta.dir === 'string'
     ? import.meta.dir
@@ -120,6 +125,16 @@ export function demoConfig(
     input.port ??
     (process.env.SUPERFIELD_DEMO_PORT ? Number(process.env.SUPERFIELD_DEMO_PORT) : randomPort());
 
+  // Registry port is randomised so concurrent demos don't collide.
+  const registryPort = process.env.SUPERFIELD_DEMO_REGISTRY_PORT
+    ? Number(process.env.SUPERFIELD_DEMO_REGISTRY_PORT)
+    : randomPort();
+  const registryName = `${clusterName}-${REGISTRY_NAME_SUFFIX}`;
+  // k3d registers the registry container in the cluster network under the
+  // name k3d-<registryName>.  Kubernetes pods must use this hostname (not
+  // localhost) to pull images pushed to the host-side localhost:<port>.
+  const registryInternalHost = `k3d-${registryName}:${registryPort}`;
+
   return {
     clusterName,
     dbHost: DB_HOST,
@@ -130,6 +145,9 @@ export function demoConfig(
     kubeconfigPath: clusterKubeconfigPath(clusterName),
     namespace: NAMESPACE,
     port,
+    registryName,
+    registryPort,
+    registryInternalHost,
     repoRoot: REPO_ROOT,
   };
 }
@@ -139,12 +157,15 @@ export function demoConfig(
 // ---------------------------------------------------------------------------
 
 export function buildDemoPlan(config: DemoConfig): DemoPlanStep[] {
-  const imageRef = `${config.imageRepo}:${config.imageTag}`;
+  const hostRegistryRef = `localhost:${config.registryPort}`;
+  const hostImageRef = `${hostRegistryRef}/${config.imageRepo}:${config.imageTag}`;
+  const clusterImageRef = `${config.registryInternalHost}/${config.imageRepo}:${config.imageTag}`;
   return [
     {
       name: 'cluster bootstrap',
       commands: [
-        `k3d cluster create ${config.clusterName} --port ${config.dbPort}:5432@loadbalancer --wait`,
+        `k3d registry create ${config.registryName} --port ${config.registryPort}`,
+        `k3d cluster create ${config.clusterName} --port ${config.dbPort}:5432@loadbalancer --registry-use k3d-${config.registryName}:${config.registryPort} --wait`,
         `k3d kubeconfig write ${config.clusterName} --output ${config.kubeconfigPath}`,
       ],
     },
@@ -159,11 +180,14 @@ export function buildDemoPlan(config: DemoConfig): DemoPlanStep[] {
     },
     {
       name: 'image build',
-      commands: [`docker build -f Dockerfile.release -t ${imageRef} .`],
+      commands: [`docker build --target release -t ${hostImageRef} .`],
     },
     {
-      name: 'image import',
-      commands: [`k3d image import -c ${config.clusterName} ${imageRef}`],
+      name: 'image push',
+      commands: [
+        `docker push ${hostImageRef}`,
+        `# manifest will reference cluster-internal: ${clusterImageRef}`,
+      ],
     },
     {
       name: 'manifest apply',
@@ -540,38 +564,31 @@ async function bootstrapDatabase(config: DemoConfig): Promise<void> {
 }
 
 async function buildDemoImage(config: DemoConfig): Promise<string> {
-  const imageRef = `${config.imageRepo}:${config.imageTag}`;
-  await run(['docker', 'build', '-f', 'Dockerfile.release', '-t', imageRef, '.'], {
+  // The local k3d registry is reachable from the host as localhost:<port> for
+  // docker build/push, but k3d configures containerd inside the node to resolve
+  // it as k3d-<registryName>:<port>.  We therefore:
+  //   1. Build and push using the host-side localhost:<port> address.
+  //   2. Return the cluster-internal k3d-<registryName>:<port> reference so
+  //      the k8s manifest uses the hostname that containerd can resolve.
+  const hostRegistryRef = `localhost:${config.registryPort}`;
+  const hostImageRef = `${hostRegistryRef}/${config.imageRepo}:${config.imageTag}`;
+  const clusterImageRef = `${config.registryInternalHost}/${config.imageRepo}:${config.imageTag}`;
+
+  await run(['docker', 'build', '--target', 'release', '-t', hostImageRef, '.'], {
     cwd: REPO_ROOT,
     kubeconfigPath: config.kubeconfigPath,
     phase: 'image build',
   });
 
-  // k3d image import uses a tarball written to a shared volume then read by
-  // `ctr` inside the node. On CI the file is gone by the time ctr opens it
-  // (race with volume cleanup). Pipe docker save directly into containerd
-  // instead, matching the same approach used for the postgres image.
-  const nodeName = `k3d-${config.clusterName}-server-0`;
-  console.log(`[demo] Importing ${imageRef} into ${nodeName} via docker save pipe.`);
-  const save = Bun.spawn(['docker', 'save', imageRef], {
+  console.log(`[demo] Pushing ${hostImageRef} to local registry at ${hostRegistryRef}.`);
+  await run(['docker', 'push', hostImageRef], {
     cwd: REPO_ROOT,
-    stdout: 'pipe',
-    stderr: 'inherit',
+    kubeconfigPath: config.kubeconfigPath,
+    phase: 'image push',
   });
-  const ctr = Bun.spawn(
-    ['docker', 'exec', '-i', nodeName, 'ctr', '-n', 'k8s.io', 'images', 'import', '-'],
-    {
-      cwd: REPO_ROOT,
-      stdin: save.stdout,
-      stdout: 'inherit',
-      stderr: 'inherit',
-    },
-  );
-  const [saveExit, ctrExit] = await Promise.all([save.exited, ctr.exited]);
-  if (saveExit !== 0) throw new Error(`docker save exited ${saveExit}`);
-  if (ctrExit !== 0) throw new Error(`ctr images import exited ${ctrExit}`);
 
-  return imageRef;
+  // Return the cluster-internal reference for use in k8s manifests.
+  return clusterImageRef;
 }
 
 async function deployDemoImage(config: DemoConfig, imageRef: string): Promise<void> {
@@ -743,6 +760,17 @@ async function main(): Promise<void> {
         kubeconfigPath: clusterKubeconfigPath(name),
         phase: 'cluster teardown',
       });
+      // Remove the attached local registry (best-effort — may not exist).
+      const registryName = `${name}-${REGISTRY_NAME_SUFFIX}`;
+      try {
+        await run(['k3d', 'registry', 'delete', registryName], {
+          cwd: REPO_ROOT,
+          kubeconfigPath: clusterKubeconfigPath(name),
+          phase: 'cluster teardown',
+        });
+      } catch {
+        // best effort
+      }
     }
     return;
   }
@@ -788,6 +816,17 @@ async function main(): Promise<void> {
         `[demo] Failed to delete cluster: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    // Remove the local registry attached to this cluster.
+    try {
+      await run(['k3d', 'registry', 'delete', config.registryName], {
+        cwd: REPO_ROOT,
+        kubeconfigPath: config.kubeconfigPath,
+        phase: 'cluster teardown',
+      });
+      console.log(`[demo] Registry '${config.registryName}' deleted.`);
+    } catch {
+      // best effort — registry may not exist if cluster creation failed early
+    }
   }
 
   // Register signal handlers immediately so Ctrl-C during a slow build step
@@ -806,13 +845,36 @@ async function main(): Promise<void> {
       console.log(`\n[k3d] Reusing cluster '${config.clusterName}'.`);
     } else {
       console.log(
+        `\n[k3d] Creating local registry '${config.registryName}' on port ${config.registryPort}.`,
+      );
+      await run(
+        ['k3d', 'registry', 'create', config.registryName, '--port', String(config.registryPort)],
+        {
+          cwd: REPO_ROOT,
+          kubeconfigPath: config.kubeconfigPath,
+          phase: 'cluster bootstrap',
+        },
+      );
+
+      console.log(
         `\n[k3d] Creating cluster '${config.clusterName}' (db-port=${config.dbPort}, app-port=${config.port}).`,
       );
-      await run(['k3d', 'cluster', 'create', config.clusterName, '--wait'], {
-        cwd: REPO_ROOT,
-        kubeconfigPath: config.kubeconfigPath,
-        phase: 'cluster bootstrap',
-      });
+      await run(
+        [
+          'k3d',
+          'cluster',
+          'create',
+          config.clusterName,
+          '--registry-use',
+          `k3d-${config.registryName}:${config.registryPort}`,
+          '--wait',
+        ],
+        {
+          cwd: REPO_ROOT,
+          kubeconfigPath: config.kubeconfigPath,
+          phase: 'cluster bootstrap',
+        },
+      );
     }
 
     await run(
