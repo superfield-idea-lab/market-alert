@@ -9,7 +9,7 @@
  *   2) Create/reuse a k3d cluster with host ingress + postgres port mappings
  *   3) Apply dev Postgres manifests and wait for readiness
  *   4) Run schema migration against the cluster Postgres
- *   5) Build latest app image (Dockerfile.release) and import into k3d
+ *   5) Build latest app image (Dockerfile --target release) and import into k3d
  *   6) Apply demo app Service + Deployment + Ingress
  *   7) Wait for rollout and ingress health, then enter interactive watch mode
  */
@@ -204,7 +204,7 @@ async function runMigrations(): Promise<void> {
 
 function buildAndImportImage(): void {
   console.log('\nBuilding app image from latest local code...');
-  run(`docker build -f Dockerfile.release -t ${APP_IMAGE} .`, { stdio: 'inherit' });
+  run(`docker build --target release -t ${APP_IMAGE} .`, { stdio: 'inherit' });
 
   console.log(`Importing ${APP_IMAGE} into k3d cluster...`);
   run(`k3d image import ${APP_IMAGE} -c ${CLUSTER_NAME}`, { stdio: 'inherit' });

@@ -40,9 +40,9 @@ jobs:
 
             while IFS= read -r file; do
               case "$file" in
-                apps/web/*|apps/server/*|packages/*|Dockerfile|Dockerfile.release)
+                apps/web/*|apps/server/*|packages/*|Dockerfile)
                   APP_CHANGED=true ;;
-                apps/worker/*|Dockerfile.worker|Dockerfile.agent-worker)
+                apps/worker/*|Dockerfile)
                   WORKER_CHANGED=true ;;
               esac
             done <<< "$CHANGED"
@@ -70,6 +70,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          target: production
           push: false
           tags: ghcr.io/${{ github.repository }}:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha
@@ -90,7 +91,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create codex binary stub for build validation
-        # Dockerfile.worker requires a codex binary at codex-binary/codex in the
+        # The worker target requires a codex binary at codex-binary/codex in the
         # build context. For PR build checks we use a minimal stub so the layer
         # copy succeeds without downloading the real binary.
         run: |
@@ -102,13 +103,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.worker
+          file: Dockerfile
+          target: worker
           push: false
           tags: ghcr.io/${{ github.repository }}/worker:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Release: main application image (Dockerfile.release, with push) ───────
+  # ── Release: main application image (release target, with push) ───────────
   build-test-push-app:
     needs: changes
     runs-on: ubuntu-latest
@@ -158,7 +160,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
+          target: release
           load: true
           push: false
           tags: |
@@ -220,7 +223,7 @@ jobs:
           docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           docker push ghcr.io/${{ github.repository }}:latest
 
-  # ── Release: worker image (Dockerfile.worker, with push) ─────────────────
+  # ── Release: worker image (worker target, with push) ─────────────────────
   build-test-push-worker:
     needs: changes
     runs-on: ubuntu-latest
@@ -245,7 +248,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.worker
+          file: Dockerfile
+          target: worker
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/worker:${{ github.ref_name }}

@@ -6,7 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "git config core.hooksPath .githooks",
+    "postinstall": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "build": "bun run --filter '*' build",
     "test": "bun run test:unit && bun run test:api && bun run test:component && bun run test:e2e",
     "test:migration": "bun --bun vitest run --config apps/server/vitest.migration.config.ts",
