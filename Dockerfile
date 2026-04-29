@@ -70,9 +70,9 @@ RUN bun build apps/server/src/index.ts \
 
 FROM build-server AS build-web
 
-# Refresh workspace package links then build the Vite frontend
-RUN bun install --frozen-lockfile --ignore-scripts && \
-    cd apps/web && bun run build
+# The shared install layer already populated node_modules and workspace links.
+# Reuse that layer directly so the release build only compiles the frontend once.
+RUN cd apps/web && bun run build
 
 # ── Stage: build-worker — compile the worker bundle ─────────────────────────
 

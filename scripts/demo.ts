@@ -45,6 +45,17 @@ export interface DemoPlanStep {
   name: string;
 }
 
+type DemoStage =
+  | 'cluster bootstrap'
+  | 'database bootstrap'
+  | 'image build'
+  | 'image push'
+  | 'manifest apply'
+  | 'readiness checks'
+  | 'watch prompt loop'
+  | 'cluster teardown'
+  | 'error';
+
 interface RunOptions {
   cwd?: string;
   env?: Record<string, string>;
@@ -74,6 +85,20 @@ const DEMO_DB_PASSWORDS = {
   superuserPassword: 'demo-admin-password',
 } as const;
 
+const INTERNAL_APP_PROBE_SCRIPT = [
+  "const live = await fetch('http://127.0.0.1:31415/health/live');",
+  'if (!live.ok) {',
+  "  console.error('internal health check failed: HTTP ' + live.status);",
+  '  process.exit(1);',
+  '}',
+  "const page = await fetch('http://127.0.0.1:31415/');",
+  'const html = await page.text();',
+  "if (!page.ok || !html.includes('<title>Superfield</title>') || !html.includes('id=\"root\"')) {",
+  "  console.error('internal app shell missing expected markers: HTTP ' + page.status);",
+  '  process.exit(1);',
+  '}',
+].join('\n');
+
 // ---------------------------------------------------------------------------
 // Port / name helpers
 // ---------------------------------------------------------------------------
@@ -94,6 +119,10 @@ function yamlValue(value: string): string {
 
 function nowTag(): string {
   return `demo-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function logDemo(stage: DemoStage, message: string): void {
+  console.log(`[demo:${stage}] ${message}`);
 }
 
 function clusterKubeconfigPath(clusterName: string): string {
@@ -194,10 +223,12 @@ export function buildDemoPlan(config: DemoConfig): DemoPlanStep[] {
       commands: ['kubectl apply -f k8s/app.yaml', 'kubectl apply -f <rendered demo secrets>'],
     },
     {
-      name: 'rollout',
+      name: 'readiness checks',
       commands: [
         'kubectl rollout status deployment/superfield-app --timeout=180s',
+        `kubectl exec deployment/superfield-app -- bun -e ${JSON.stringify(INTERNAL_APP_PROBE_SCRIPT)}`,
         `curl -sf http://localhost:${config.port}/health/live`,
+        `curl -sf http://localhost:${config.port}/`,
       ],
     },
     {
@@ -321,25 +352,36 @@ export function describeProbeFailure(phase: string, url: string, error: unknown)
 async function streamAndCapture(
   stream: ReadableStream<Uint8Array> | null | undefined,
   writer: NodeJS.WriteStream,
+  prefix = '',
 ): Promise<string> {
   if (!stream) return '';
 
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let output = '';
+  let buffered = '';
+
+  const writeLine = (line: string, newline = true): void => {
+    const rendered = prefix ? `${prefix}${line}` : line;
+    const text = newline ? `${rendered}\n` : rendered;
+    writer.write(text);
+    output += text;
+  };
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      output += chunk;
-      writer.write(chunk);
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() ?? '';
+      for (const line of lines) {
+        writeLine(line);
+      }
     }
-    const trailing = decoder.decode();
-    if (trailing) {
-      output += trailing;
-      writer.write(trailing);
+    buffered += decoder.decode();
+    if (buffered) {
+      writeLine(buffered, false);
     }
   } finally {
     reader.releaseLock();
@@ -361,8 +403,8 @@ async function run(command: string[], opts: RunOptions): Promise<void> {
   });
 
   const [, stderr, exitCode] = await Promise.all([
-    streamAndCapture(child.stdout, process.stdout),
-    streamAndCapture(child.stderr, process.stderr),
+    streamAndCapture(child.stdout, process.stdout, `[demo:${opts.phase}] `),
+    streamAndCapture(child.stderr, process.stderr, `[demo:${opts.phase}] `),
     child.exited,
   ]);
 
@@ -498,6 +540,7 @@ async function applyTempManifest(
   filename: string,
   contents: string,
   kubeconfigPath: string,
+  phase: DemoStage = 'manifest apply',
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'superfield-demo-'));
   const filePath = join(dir, filename);
@@ -506,7 +549,7 @@ async function applyTempManifest(
     await run(['kubectl', 'apply', '-f', filePath], {
       cwd: REPO_ROOT,
       kubeconfigPath,
-      phase: 'deploy',
+      phase,
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -531,8 +574,9 @@ async function bootstrapDatabase(config: DemoConfig): Promise<void> {
   // The postgres service is ClusterIP — it is not reachable via the k3d
   // loadbalancer port mapping.  Use kubectl port-forward to expose it locally
   // for the duration of the bootstrap run.
-  console.log(
-    `[demo] Starting port-forward: svc/superfield-dev-postgres → localhost:${config.dbPort}`,
+  logDemo(
+    'database bootstrap',
+    `Starting port-forward: svc/superfield-dev-postgres → localhost:${config.dbPort}`,
   );
   const portForward = Bun.spawn(
     ['kubectl', 'port-forward', 'svc/superfield-dev-postgres', `${config.dbPort}:5432`],
@@ -544,9 +588,12 @@ async function bootstrapDatabase(config: DemoConfig): Promise<void> {
     },
   );
   try {
-    console.log(`[demo] Waiting for postgres to accept connections on localhost:${config.dbPort}…`);
+    logDemo(
+      'database bootstrap',
+      `Waiting for postgres to accept connections on localhost:${config.dbPort}…`,
+    );
     await waitForTcpPort('127.0.0.1', config.dbPort);
-    console.log(`[demo] Postgres port-forward ready. Running init-remote.`);
+    logDemo('database bootstrap', 'Postgres port-forward ready. Running init-remote.');
     await run(['bun', 'run', 'packages/db/init-remote.ts'], {
       cwd: REPO_ROOT,
       env,
@@ -554,7 +601,7 @@ async function bootstrapDatabase(config: DemoConfig): Promise<void> {
       phase: 'database bootstrap',
     });
   } finally {
-    console.log(`[demo] Stopping port-forward for svc/superfield-dev-postgres.`);
+    logDemo('database bootstrap', 'Stopping port-forward for svc/superfield-dev-postgres.');
     try {
       portForward.kill();
     } catch {
@@ -580,7 +627,7 @@ async function buildDemoImage(config: DemoConfig): Promise<string> {
     phase: 'image build',
   });
 
-  console.log(`[demo] Pushing ${hostImageRef} to local registry at ${hostRegistryRef}.`);
+  logDemo('image push', `Pushing ${hostImageRef} to local registry at ${hostRegistryRef}.`);
   await run(['docker', 'push', hostImageRef], {
     cwd: REPO_ROOT,
     kubeconfigPath: config.kubeconfigPath,
@@ -600,8 +647,63 @@ async function deployDemoImage(config: DemoConfig, imageRef: string): Promise<vo
   await run(['kubectl', 'rollout', 'status', 'deployment/superfield-app', '--timeout=180s'], {
     cwd: REPO_ROOT,
     kubeconfigPath: config.kubeconfigPath,
-    phase: 'deploy',
+    phase: 'readiness checks',
   });
+}
+
+async function verifyInternalAppReachability(config: DemoConfig): Promise<void> {
+  logDemo(
+    'readiness checks',
+    'Verifying the app responds inside the pod and on the localhost port-forward.',
+  );
+  await run(
+    ['kubectl', 'exec', 'deployment/superfield-app', '--', 'bun', '-e', INTERNAL_APP_PROBE_SCRIPT],
+    {
+      cwd: REPO_ROOT,
+      kubeconfigPath: config.kubeconfigPath,
+      phase: 'readiness checks',
+    },
+  );
+  await waitForHealth(`http://localhost:${config.port}/health/live`);
+  await waitForHealth(`http://localhost:${config.port}/`);
+  logDemo('readiness checks', 'Internal pod probe and localhost port-forward probe passed.');
+}
+
+async function verifyPublicAppReachability(url: string, timeoutMs = 120_000): Promise<void> {
+  logDemo('readiness checks', `Verifying the cloudflared URL serves the app: ${url}`);
+  const started = Date.now();
+  let lastError: string | null = null;
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'user-agent':
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+          accept: 'text/html,application/xhtml+xml',
+        },
+      });
+      const html = await res.text();
+      const bodyMarkers = ['<title>Superfield</title>', 'id="root"'].filter((marker) =>
+        html.includes(marker),
+      );
+
+      if (res.ok && bodyMarkers.length >= 2) {
+        logDemo('readiness checks', `Cloudflared URL rendered the app shell at ${url}`);
+        return;
+      }
+
+      lastError = `status ${res.status}, content-type ${res.headers.get('content-type') ?? 'unknown'}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+
+  throw new Error(
+    `cloudflared URL did not render the app shell at ${url}${lastError ? ` (${lastError})` : ''}.`,
+  );
 }
 
 function waitForTcpPort(host: string, port: number, timeoutMs = 30_000): Promise<void> {
@@ -670,26 +772,15 @@ async function refreshOnce(config: DemoConfig): Promise<string> {
   config.imageTag = nowTag();
   const imageRef = await buildDemoImage(config);
   await deployDemoImage(config, imageRef);
-  try {
-    await waitForHealth(`http://localhost:${config.port}/health/live`);
-  } catch (error) {
-    throw new Error(
-      describeProbeFailure(
-        'deploy readiness',
-        `http://localhost:${config.port}/health/live`,
-        error,
-      ),
-      { cause: error },
-    );
-  }
+  await verifyInternalAppReachability(config);
   return imageRef;
 }
 
 async function runInteractiveLoop(config: DemoConfig): Promise<void> {
   if (!config.interactive) {
-    console.log(`  Local URL: http://localhost:${config.port}/`);
+    logDemo('watch prompt loop', `Local URL: http://localhost:${config.port}/`);
     // Non-interactive: keep the cluster alive until SIGINT/SIGTERM.
-    console.log('  (non-interactive mode — press Ctrl-C or send SIGTERM to stop)');
+    logDemo('watch prompt loop', '(non-interactive mode — press Ctrl-C or send SIGTERM to stop)');
     await new Promise<void>((resolve) => {
       process.once('SIGINT', resolve);
       process.once('SIGTERM', resolve);
@@ -701,7 +792,9 @@ async function runInteractiveLoop(config: DemoConfig): Promise<void> {
   try {
     while (true) {
       const answer = (
-        await rl.question('\n[demo] Press Enter to rebuild and redeploy, or q to quit: ')
+        await rl.question(
+          '\n[demo:watch prompt loop] Press Enter to rebuild and redeploy, or q to quit: ',
+        )
       )
         .trim()
         .toLowerCase();
@@ -709,7 +802,7 @@ async function runInteractiveLoop(config: DemoConfig): Promise<void> {
         return;
       }
       const imageRef = await refreshOnce(config);
-      console.log(`[demo] Deployed ${imageRef}`);
+      logDemo('watch prompt loop', `Deployed ${imageRef}`);
     }
   } finally {
     rl.close();
@@ -732,11 +825,11 @@ async function main(): Promise<void> {
   if (statusOnly) {
     const clusters = listDemoClusters();
     if (clusters.length === 0) {
-      console.log('No running demo clusters found.');
+      logDemo('cluster bootstrap', 'No running demo clusters found.');
     } else {
-      console.log('Running demo clusters:');
+      logDemo('cluster bootstrap', 'Running demo clusters:');
       for (const name of clusters) {
-        console.log(`  ${name}`);
+        console.log(`[demo:cluster bootstrap]   ${name}`);
       }
     }
     return;
@@ -749,12 +842,12 @@ async function main(): Promise<void> {
     const toDelete = targeted ? [targeted] : listDemoClusters();
 
     if (toDelete.length === 0) {
-      console.log('No demo clusters found — nothing to delete.');
+      logDemo('cluster teardown', 'No demo clusters found — nothing to delete.');
       return;
     }
 
     for (const name of toDelete) {
-      console.log(`[k3d] Deleting cluster '${name}'.`);
+      logDemo('cluster teardown', `Deleting cluster '${name}'.`);
       await run(['k3d', 'cluster', 'delete', name], {
         cwd: REPO_ROOT,
         kubeconfigPath: clusterKubeconfigPath(name),
@@ -792,7 +885,7 @@ async function main(): Promise<void> {
   async function teardown(reason?: string) {
     if (cleanupDone) return;
     cleanupDone = true;
-    if (reason) console.log(`\n[demo] ${reason}`);
+    if (reason) logDemo('cluster teardown', reason);
     try {
       cloudflaredChild?.kill();
     } catch {
@@ -803,17 +896,17 @@ async function main(): Promise<void> {
     } catch {
       // best effort
     }
-    console.log(`[demo] Deleting cluster '${config.clusterName}'...`);
+    logDemo('cluster teardown', `Deleting cluster '${config.clusterName}'...`);
     try {
       await run(['k3d', 'cluster', 'delete', config.clusterName], {
         cwd: REPO_ROOT,
         kubeconfigPath: config.kubeconfigPath,
         phase: 'cluster teardown',
       });
-      console.log(`[demo] Cluster '${config.clusterName}' deleted.`);
+      logDemo('cluster teardown', `Cluster '${config.clusterName}' deleted.`);
     } catch (err) {
       console.error(
-        `[demo] Failed to delete cluster: ${err instanceof Error ? err.message : String(err)}`,
+        `[demo:cluster teardown] Failed to delete cluster: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     // Remove the local registry attached to this cluster.
@@ -823,7 +916,7 @@ async function main(): Promise<void> {
         kubeconfigPath: config.kubeconfigPath,
         phase: 'cluster teardown',
       });
-      console.log(`[demo] Registry '${config.registryName}' deleted.`);
+      logDemo('cluster teardown', `Registry '${config.registryName}' deleted.`);
     } catch {
       // best effort — registry may not exist if cluster creation failed early
     }
@@ -842,10 +935,11 @@ async function main(): Promise<void> {
 
   try {
     if (clusterExists(config)) {
-      console.log(`\n[k3d] Reusing cluster '${config.clusterName}'.`);
+      logDemo('cluster bootstrap', `Reusing cluster '${config.clusterName}'.`);
     } else {
-      console.log(
-        `\n[k3d] Creating local registry '${config.registryName}' on port ${config.registryPort}.`,
+      logDemo(
+        'cluster bootstrap',
+        `Creating local registry '${config.registryName}' on port ${config.registryPort}.`,
       );
       await run(
         ['k3d', 'registry', 'create', config.registryName, '--port', String(config.registryPort)],
@@ -856,8 +950,9 @@ async function main(): Promise<void> {
         },
       );
 
-      console.log(
-        `\n[k3d] Creating cluster '${config.clusterName}' (db-port=${config.dbPort}, app-port=${config.port}).`,
+      logDemo(
+        'cluster bootstrap',
+        `Creating cluster '${config.clusterName}' (db-port=${config.dbPort}, app-port=${config.port}).`,
       );
       await run(
         [
@@ -891,7 +986,7 @@ async function main(): Promise<void> {
     // "content digest not found" because docker save includes multi-arch manifest
     // list references for blobs that were never fetched locally. Pulling via
     // `ctr -n k8s.io images pull` inside the node bypasses that entirely.
-    console.log('[demo] Pre-loading postgres:16-alpine into k3d containerd.');
+    logDemo('database bootstrap', 'Pre-loading postgres:16-alpine into k3d containerd.');
     await run(
       [
         'docker',
@@ -911,7 +1006,7 @@ async function main(): Promise<void> {
       },
     );
 
-    console.log('[demo] Applying dev Postgres manifests.');
+    logDemo('database bootstrap', 'Applying dev Postgres manifests.');
     await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml')], {
       cwd: REPO_ROOT,
       kubeconfigPath: config.kubeconfigPath,
@@ -931,45 +1026,40 @@ async function main(): Promise<void> {
       },
     );
 
-    console.log('[demo] Bootstrapping databases and roles.');
+    logDemo('database bootstrap', 'Bootstrapping databases and roles.');
     await bootstrapDatabase(config);
 
-    console.log('[demo] Building and importing the local release image.');
+    logDemo('image build', 'Building the local release image.');
     const imageRef = await buildDemoImage(config);
 
-    console.log('[demo] Applying the app runtime manifest.');
+    logDemo('manifest apply', 'Applying the app runtime manifest.');
     await deployDemoImage(config, imageRef);
 
-    console.log(`[demo] Cluster: ${config.clusterName}`);
-    console.log(
-      `[demo] To delete: SUPERFIELD_DEMO_CLUSTER=${config.clusterName} bun run demo --delete`,
+    logDemo('cluster bootstrap', `Cluster: ${config.clusterName}`);
+    logDemo(
+      'cluster bootstrap',
+      `To delete: SUPERFIELD_DEMO_CLUSTER=${config.clusterName} bun run demo --delete`,
     );
 
     portForward = startPortForward(config);
-    try {
-      await waitForHealth(`http://localhost:${config.port}/health/live`);
-    } catch (error) {
-      throw new Error(
-        describeProbeFailure(
-          'deploy readiness',
-          `http://localhost:${config.port}/health/live`,
-          error,
-        ),
-        { cause: error },
-      );
-    }
+    await verifyInternalAppReachability(config);
 
     if (noTunnel) {
-      console.log('[demo] --no-tunnel set; skipping cloudflared tunnel.');
+      logDemo('readiness checks', '--no-tunnel set; skipping cloudflared tunnel.');
     } else {
-      console.log('[demo] Starting cloudflared tunnel…');
+      logDemo('readiness checks', 'Starting cloudflared tunnel…');
       const tunnel = await startCloudflaredTunnel(config.port);
       cloudflaredChild = tunnel.child;
-      console.log(`[demo] Public URL: ${tunnel.url}`);
-      console.log(
-        '[demo] Note: Cloudflare quick tunnels show a browser-integrity warning page on first visit.',
+      logDemo('readiness checks', `Public URL: ${tunnel.url}`);
+      logDemo(
+        'readiness checks',
+        'Note: Cloudflare quick tunnels show a browser-integrity warning page on first visit.',
       );
-      console.log('[demo] Click "Click to continue" (or wait a few seconds) to reach the app.');
+      logDemo(
+        'readiness checks',
+        'Click "Click to continue" (or wait a few seconds) to reach the app.',
+      );
+      await verifyPublicAppReachability(tunnel.url);
     }
 
     await runInteractiveLoop(config);
@@ -980,7 +1070,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((err) => {
-    console.error(`[demo] ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[demo:error] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   });
 }
