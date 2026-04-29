@@ -224,6 +224,7 @@ export async function handlePasskeyRequest(
         userDisplayName: user.username,
         excludeCredentials,
         authenticatorSelection: {
+          authenticatorAttachment: 'platform',
           residentKey: 'preferred',
           userVerification: 'preferred',
         },
@@ -278,6 +279,8 @@ export async function handlePasskeyRequest(
         return json({ error: 'userId and response required' }, 400, corsHeaders);
       }
 
+      console.log('[reg/complete] step 1 — looking up challenge for userId:', userId);
+
       // Retrieve unexpired challenge for this user
       const challengeRows = await sql`
         SELECT id, challenge FROM passkey_challenges
@@ -288,6 +291,7 @@ export async function handlePasskeyRequest(
         LIMIT 1
       `;
       if (challengeRows.length === 0) {
+        console.warn('[reg/complete] no valid challenge found for userId:', userId);
         return json({ error: 'No valid challenge found' }, 400, corsHeaders);
       }
       const challengeRow = challengeRows[0] as { id: string; challenge: string };
@@ -296,6 +300,7 @@ export async function handlePasskeyRequest(
       await sql`DELETE FROM passkey_challenges WHERE id = ${challengeRow.id}`;
 
       const { rpId, origin: rpOrigin } = getRpConfig(req);
+      console.log('[reg/complete] step 2 — verifying, rpId:', rpId, 'origin:', rpOrigin);
 
       const verification = await verifyRegistrationResponse({
         response,
@@ -305,9 +310,11 @@ export async function handlePasskeyRequest(
       });
 
       if (!verification.verified || !verification.registrationInfo) {
+        console.warn('[reg/complete] verification failed for userId:', userId);
         return json({ error: 'Registration verification failed' }, 400, corsHeaders);
       }
 
+      console.log('[reg/complete] step 3 — storing credential for userId:', userId);
       const { credential, aaguid } = verification.registrationInfo;
 
       // Store the credential, return the persisted credential_id
@@ -325,6 +332,8 @@ export async function handlePasskeyRequest(
         RETURNING credential_id
       `;
       const credentialId = (inserted[0] as { credential_id: string }).credential_id;
+
+      console.log('[reg/complete] step 4 — issuing session, credentialId:', credentialId);
 
       // Look up the user's username so we can issue a session JWT.
       // This means a successful passkey registration also logs the user in,
@@ -344,6 +353,7 @@ export async function handlePasskeyRequest(
         isCrmAdmin: false,
         isComplianceOfficer: false,
       }));
+      console.log('[reg/complete] step 5 — sending 200 response for userId:', userId);
       const regRes = new Response(
         JSON.stringify({
           verified: true,

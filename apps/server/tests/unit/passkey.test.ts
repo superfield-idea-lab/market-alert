@@ -35,6 +35,45 @@ describe('passkey route matching', () => {
   });
 });
 
+describe('register/begin options', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('requests platform authenticators for passkey registration', async () => {
+    const sql = vi.fn(async (strings: TemplateStringsArray) => {
+      const query = strings.join(' ');
+      if (query.includes('FROM entities') && query.includes("type = 'user'")) {
+        return [{ id: 'user-1', username: 'alice' }];
+      }
+      if (query.includes('FROM passkey_credentials')) {
+        return [];
+      }
+      return [];
+    }) as unknown as import('../../src/index').AppState['sql'];
+    const appState = {
+      sql,
+      auditSql: sql,
+      analyticsSql: sql,
+      dictionarySql: sql,
+    } as import('../../src/index').AppState;
+
+    const req = new Request('http://localhost/api/auth/passkey/register/begin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'user-1' }),
+    });
+
+    const res = await handlePasskeyRequest(req, new URL(req.url), appState);
+    expect(res?.status).toBe(200);
+
+    const body = (await res?.json()) as {
+      authenticatorSelection?: { authenticatorAttachment?: string };
+    };
+    expect(body.authenticatorSelection?.authenticatorAttachment).toBe('platform');
+  });
+});
+
 describe('passkey challenge TTL constants', () => {
   test('challenge expires in 5 minutes (300 seconds)', () => {
     // The SQL uses NOW() + INTERVAL '5 minutes'. Verify intent is consistent.

@@ -110,7 +110,12 @@ export const RegisterPasskeyButton: React.FC<RegisterPasskeyButtonProps> = ({
       // Pass only the standard WebAuthn options (strip _userId before handing to the lib).
       const { _userId: _ignored, ...webAuthnOptions } = options;
       void _ignored;
+      console.log(
+        '[passkey] step 2 — invoking browser authenticator, resolvedUserId:',
+        resolvedUserId,
+      );
       const registrationResponse = await startRegistration({ optionsJSON: webAuthnOptions });
+      console.log('[passkey] step 2 complete — authenticator returned, sending to server');
 
       // Step 3: send response to server for verification and storage.
       // X-CSRF-Token is only required when adding a passkey to an existing
@@ -120,6 +125,7 @@ export const RegisterPasskeyButton: React.FC<RegisterPasskeyButtonProps> = ({
       if (userId) {
         completeHeaders['X-CSRF-Token'] = getCsrfToken();
       }
+      console.log('[passkey] step 3 — POSTing to register/complete');
       const completeRes = await fetch('/api/auth/passkey/register/complete', {
         method: 'POST',
         headers: completeHeaders,
@@ -127,6 +133,7 @@ export const RegisterPasskeyButton: React.FC<RegisterPasskeyButtonProps> = ({
         body: JSON.stringify({ userId: resolvedUserId, response: registrationResponse }),
       });
 
+      console.log('[passkey] step 3 complete — server responded with status:', completeRes.status);
       if (!completeRes.ok) {
         const err = await completeRes.json();
         throw new Error(err.error ?? 'Failed to complete passkey registration');
