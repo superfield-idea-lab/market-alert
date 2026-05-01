@@ -26,7 +26,7 @@ body="$(jq -r '
           parallel_safe: ($issue.parallel_safe // false)
         } | @json)
       + " -->";
-  | def phase_block($root; $phase):
+  def phase_block($root; $phase):
     [
       "## Phase: " + $phase.name,
       "",

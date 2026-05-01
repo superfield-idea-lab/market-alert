@@ -14,7 +14,7 @@ if [[ ! -f "docs/prd.md" ]]; then
   reasons="$(jq -c '. + ["missing-prd"]' <<<"$reasons")"
 fi
 
-if [[ ! -d "calypso-blueprint" ]]; then
+if [[ ! -d "superfield-blueprint" ]]; then
   reasons="$(jq -c '. + ["missing-blueprint-directory"]' <<<"$reasons")"
 fi
 

@@ -5,13 +5,24 @@ description: User-facing wrapper for the Superfield replan audit workflow. Use w
 
 # Superfield Replan Audit
 
-This skill exists because Codex currently discovers repository skills, but does not expose repository `.agents/commands/*.md` files as custom slash commands.
+Use this skill to run deterministic compliance checks before any replanning.
 
-Use this skill only when the user explicitly invokes `superfield-replan-audit` or clearly asks to run that command workflow.
+## Must do
 
-## Workflow
+- Audit all open issues for required headings and checkbox sections.
+- Audit issue titles and bodies for forbidden plan-order metadata.
+- Audit PRs for one-PR-one-issue compliance.
+- Audit PR bodies so they contain only a single closing reference.
+- Audit merged PRs so their linked issue is closed.
 
-1. Read [`../../commands/superfield-replan-audit.md`](../../commands/superfield-replan-audit.md).
-2. Treat that command file as the orchestration source of truth.
-3. Run the compliance audit flow it defines using the deterministic replan scripts.
-4. Surface concrete audit findings before any Plan rewrite.
+## Deterministic flow
+
+```bash
+.agents/scripts/replan/audit-issues.sh
+.agents/scripts/replan/audit-prs.sh
+.agents/scripts/replan/normalize-issue-template.sh
+.agents/scripts/replan/normalize-pr-body.sh
+```
+
+Do not continue into ranking or plan rewriting until these audits are clean or
+all straightforward fixes have been applied.

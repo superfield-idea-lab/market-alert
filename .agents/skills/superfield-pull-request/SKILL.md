@@ -5,13 +5,11 @@ description: User-facing wrapper for the Superfield pull request workflow. Use w
 
 # Superfield Pull Request
 
-This skill exists because Codex currently discovers repository skills, but does not expose repository `.agents/commands/*.md` files as custom slash commands.
+Use the internal `pr-sync` skill.
 
-Use this skill only when the user explicitly invokes `superfield-pull-request` or clearly asks to run that command workflow.
+Before creating or updating the PR:
 
-## Workflow
-
-1. Read [`../../commands/superfield-pull-request.md`](../../commands/superfield-pull-request.md).
-2. Treat that command file as the orchestration source of truth.
-3. Execute the workflow it defines without inventing alternate repository process.
-4. Keep issue, PR, and checklist state aligned with repository rules.
+- verify the body closes exactly one issue
+- keep the body to that single closing reference only
+- verify the linked issue checklist is complete
+- keep the PR aligned with current repository rules

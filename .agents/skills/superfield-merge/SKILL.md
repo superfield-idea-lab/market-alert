@@ -5,14 +5,24 @@ description: User-facing wrapper for the Superfield merge workflow. Use when the
 
 # Superfield Merge
 
-This skill exists because Codex currently discovers repository skills, but does not expose repository `.agents/commands/*.md` files as custom slash commands.
+Use this skill to merge a PR only when deterministic checks say it is ready.
 
-Use this skill only when the user explicitly invokes `superfield-merge` or clearly asks to run that command workflow.
+## Must do
 
-## Workflow
+- Check readiness with the shared scripts first.
+- Merge only when checks are green, checklist is complete, and the PR is mergeable.
 
-1. Read [`../../commands/superfield-merge.md`](../../commands/superfield-merge.md).
-2. Treat that command file as the orchestration source of truth.
-3. Execute only the deterministic merge actions described there.
-4. Use the shared `.agents/scripts/auto/` helpers as the source of truth for readiness and merge state.
-5. Do not broaden scope beyond the selected PR.
+## Must not do
+
+- Do not merge on judgment alone.
+- Do not bypass repository rules.
+
+## Deterministic flow
+
+```bash
+.agents/scripts/auto/merge-ready.sh {pr-number}
+.agents/scripts/auto/mark-pr-ready.sh {pr-number}
+.agents/scripts/auto/merge-pr.sh {pr-number}
+```
+
+If the PR is not ready, keep working the issue instead of merging.

@@ -25,7 +25,7 @@ jq -n \
   --argjson duplicates "$duplicates" \
   --argjson context_validation "$context_validation" \
   --arg prd_path "docs/prd.md" \
-  --arg blueprint_path "calypso-blueprint/" \
+  --arg blueprint_path "superfield-blueprint/" \
   '{
     request: $request,
     plan: $plan,
