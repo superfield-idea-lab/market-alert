@@ -14,7 +14,9 @@ if [[ ! -f "docs/prd.md" ]]; then
   reasons="$(jq -c '. + ["missing-prd"]' <<<"$reasons")"
 fi
 
-if [[ ! -d "superfield-blueprint" ]]; then
+BLUEPRINT_DIR="${BLUEPRINT_DIR:-blueprint}"
+
+if [[ ! -d "$BLUEPRINT_DIR" ]]; then
   reasons="$(jq -c '. + ["missing-blueprint-directory"]' <<<"$reasons")"
 fi
 
