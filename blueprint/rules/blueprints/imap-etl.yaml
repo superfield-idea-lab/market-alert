@@ -1,0 +1,915 @@
+meta:
+  domain: IMAP-ETL
+  title: IMAP ETL Protocol Blueprint
+  version: 1
+  requires:
+    - ETL
+    - DATA
+    - TASK-QUEUE
+  vision: |
+    This blueprint is not "special email logic." It is the general journaled ETL pattern
+    instantiated over an IMAP mailbox stream. IMAP already provides the two protocol primitives
+    that make this work cleanly: a mailbox identity boundary via UIDVALIDITY, and a per-mailbox
+    ordered cursor via UID. The protocol explicitly distinguishes UIDs (durable, ascending,
+    assigned once) from message sequence numbers (ephemeral, reassigned after expunges). Durable
+    sync is based on UIDs, never sequence numbers. (RFC 9051)
+
+    The core protocol statement is:
+
+      For mailbox epoch (account, mailbox, UIDVALIDITY), all messages with UID <= committed_uid
+      are considered durably imported.
+
+    This matches IMAP's semantics exactly: the combination of mailbox name, UIDVALIDITY, and UID
+    refers to a single immutable or expunged message on that server, and UIDs are strictly
+    ascending within the mailbox. The ETL blueprint's cursor, epoch, and item identity map
+    directly onto IMAP's UID, UIDVALIDITY, and per-message identity with no impedance mismatch.
+
+    The first version of this protocol is arrival-oriented, not a full mailbox mirror. It ingests
+    new messages, preserves raw content and envelope metadata, and does not make deletes,
+    expunges, moves, or read/unread state part of the correctness boundary. Once flag and expunge
+    tracking enter the correctness model, the system becomes a mailbox mirror — a fundamentally
+    different contract. That is deferred to a future version that can leverage CONDSTORE/QRESYNC
+    (RFC 7162) for efficient state resynchronization.
+
+    IMAP IDLE is treated as a wakeup optimization, not a source of truth — the same architectural
+    position the TASK-QUEUE blueprint takes with PostgreSQL LISTEN/NOTIFY. Clients using IDLE
+    should terminate and reissue it at least every 29 minutes to avoid timeout issues (RFC 9051).
+    The journal-driven cursor remains authoritative in both polling and IDLE modes.
+
+    Nearly every rule in this blueprint implements or refines a rule from the general ETL
+    blueprint. Where IMAP provides a stronger guarantee than the general pattern requires (e.g.,
+    UIDs are strictly ascending integers, not merely comparable), the IMAP-specific rule narrows
+    the general invariant. Where IMAP introduces a domain-specific risk (e.g., sequence number
+    misuse, Message-ID collision), the IMAP-specific rule adds a threat not present in the
+    general pattern. A small number of rules — the arrival-vs-mirror scope boundary and its
+    associated threat and antipattern — are genuinely IMAP-specific with no ETL counterpart.
+
+    Raw email is among the most PII-dense data a system can ingest — names, email addresses,
+    message bodies, attachments, credentials in forwarded messages. When the sink is a database
+    governed by the DATA blueprint, raw message blobs must be encrypted at the application layer
+    before storage. The ETL and DATA blueprints' security models apply in full; the IMAP
+    protocol does not create an exception.
+
+rules:
+  # ── Threats ──
+
+  - number: IMAP-T-001
+    hash: aa11bb22cc33
+    name: sequence-number-checkpoint
+    type: threat
+    description: >
+      The system uses IMAP message sequence numbers instead of UIDs for checkpoint state. Sequence
+      numbers are relative positions within a mailbox session — they are reassigned after expunges
+      and are not stable across sessions. A checkpoint based on sequence number 42 may refer to
+      message A in one session and message B in the next. Using sequence numbers for durable
+      progress tracking violates deterministic ordering and produces silent data loss or duplication
+      on every reconnect. (RFC 9051 Section 2.3.1.2)
+    links:
+      - {target: dd11ee22ff33, rel: depends_on}  # IMAP-P-001 uid-only-checkpointing
+      - {target: f6a7b8c9d0e2, rel: refines}     # ETL-T-006 unstable-cursor-causes-drift
+    deprecated: false
+
+  - number: IMAP-T-002
+    hash: bb22cc33dd44
+    name: uidvalidity-change-missed
+    type: threat
+    description: >
+      The system reconnects to a mailbox after UIDVALIDITY has changed (mailbox rebuilt, compacted,
+      or recreated) but does not check the new UIDVALIDITY against the journaled epoch. The old
+      committed UID now points into a different message sequence. The system either skips messages
+      (if UIDs were reassigned lower) or re-ingests from a stale midpoint (if UIDs were reset).
+      IMAP requires that if earlier-session UIDs do not persist, the server must increase
+      UIDVALIDITY. (RFC 9051 Section 2.3.1.1)
+    links:
+      - {target: ee22ff33aa44, rel: depends_on}  # IMAP-P-002 uidvalidity-is-epoch
+      - {target: b2c3d4e5f6a7, rel: refines}     # ETL-T-002 source-identity-change-corrupts-cursor
+    deprecated: false
+
+  - number: IMAP-T-003
+    hash: cc33dd44ee55
+    name: message-id-as-sync-identity
+    type: threat
+    description: >
+      The system uses the RFC 5322 Message-ID header as the primary sync identity instead of
+      the protocol-level (epoch, UID) tuple. Message-ID is set by the sending MUA, not the
+      receiving server — it can be missing, duplicated across messages, forged, or non-unique
+      across mailboxes. Two different messages can share a Message-ID; two copies of the same
+      message in different mailboxes have different UIDs. Message-ID is a useful secondary
+      correlation field but is not a durable sync identity.
+    links:
+      - {target: ff33aa44bb55, rel: depends_on}  # IMAP-P-004 epoch-uid-is-item-identity
+    deprecated: false
+
+  - number: IMAP-T-004
+    hash: dd44ee55ff66
+    name: idle-missed-causes-stale-mailbox
+    type: threat
+    description: >
+      The system relies on IMAP IDLE as the sole mechanism for discovering new messages. IDLE
+      notifications are lost during connection interruptions, server-side timeouts (commonly
+      29 minutes), or client reconnection windows. A system that only wakes on IDLE never
+      discovers messages that arrived while it was disconnected. The polling loop with a bounded
+      interval is the authoritative discovery mechanism; IDLE reduces latency but its loss must
+      not stall ingestion.
+    links:
+      - {target: aa44bb55cc66, rel: depends_on}  # IMAP-P-006 idle-assists-polling-not-replaces
+      - {target: 194e91ebc876, rel: refines}     # TQ-T-004 notification-missed-causes-stuck-task
+    deprecated: false
+
+  - number: IMAP-T-005
+    hash: ee55ff66aa77
+    name: parse-failure-blocks-ingestion
+    type: threat
+    description: >
+      A malformed message (broken MIME structure, invalid encoding, oversized attachment) causes
+      the runner to fail during parsing. If parsing is coupled to landing, the poison message
+      blocks all subsequent UIDs. The ingestion boundary must be raw message bytes, not parsed
+      content. A message that lands as raw bytes is ingested regardless of whether it can be
+      parsed. Parsing, MIME extraction, and attachment analysis are downstream operations that
+      do not gate the landing decision.
+    links:
+      - {target: bb55cc66dd77, rel: depends_on}  # IMAP-P-003 raw-landing-is-ingestion-boundary
+      - {target: d4e5f6a7b8c0, rel: refines}     # ETL-T-004 poison-item-blocks-stream
+    deprecated: false
+
+  - number: IMAP-T-006
+    hash: ff66aa77bb88
+    name: flag-tracking-breaks-append-model
+    type: threat
+    description: >
+      The system includes flag changes (read/unread, deleted, moved) or expunge tracking in the
+      correctness boundary of the v1 ingestion protocol. This transforms the system from an
+      append-only journaled importer into a full mailbox mirror — a fundamentally different
+      contract that requires bidirectional state diffing, tombstone handling, and move detection.
+      The v1 protocol must be arrival-oriented only. Flag and expunge tracking is deferred to v2
+      where CONDSTORE/QRESYNC (RFC 7162) can provide efficient differential state sync.
+    links:
+      - {target: cc66dd77ee88, rel: depends_on}  # IMAP-P-005 arrival-oriented-not-mirror
+    deprecated: false
+
+  - number: IMAP-T-007
+    hash: aa77bb88cc99
+    name: raw-email-pii-exposure
+    type: threat
+    description: >
+      Raw email bytes are among the most PII-dense data a system can ingest: sender and recipient
+      names, email addresses, message bodies, forwarded credentials, financial statements in
+      attachments, and legal correspondence. Landing raw bytes without application-layer encryption
+      means the sink table, its backups, its indexes, and any downstream consumers inherit the full
+      PII exposure. If the sink is in a database governed by the DATA blueprint, raw message blobs
+      must be encrypted before storage. This is a domain-specific amplification of the general ETL
+      sink PII threat (ETL-T-009) — email content is inherently high-PII, not incidentally.
+    links:
+      - {target: c4d5e6f7a8b9, rel: refines}     # ETL-T-009 sink-exposes-ingested-pii
+      - {target: 3be027de3daf, rel: depends_on}   # DATA-P-002 layered-encryption
+    deprecated: false
+
+  # ── Principles ──
+
+  - number: IMAP-P-001
+    hash: dd11ee22ff33
+    name: uid-only-checkpointing
+    type: principle
+    description: >
+      All durable progress tracking uses IMAP UIDs, never message sequence numbers. UIDs are
+      assigned once by the server, are unique within a mailbox epoch (UIDVALIDITY), and are
+      strictly ascending for new messages. Sequence numbers are relative positions that change
+      after expunges and are only valid within a single session. The committed cursor is always
+      a UID. Fetch operations for sync use UID FETCH, not FETCH. Search operations for sync use
+      UID SEARCH, not SEARCH. This is the IMAP instantiation of the general ETL deterministic
+      ordering principle — UIDs are the strongest cursor type IMAP provides.
+      (RFC 9051 Section 2.3.1.2)
+    links:
+      - {target: aa11bb22cc33, rel: mitigates}  # IMAP-T-001 sequence-number-checkpoint
+      - {target: a6b7c8d9e0f1, rel: refines}   # ETL-P-006 deterministic-ordering
+      - {target: 7b8c9d0e1f2a, rel: refines}   # ETL-D-007 cursor-design
+    deprecated: false
+
+  - number: IMAP-P-002
+    hash: ee22ff33aa44
+    name: uidvalidity-is-epoch
+    type: principle
+    description: >
+      The source identity (epoch) for an IMAP mailbox is the tuple (account, mailbox, UIDVALIDITY).
+      UIDVALIDITY is a 32-bit value assigned by the server that changes when the UID space is
+      invalidated — mailbox rebuild, compaction, or recreation. On every run, the system reads
+      UIDVALIDITY from the SELECT response and compares it against the journaled epoch. If
+      UIDVALIDITY has changed, the old committed UID is invalid and the epoch rollover reset
+      policy is applied. This is the IMAP instantiation of the general ETL stable source identity
+      principle. (RFC 9051 Section 2.3.1.1)
+    links:
+      - {target: bb22cc33dd44, rel: mitigates}  # IMAP-T-002 uidvalidity-change-missed
+      - {target: d4e5f6a7b8c9, rel: refines}   # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: IMAP-P-003
+    hash: bb55cc66dd77
+    name: raw-landing-is-ingestion-boundary
+    type: principle
+    description: >
+      The ingestion boundary is raw RFC 5322 message bytes, not parsed content. A message is
+      considered ingested when its raw bytes are durably stored in the sink with lineage metadata.
+      MIME parsing, header extraction, attachment processing, and any downstream business logic
+      are separate operations that run against the landed raw payload. A message that cannot be
+      parsed is still ingested — it lands as raw bytes and can be reprocessed when the parser is
+      fixed. This prevents MIME parsing failures from blocking the UID frontier and decouples
+      ingestion correctness from parsing correctness.
+    links:
+      - {target: ee55ff66aa77, rel: mitigates}  # IMAP-T-005 parse-failure-blocks-ingestion
+      - {target: 5f6a7b8c9d0e, rel: refines}   # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: IMAP-P-004
+    hash: ff33aa44bb55
+    name: epoch-uid-is-item-identity
+    type: principle
+    description: >
+      The durable identity of a landed message is (source_key, UIDVALIDITY, UID) — the
+      protocol-level tuple, not any header field. Message-ID is stored as a secondary correlation
+      field for cross-mailbox deduplication or threading, but it is not the sync identity. Two
+      messages with the same Message-ID but different UIDs are two distinct items. Two copies of
+      the same message in different mailboxes have independent identities. The unique constraint
+      in the sink is on (source_key, epoch, uid), not on Message-ID.
+    links:
+      - {target: cc33dd44ee55, rel: mitigates}  # IMAP-T-003 message-id-as-sync-identity
+      - {target: 4d5e6f7a8b9c, rel: refines}   # ETL-D-004 item-lineage
+    deprecated: false
+
+  - number: IMAP-P-005
+    hash: cc66dd77ee88
+    name: arrival-oriented-not-mirror
+    type: principle
+    description: >
+      The v1 protocol is arrival-oriented: it ingests new messages as they appear in the mailbox,
+      preserves raw content and envelope metadata at landing time, and advances the UID frontier.
+      It does not track flag changes (read/unread, flagged), expunges, moves between mailboxes,
+      or any mutable mailbox state. These operations transform the system from a journaled
+      importer into a bidirectional mailbox mirror — a different correctness contract that requires
+      state diffing, tombstone handling, and conflict resolution. Flag and expunge tracking is
+      deferred to v2, where CONDSTORE/QRESYNC (RFC 7162) provides efficient differential sync.
+    links:
+      - {target: ff66aa77bb88, rel: mitigates}  # IMAP-T-006 flag-tracking-breaks-append-model
+    deprecated: false
+
+  - number: IMAP-P-006
+    hash: aa44bb55cc66
+    name: idle-assists-polling-not-replaces
+    type: principle
+    description: >
+      IMAP IDLE is a wakeup optimization that reduces discovery latency for new messages. It is
+      not the source of truth for mailbox state. IDLE notifications are lost during connection
+      interruptions, server-side timeouts, and reconnection windows. A system that misses every
+      IDLE notification must still discover and ingest new messages within one poll interval. The
+      journal-driven cursor remains authoritative in both polling and IDLE modes. Clients using
+      IDLE should terminate and reissue the command at least every 29 minutes.
+      (RFC 9051 Section 6.3.13)
+    links:
+      - {target: dd44ee55ff66, rel: mitigates}  # IMAP-T-004 idle-missed-causes-stale-mailbox
+      - {target: d3356916c05d, rel: refines}    # TQ-P-005 notification-assists-polling-not-replaces
+    deprecated: false
+
+  - number: IMAP-P-007
+    hash: dd77ee88ff99
+    name: land-before-advance-uid
+    type: principle
+    description: >
+      The committed UID cursor is only advanced after raw message bytes are durably persisted in
+      the sink. This is the IMAP instantiation of the ETL blueprint's foundational invariant
+      (durable-before-advance). If the system crashes after landing messages but before committing
+      the cursor, the next run re-fetches and re-lands the same UIDs — safe because the sink is
+      idempotent on (source_key, epoch, uid). If the system were to advance the cursor before
+      landing, a crash would silently skip messages. The ordering is: UID FETCH, persist raw
+      bytes, verify persistence (optional), commit UID cursor. Never the reverse.
+    links:
+      - {target: f1e2d3c4b5a6, rel: refines}   # ETL-P-001 durable-before-advance
+      - {target: a1b2c3d4e5f6, rel: mitigates}  # ETL-T-001 cursor-advanced-before-persist
+    deprecated: false
+
+  # ── Design Patterns ──
+
+  - number: IMAP-D-001
+    hash: aa55bb66cc77
+    name: mailbox-source-adapter
+    type: design_pattern
+    description: >
+      The IMAP source adapter maps the general ETL source adapter interface onto IMAP protocol
+      commands. It exposes: resolve source key (account + mailbox path), open mailbox (SELECT or
+      EXAMINE), read current epoch (UIDVALIDITY from SELECT response), enumerate messages after
+      cursor (UID SEARCH UID cursor+1:*, ascending), fetch durable payload (UID FETCH for
+      RFC822/BODY[]), and optionally report mailbox statistics for reconciliation (STATUS for
+      MESSAGES, UIDNEXT). All operations use UID-based commands. The adapter does not expose
+      sequence numbers to the runner.
+    problem: |
+      The general ETL runner needs a uniform source interface. IMAP has its own command vocabulary
+      (SELECT, FETCH, SEARCH, UID) that must be mapped to the abstract source adapter operations
+      without leaking protocol details into the runner.
+    solution: |
+      A source adapter trait/interface with methods: source_key() -> SourceKey, open() -> Session,
+      epoch() -> UIDVALIDITY, enumerate_after(cursor) -> Vec<UID>, fetch(uid) -> RawMessage,
+      and optionally stats() -> MailboxStats. Internally, each method issues the corresponding
+      IMAP command. The adapter handles connection management, authentication, and IMAP error
+      translation. The runner sees only the abstract ETL interface.
+    tradeoffs: |
+      The adapter abstracts away IMAP capabilities negotiation, connection pooling, and TLS. These
+      are real operational concerns but belong in the adapter, not the runner. The adapter may need
+      to handle IMAP server quirks (non-compliant UIDVALIDITY behavior, missing capabilities)
+      behind the uniform interface.
+    links:
+      - {target: 8c9d0e1f2a3b, rel: refines}  # ETL-A-001 four-component-architecture
+    deprecated: false
+
+  - number: IMAP-D-002
+    hash: bb66cc77dd88
+    name: epoch-rollover-reset
+    type: design_pattern
+    description: >
+      When UIDVALIDITY changes between runs, the system performs an epoch rollover — not a silent
+      cursor reset. The rollover procedure: (1) close the previous epoch logically in the journal
+      (mark as superseded, retain history), (2) create a new epoch entry with the new UIDVALIDITY,
+      (3) reset committed UID frontier to 0 for the new epoch, (4) retain all previously landed
+      messages and run ledger entries from the old epoch. The old epoch's data is never deleted —
+      it remains available for audit and cross-epoch reconciliation.
+    problem: |
+      UIDVALIDITY changes invalidate the entire UID space. The old committed UID means nothing in
+      the new epoch. A silent cursor reset loses the audit trail of the previous epoch. Deleting
+      old-epoch data destroys the ability to compare pre- and post-rollover state.
+    solution: |
+      Epoch rollover creates a new journal entry rather than mutating the existing one. The source
+      key gains an epoch dimension: (account, mailbox, UIDVALIDITY). Previous epochs are logically
+      closed but their journal entries, run ledger records, and landed messages are retained.
+    tradeoffs: |
+      Epoch rollover means a full re-import of the mailbox from UID 1. For large mailboxes this
+      is expensive. In practice, UIDVALIDITY changes are rare (mailbox rebuild, server migration)
+      and a full re-import is the only correct response — there is no way to correlate old UIDs
+      with new UIDs after UIDVALIDITY changes.
+    links:
+      - {target: ee22ff33aa44, rel: refines}    # IMAP-P-002 uidvalidity-is-epoch
+      - {target: d4e5f6a7b8c9, rel: refines}   # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: IMAP-D-003
+    hash: cc77dd88ee99
+    name: uid-frontier-cursor
+    type: design_pattern
+    description: >
+      The cursor is the highest UID that has been durably landed and committed. The sync loop
+      enumerates messages with UID > committed_uid, ordered ascending by UID. Because UIDs are
+      strictly ascending integers assigned by the server for new messages, this cursor is
+      monotonic, stable across retries, comparable via integer comparison, and represents a safe
+      replay frontier. The cursor is stored as a 32-bit unsigned integer in the journal.
+    problem: |
+      IMAP offers multiple possible cursor types: sequence numbers, UIDs, dates, Message-IDs.
+      Only UIDs satisfy all requirements of the general ETL cursor design pattern: stable,
+      comparable, deterministic, and monotonic within an epoch.
+    solution: |
+      The committed cursor is a single UID value per (account, mailbox, UIDVALIDITY) tuple.
+      Enumeration uses range-bounded UID SEARCH (see IMAP-D-008) to find new messages. The
+      cursor advances to the highest UID in each successfully landed and committed batch.
+    tradeoffs: |
+      UIDs may have gaps (from expunged messages). Gaps are normal — the cursor skips over them
+      naturally because enumeration finds the next existing UID, not the next integer. The cursor
+      does not represent a count of messages; it represents a frontier in an ordered space.
+    links:
+      - {target: dd11ee22ff33, rel: refines}    # IMAP-P-001 uid-only-checkpointing
+      - {target: c2d3e4f5a6b7, rel: refines}   # ETL-P-002 monotonic-cursor
+      - {target: 7b8c9d0e1f2a, rel: refines}   # ETL-D-007 cursor-design
+    deprecated: false
+
+  - number: IMAP-D-004
+    hash: dd88ee99ff00
+    name: raw-message-landing
+    type: design_pattern
+    description: >
+      Each landed message is stored as raw RFC 5322 bytes plus metadata. The sink record contains:
+      raw message bytes (the full BODY[] or RFC822 content), source key, epoch (UIDVALIDITY), UID,
+      run ID, ingest timestamp, and optionally the IMAP envelope (FROM, TO, SUBJECT, DATE,
+      MESSAGE-ID) captured at fetch time for indexing convenience. The unique constraint is on
+      (source_key, epoch, uid). Message-ID is stored as a non-unique secondary field. MIME parsing,
+      attachment extraction, and content indexing are downstream operations that read from the
+      landed raw bytes.
+    problem: |
+      Coupling parsing to landing creates a single point of failure. A malformed MIME structure,
+      an invalid charset, or an oversized attachment blocks ingestion of the entire message and
+      all subsequent UIDs. The raw bytes are the immutable source of truth; parsed projections
+      are derived and recomputable.
+    solution: |
+      The sink stores raw bytes as a blob/bytea/binary column or object. Envelope metadata is
+      extracted from the IMAP FETCH response (not by parsing the raw message) for immediate
+      indexing. A separate parsing pipeline reads landed raw bytes and produces normalized
+      projections (parsed headers, body text, attachments, etc.) that can be reprocessed
+      independently.
+    tradeoffs: |
+      Storing raw bytes increases storage compared to storing only parsed projections. For typical
+      email (10KB-1MB per message), this is manageable. The tradeoff is strictly favorable:
+      raw bytes enable reprocessing, while parsed-only storage is lossy and irreversible.
+    links:
+      - {target: bb55cc66dd77, rel: refines}    # IMAP-P-003 raw-landing-is-ingestion-boundary
+      - {target: ff33aa44bb55, rel: refines}    # IMAP-P-004 epoch-uid-is-item-identity
+      - {target: 5f6a7b8c9d0e, rel: refines}   # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: IMAP-D-005
+    hash: ee99ff00aa11
+    name: uid-overlap-window
+    type: design_pattern
+    description: >
+      Each run optionally re-reads a bounded range of UIDs before the committed frontier. Instead
+      of only fetching UID > committed_uid, the runner fetches UID > (committed_uid - N) where N
+      is the overlap size (e.g., last 50 UIDs). The overlap catches messages missed by prior runs
+      due to partial failures, connection drops during fetch, or server-side delivery ordering
+      anomalies. The sink's idempotency on (source_key, epoch, uid) ensures that re-landing
+      overlap messages is harmless.
+    problem: |
+      A strict frontier can miss messages if a prior run's connection dropped after fetching
+      some UIDs but before landing all of them, or if the server delivered messages slightly
+      out of UID order during a session (rare but permitted by some implementations).
+    solution: |
+      Extend the fetch range behind the frontier by a configurable overlap count. The overlap
+      is bounded (default: 50 UIDs) and the sink rejects or upserts duplicates. The committed
+      cursor still advances forward to the highest UID in the new batch, not backward to the
+      overlap start.
+    tradeoffs: |
+      Overlap increases IMAP FETCH traffic proportional to the overlap size. For most mailboxes,
+      50 extra UIDs per run is negligible. For mailboxes with very large messages, a smaller
+      overlap or byte-budget-aware overlap may be appropriate. Note that the overlap is defined in
+      UID-space distance, not message count — if many UIDs in the overlap range were expunged, the
+      actual number of re-fetched messages may be less than N. This is safe (a smaller effective
+      overlap is still an overlap) but means the overlap guarantee is "at most N UIDs re-checked,"
+      not "exactly N messages re-fetched."
+    links:
+      - {target: 5e6f7a8b9c0d, rel: refines}  # ETL-D-005 overlap-window
+      - {target: e5f6a7b8c9d0, rel: refines}  # ETL-P-003 replay-safety
+    deprecated: false
+
+  - number: IMAP-D-006
+    hash: ff00aa11bb22
+    name: three-layer-audit
+    type: design_pattern
+    description: >
+      IMAP ingestion supports three layers of audit, each providing stronger guarantees.
+      Layer 1 (frontier audit): the run ledger records claimed UID range — what did the run
+      claim to process? Layer 2 (presence audit): item lineage records which UIDs actually
+      landed — what was actually stored? Layer 3 (reconciliation audit): re-enumerate a recent
+      UID window via UID SEARCH and compare against landed state — what should be present?
+      The combination answers "did we miss anything?" without trusting the cursor alone.
+    problem: |
+      A cursor-only design can prove it advanced but cannot prove every message within the
+      advanced range was actually landed. Network errors, partial fetches, and server quirks
+      can cause gaps between the claimed frontier and the actual landed set.
+    solution: |
+      Run ledger + item lineage + periodic UID re-enumeration. The reconciliation query issues
+      UID SEARCH UID (committed_uid - lookback):committed_uid and compares the result set against
+      landed records. Missing UIDs are flagged for re-fetch. This maps directly to the general
+      ETL reconciliation levels (cursor-based, manifest-based, re-enumeration).
+    tradeoffs: |
+      Layer 3 reconciliation issues additional IMAP commands and increases server load. The
+      lookback window should be bounded (e.g., last 500 UIDs or last 24 hours of runs) and
+      run periodically rather than on every sync cycle.
+    links:
+      - {target: 3f4a5b6c7d8e, rel: refines}  # ETL-D-008 reconciliation-levels
+      - {target: 2b3c4d5e6f7a, rel: refines}  # ETL-D-002 run-ledger
+      - {target: 4d5e6f7a8b9c, rel: refines}  # ETL-D-004 item-lineage
+    deprecated: false
+
+  - number: IMAP-D-007
+    hash: aa22bb33cc44
+    name: idle-wakeup-optimization
+    type: design_pattern
+    description: >
+      IMAP IDLE is used as a latency optimization for new message discovery. When IDLE is
+      supported (server advertises IDLE capability), the source adapter enters IDLE mode between
+      poll intervals and wakes immediately on server notification. The poll loop remains the
+      authoritative discovery mechanism. IDLE is terminated and reissued every 29 minutes maximum
+      to avoid server-side timeouts. If IDLE is not supported or the connection drops, the system
+      falls back to polling without degradation of correctness.
+    problem: |
+      Polling on a fixed interval introduces latency equal to half the interval on average. For
+      mailboxes where timely ingestion matters, this latency is noticeable.
+    solution: |
+      The source adapter uses a select/poll pattern: wake on IDLE notification OR wake on poll
+      interval timeout, whichever comes first. IDLE is a hint; the poll timer is the guarantee.
+      The adapter reissues IDLE before the 29-minute server timeout.
+    tradeoffs: |
+      IDLE requires holding an open IMAP connection per mailbox. For systems syncing many
+      mailboxes, this may exceed server connection limits. Polling-only mode is always available
+      as a fallback.
+    links:
+      - {target: aa44bb55cc66, rel: refines}    # IMAP-P-006 idle-assists-polling-not-replaces
+      - {target: 869d373d9461, rel: refines}    # TQ-D-005 listen-notify-wake
+    deprecated: false
+
+  - number: IMAP-D-008
+    hash: bb44cc55dd66
+    name: range-bounded-enumeration
+    type: design_pattern
+    description: >
+      Enumeration of new UIDs is range-bounded rather than open-ended. Instead of
+      UID SEARCH UID (committed_uid+1):*, which returns every UID above the frontier (potentially
+      millions for a large backlog), the runner issues UID SEARCH UID (committed_uid+1):UIDNEXT
+      bounded by a batch size limit. UIDNEXT (from the SELECT response or STATUS command) provides
+      the upper bound of the UID space. The runner processes at most batch_size UIDs per iteration,
+      then commits and loops. This prevents the SEARCH response itself from exhausting client
+      memory and keeps each iteration within the run budget.
+    problem: |
+      A mailbox with a 100,000-message backlog returns 100,000 UIDs in a single UID SEARCH
+      response. The response alone can be megabytes. For Gmail-scale mailboxes (millions of
+      messages), an unbounded SEARCH is a denial-of-service against the client. The SEARCH must
+      be bounded so the runner processes a manageable batch per iteration.
+    solution: |
+      The source adapter uses UIDNEXT from the SELECT response as the upper bound. Enumeration
+      issues UID SEARCH UID (committed_uid+1):(committed_uid+batch_size) where batch_size is
+      derived from the run budget (max_items). If the result set is empty and committed_uid <
+      UIDNEXT, the gap contains only expunged UIDs — advance the search window. Each iteration
+      fetches and lands at most batch_size messages before committing.
+    tradeoffs: |
+      Range-bounded enumeration requires multiple SEARCH commands to drain a large backlog. Each
+      SEARCH is a round-trip to the server. For backlogs of thousands, this is negligible. For
+      backlogs of millions, the alternative (unbounded SEARCH) is worse. The batch size should
+      match the run budget from ETL-D-012.
+    links:
+      - {target: 7d8e9f0a1b2c, rel: refines}  # ETL-D-012 backpressure-and-budget
+      - {target: cc77dd88ee99, rel: refines}   # IMAP-D-003 uid-frontier-cursor
+    deprecated: false
+
+  - number: IMAP-D-009
+    hash: cc55dd66ee77
+    name: connection-lifecycle
+    type: design_pattern
+    description: >
+      The IMAP connection is a session-scoped resource that must be managed across batches within
+      a run. A single run holds one IMAP connection from SELECT through commit. If the connection
+      drops mid-run (timeout, network error, server disconnect), the runner must: (1) abandon the
+      current batch (no partial commit), (2) reconnect and re-authenticate, (3) re-SELECT the
+      mailbox and re-read UIDVALIDITY, (4) if UIDVALIDITY matches the journaled epoch, resume
+      from the committed cursor (not from mid-batch state), (5) if UIDVALIDITY changed, trigger
+      epoch rollover. Reconnection always re-validates the epoch because the server may have
+      rebuilt the mailbox during the outage.
+    problem: |
+      IMAP connections are stateful — a SELECT establishes a session context that SEARCH and FETCH
+      depend on. A dropped connection invalidates all session state. Resuming from mid-batch
+      position after reconnect is unsafe because the session context (sequence number assignments,
+      mailbox state) may have changed.
+    solution: |
+      On connection drop, discard in-flight batch state and reconnect from the committed cursor.
+      The committed cursor in the journal is the only safe resume point. Re-SELECT and re-read
+      UIDVALIDITY to detect any epoch change during the outage. Already-landed messages from the
+      interrupted batch will be re-fetched and re-landed idempotently.
+    tradeoffs: |
+      Discarding an in-flight batch wastes the work done before the drop. For small batches this
+      is negligible. For very large batches, use smaller batch sizes to reduce the blast radius of
+      a mid-batch connection drop. The alternative — tracking mid-batch progress — adds complexity
+      without improving correctness, since the committed cursor already provides a safe resume point.
+    links:
+      - {target: dd77ee88ff99, rel: refines}    # IMAP-P-007 land-before-advance-uid
+      - {target: bb66cc77dd88, rel: refines}    # IMAP-D-002 epoch-rollover-reset
+      - {target: 5b6c7d8e9f0a, rel: refines}   # ETL-D-010 cross-store-atomicity
+    deprecated: false
+
+  - number: IMAP-D-010
+    hash: dd66ee77ff88
+    name: mailbox-as-partition
+    type: design_pattern
+    description: >
+      Each mailbox is an independent sync partition with its own epoch, cursor, journal entry,
+      and run ledger. Multi-mailbox sync runs independent instances concurrently. A single IMAP
+      connection can only have one mailbox SELECTed at a time, so each concurrent mailbox sync
+      requires its own connection. The total number of concurrent mailbox syncs per account is
+      bounded by the IMAP server's connection limit (typically 10-30 per account for major
+      providers). The runner manages a connection pool per account and schedules mailbox syncs
+      within the connection budget.
+    problem: |
+      An account with 50 mailboxes cannot sync all 50 concurrently if the server allows 15
+      connections. Without connection budgeting, the system exceeds server limits and connections
+      are rejected or existing connections are dropped.
+    solution: |
+      A per-account connection pool with a configurable maximum (default: server-advertised limit
+      or a conservative default like 10). Mailbox syncs are scheduled from the pool — when a
+      connection is available, the next mailbox is synced. Each mailbox sync is fully independent:
+      its own SELECT, its own epoch check, its own cursor, its own commit. No cross-mailbox
+      coordination is needed.
+    tradeoffs: |
+      Connection pooling limits throughput for accounts with many mailboxes. With a pool of 10,
+      syncing 50 mailboxes takes 5 rounds. This is acceptable — mailbox sync is I/O-bound and
+      individual mailbox syncs are fast for steady-state (only new messages since last cursor).
+      Backlog situations (initial import) are naturally bounded by the per-run budget.
+    links:
+      - {target: 4a5b6c7d8e9f, rel: refines}  # ETL-D-009 concurrency-partitioning
+      - {target: bb33cc44dd55, rel: refines}   # IMAP-A-001 imap-sync-protocol
+    deprecated: false
+
+  # ── Architectures ──
+
+  - number: IMAP-A-001
+    hash: bb33cc44dd55
+    name: imap-sync-protocol
+    type: architecture
+    description: >
+      The complete IMAP sync protocol, instantiating the general ETL synchronization loop over
+      IMAP primitives. Phase 0 (bootstrap): connect, SELECT mailbox, read UIDVALIDITY, create
+      journal with epoch and committed_uid = 0. Phase 1 (begin run): load journal, open mailbox,
+      read UIDVALIDITY, compare with journaled epoch. Phase 2 (reset if needed): epoch changed
+      triggers epoch rollover — close old epoch, create new epoch entry, reset cursor. Phase 3
+      (enumerate): range-bounded UID SEARCH (see IMAP-D-008) ascending, batched by budget.
+      Phase 4 (land): UID FETCH raw message + envelope, persist idempotently with lineage.
+      Phase 5 (commit): advance committed_uid to highest landed UID, write run ledger.
+      Phase 6 (audit): periodic overlap reconciliation via UID re-enumeration. Connection drops
+      at any phase trigger reconnection, epoch re-validation, and resume from committed cursor
+      (see IMAP-D-009).
+    diagram: |
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │  IMAP Sync Protocol                                                 │
+      │                                                                     │
+      │  ┌─────────────┐                                                    │
+      │  │ Load journal │                                                   │
+      │  └──────┬──────┘                                                    │
+      │         ▼                                                           │
+      │  ┌──────────────┐     ┌─────────────────┐                          │
+      │  │ SELECT mbox  │────►│ UIDVALIDITY     │                          │
+      │  │ read UIDVAL  │     │ changed?        │                          │
+      │  └──────────────┘     └───────┬─────────┘                          │
+      │                           yes │                                     │
+      │                               ▼                                     │
+      │                        ┌──────────────┐                             │
+      │                        │ Epoch        │                             │
+      │                        │ rollover     │                             │
+      │                        └──────┬───────┘                             │
+      │         ┌─────────────────────┘                                     │
+      │         ▼                                                           │
+      │  ┌────────────────────┐                                             │
+      │  │ UID SEARCH         │◄─────────────────────────┐                 │
+      │  │ uid+1:uid+N (rng)  │                          │                 │
+      │  └──────┬─────────────┘                          │                 │
+      │         ▼                                        │                 │
+      │  ┌────────────────────┐                          │                 │
+      │  │ UID FETCH          │                          │                 │
+      │  │ raw + envelope     │                          │                 │
+      │  └──────┬─────────────┘                          │                 │
+      │         ▼                                        │                 │
+      │  ┌────────────────────┐                          │                 │
+      │  │ Land idempotently  │                          │                 │
+      │  │ (epoch, uid) key   │                          │                 │
+      │  └──────┬─────────────┘                          │                 │
+      │         ▼                                        │                 │
+      │  ┌────────────────────┐     ┌──────────┐        │                 │
+      │  │ Commit UID cursor  │────►│ More?    │──yes───┘                 │
+      │  │ + run ledger       │     └────┬─────┘                          │
+      │  └────────────────────┘          │ no                              │
+      │                                  ▼                                 │
+      │                           ┌──────────┐                             │
+      │                           │   Done   │                             │
+      │                           └──────────┘                             │
+      └─────────────────────────────────────────────────────────────────────┘
+
+      Identity mapping:
+        source_key   = (account, mailbox)
+        source_epoch = (account, mailbox, UIDVALIDITY)
+        cursor       = highest_committed_uid
+        item_key     = (source_epoch, uid)
+    when_appropriate: |
+      Any system that needs to progressively ingest email from an IMAP server — whether for
+      archival, search indexing, AI processing, compliance capture, or analytics. The protocol
+      applies per-mailbox; multi-mailbox sync runs independent instances with separate cursors.
+    tradeoffs: |
+      The protocol is arrival-oriented only (v1). It does not track flag changes, expunges, or
+      moves. Adding state-mirror capabilities in v2 requires CONDSTORE/QRESYNC support and a
+      fundamentally different reconciliation model. The v1 protocol should not be extended with
+      flag tracking — it should be superseded by a v2 protocol that is designed for it.
+
+      Multi-mailbox sync is independent instances, not a single coordinated sync. Each mailbox
+      has its own epoch, cursor, and journal entry. Cross-mailbox ordering is not guaranteed or
+      required. This maps to the general ETL concurrency partitioning pattern where each mailbox
+      is an independent partition. See IMAP-D-010 for connection pooling constraints.
+
+      Of the four ETL components (source adapter, sink, journal store, runner), only the source
+      adapter is IMAP-specific (IMAP-D-001). The sink and journal store are storage-layer concerns
+      (PostgreSQL, S3, etc.) that use the general ETL patterns (ETL-D-001, ETL-P-005) without
+      IMAP-specific adaptation. The runner is the general ETL synchronization loop with IMAP
+      commands substituted at the source-adapter boundary.
+    links:
+      - {target: 9d0e1f2a3b4c, rel: refines}  # ETL-A-002 synchronization-loop
+      - {target: 8c9d0e1f2a3b, rel: refines}  # ETL-A-001 four-component-architecture
+      - {target: 4a5b6c7d8e9f, rel: refines}  # ETL-D-009 concurrency-partitioning
+    deprecated: false
+
+  # ── Checklist ──
+
+  - number: IMAP-C-001
+    hash: cc44dd55ee66
+    name: uid-not-sequence-number-verified
+    type: checklist
+    description: >
+      All IMAP commands used for sync (SEARCH, FETCH, STORE) are verified to use UID-prefixed
+      variants (UID SEARCH, UID FETCH). No sequence number is stored in the journal, sink, or
+      run ledger. Tested by inspecting the IMAP command log for any non-UID FETCH or SEARCH
+      during a sync run.
+    links:
+      - {target: dd11ee22ff33, rel: verifies}  # IMAP-P-001 uid-only-checkpointing
+    deprecated: false
+
+  - number: IMAP-C-002
+    hash: dd55ee66ff77
+    name: uidvalidity-change-triggers-rollover
+    type: checklist
+    description: >
+      UIDVALIDITY is changed on the server (simulated via mailbox recreation or test server
+      control). Verified that the runner detects the change, does not continue from the old
+      committed UID, creates a new epoch entry in the journal, and begins a full re-import from
+      UID 1. Old epoch data and run ledger entries are retained.
+    links:
+      - {target: ee22ff33aa44, rel: verifies}  # IMAP-P-002 uidvalidity-is-epoch
+      - {target: bb66cc77dd88, rel: verifies}  # IMAP-D-002 epoch-rollover-reset
+      - {target: 3b4c5d6e7f8a, rel: verifies}  # ETL-C-004 source-reset-detected
+    deprecated: false
+
+  - number: IMAP-C-003
+    hash: ee66ff77aa88
+    name: duplicate-uid-landing-idempotent
+    type: checklist
+    description: >
+      The same UID is fetched and landed twice within the same epoch. Verified that the sink
+      contains exactly one record for that (source_key, epoch, uid) tuple, not two. Idempotency
+      enforced by unique constraint or upsert.
+    links:
+      - {target: ff33aa44bb55, rel: verifies}  # IMAP-P-004 epoch-uid-is-item-identity
+      - {target: 2a3b4c5d6e7f, rel: verifies}  # ETL-C-003 duplicate-batch-idempotent
+    deprecated: false
+
+  - number: IMAP-C-004
+    hash: ff77aa88bb99
+    name: malformed-message-lands-as-raw
+    type: checklist
+    description: >
+      A message with broken MIME structure (invalid Content-Type, corrupted base64, missing
+      boundary) is present in the mailbox. Verified that the runner lands the raw bytes
+      successfully, the UID frontier advances past it, and the raw bytes are available for
+      downstream reprocessing. Parsing failures are logged but do not block ingestion.
+    links:
+      - {target: bb55cc66dd77, rel: verifies}  # IMAP-P-003 raw-landing-is-ingestion-boundary
+      - {target: 6e7f8a9b0c1d, rel: verifies}  # ETL-C-007 poison-item-quarantined
+    deprecated: false
+
+  - number: IMAP-C-005
+    hash: aa88bb99cc00
+    name: idle-loss-does-not-stall-ingestion
+    type: checklist
+    description: >
+      IDLE notifications are blocked (simulated via firewall rule or test harness). Messages are
+      inserted into the mailbox. Verified that the runner discovers and ingests the messages
+      within one poll interval despite receiving no IDLE notifications.
+    links:
+      - {target: aa44bb55cc66, rel: verifies}  # IMAP-P-006 idle-assists-polling-not-replaces
+    deprecated: false
+
+  - number: IMAP-C-006
+    hash: bb99cc00dd11
+    name: overlap-catches-prior-partial-failure
+    type: checklist
+    description: >
+      Runner is killed after fetching 5 of 10 UIDs in a batch but before committing the cursor.
+      On restart with overlap window enabled, verified that the overlap re-fetches the 5
+      already-landed UIDs (idempotently) plus the 5 missed UIDs, all 10 land successfully,
+      and the cursor advances to the correct frontier.
+    links:
+      - {target: ee99ff00aa11, rel: verifies}  # IMAP-D-005 uid-overlap-window
+      - {target: 1f2a3b4c5d6e, rel: verifies}  # ETL-C-002 crash-recovery-resumes-correctly
+    deprecated: false
+
+  - number: IMAP-C-007
+    hash: cc00dd11ee22
+    name: reconciliation-detects-missing-uid
+    type: checklist
+    description: >
+      A landed message is deleted from the sink. Reconciliation audit (Layer 3) re-enumerates
+      UIDs from the server and detects the gap. The missing UID is flagged for re-fetch.
+    links:
+      - {target: ff00aa11bb22, rel: verifies}  # IMAP-D-006 three-layer-audit
+      - {target: 5d6e7f8a9b0c, rel: verifies}  # ETL-C-006 reconciliation-detects-gaps
+    deprecated: false
+
+  - number: IMAP-C-008
+    hash: dd11ee22ff44
+    name: message-id-not-used-as-sync-key
+    type: checklist
+    description: >
+      Two messages with identical Message-ID headers but different UIDs are present in the
+      mailbox. Verified that both are landed as separate records with distinct (source_key,
+      epoch, uid) keys. The sink does not deduplicate or reject based on Message-ID.
+    links:
+      - {target: ff33aa44bb55, rel: verifies}  # IMAP-P-004 epoch-uid-is-item-identity
+    deprecated: false
+
+  - number: IMAP-C-009
+    hash: ee88ff99aa00
+    name: connection-drop-resumes-from-cursor
+    type: checklist
+    description: >
+      The IMAP connection is dropped (simulated via network interruption) after landing 3 of 10
+      messages in a batch but before committing the cursor. Verified that the runner reconnects,
+      re-SELECTs the mailbox, re-reads UIDVALIDITY (epoch unchanged), resumes from the committed
+      cursor (not from mid-batch), re-fetches all 10 UIDs, re-lands idempotently, and commits
+      the correct frontier.
+    links:
+      - {target: cc55dd66ee77, rel: verifies}   # IMAP-D-009 connection-lifecycle
+      - {target: dd77ee88ff99, rel: verifies}   # IMAP-P-007 land-before-advance-uid
+    deprecated: false
+
+  - number: IMAP-C-010
+    hash: ff99aa00bb11
+    name: large-backlog-bounded-enumeration
+    type: checklist
+    description: >
+      Mailbox contains 10,000 messages above the committed cursor. Runner configured with
+      batch_size=100. Verified that the runner does not issue an unbounded UID SEARCH returning
+      all 10,000 UIDs. Instead, it processes 100 UIDs per iteration, commits after each batch,
+      and exits cleanly when the run budget is exhausted.
+    links:
+      - {target: bb44cc55dd66, rel: verifies}   # IMAP-D-008 range-bounded-enumeration
+      - {target: 9a0b1c2d3e4f, rel: verifies}   # ETL-C-009 budget-exhaustion-commits-cleanly
+    deprecated: false
+
+  - number: IMAP-C-011
+    hash: aa00bb11cc22
+    name: raw-email-encrypted-at-rest
+    type: checklist
+    description: >
+      Raw email bytes stored in the sink are encrypted at the application layer before persistence.
+      Verified that querying the sink table directly returns ciphertext for the raw message column,
+      and that only the application layer can decrypt. Applies when the sink is in a database
+      governed by the DATA blueprint.
+    links:
+      - {target: aa77bb88cc99, rel: verifies}    # IMAP-T-007 raw-email-pii-exposure
+      - {target: 0b1c2d3e4f5a, rel: verifies}   # ETL-C-010 sink-pii-encryption-verified
+    deprecated: false
+
+  # ── Antipatterns ──
+
+  - number: IMAP-X-001
+    hash: ee22ff33aa55
+    name: sequence-number-as-cursor
+    type: antipattern
+    description: >
+      Using IMAP message sequence numbers for durable checkpoint state. Sequence numbers are
+      session-relative positions: message 5 in one session may be message 4 in the next after
+      an expunge. Storing "last synced sequence number = 42" in the journal is meaningless after
+      a reconnect. All durable sync must use UIDs. (RFC 9051 Section 2.3.1.2)
+    links:
+      - {target: dd11ee22ff33, rel: contradicts}  # IMAP-P-001 uid-only-checkpointing
+      - {target: 2e3f4a5b6c7d, rel: refines}     # ETL-X-006 page-number-cursor
+    deprecated: false
+
+  - number: IMAP-X-002
+    hash: ff33aa44bb66
+    name: message-id-as-primary-sync-identity
+    type: antipattern
+    description: >
+      Using the RFC 5322 Message-ID header as the primary deduplication or sync identity. Message-ID
+      is set by the sending MUA — it can be missing, duplicated, forged, or collide across
+      unrelated messages. Two distinct messages may share a Message-ID; using it as a unique
+      key causes one to silently overwrite the other. Message-ID is useful for threading and
+      cross-mailbox correlation but must not be the sync key.
+    links:
+      - {target: ff33aa44bb55, rel: contradicts}  # IMAP-P-004 epoch-uid-is-item-identity
+    deprecated: false
+
+  - number: IMAP-X-003
+    hash: aa44bb55cc77
+    name: parse-before-land
+    type: antipattern
+    description: >
+      Requiring successful MIME parsing, header extraction, or attachment processing before
+      landing a message. If the parse step fails, the message is not landed and the UID frontier
+      cannot advance past it. One malformed message blocks the entire mailbox. The correct
+      boundary is: land raw bytes first, parse later. A message that lands as raw bytes is
+      ingested; a message that requires parsing to land is hostage to parser quality.
+    links:
+      - {target: bb55cc66dd77, rel: contradicts}  # IMAP-P-003 raw-landing-is-ingestion-boundary
+    deprecated: false
+
+  - number: IMAP-X-004
+    hash: bb55cc66dd88
+    name: idle-as-sole-trigger
+    type: antipattern
+    description: >
+      Relying on IMAP IDLE as the sole mechanism for discovering new messages. IDLE is lost
+      during connection interruptions, server timeouts (29 minutes max recommended), and
+      reconnection windows. A system that only wakes on IDLE misses messages inserted while
+      disconnected. The polling loop is mandatory; IDLE is supplementary.
+    links:
+      - {target: aa44bb55cc66, rel: contradicts}  # IMAP-P-006 idle-assists-polling-not-replaces
+      - {target: 0718a9a15e3f, rel: refines}     # TQ-X-004 notification-as-sole-trigger
+    deprecated: false
+
+  - number: IMAP-X-005
+    hash: cc66dd77ee99
+    name: flag-tracking-in-v1
+    type: antipattern
+    description: >
+      Adding flag change tracking (read/unread, flagged, deleted), expunge detection, or
+      move tracking to the v1 arrival-oriented protocol. These operations require bidirectional
+      state diffing, tombstone handling, and conflict resolution — a fundamentally different
+      correctness model. Mixing arrival-oriented ingestion with state-mirror operations produces
+      a hybrid that is neither correct as an importer nor complete as a mirror. Flag tracking
+      belongs in v2 with CONDSTORE/QRESYNC support.
+    links:
+      - {target: cc66dd77ee88, rel: contradicts}  # IMAP-P-005 arrival-oriented-not-mirror
+    deprecated: false

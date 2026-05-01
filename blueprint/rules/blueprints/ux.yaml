@@ -1,0 +1,2296 @@
+meta:
+  domain: UX
+  title: UX Blueprint
+  version: 1
+  requires:
+    - AUTH
+  vision: |
+    This blueprint is part of the Superfield Generative UI product. It governs the UX of
+    interfaces that are generated, not hand-authored — specifications are produced by AI agents
+    from blueprint rules, and implementations are produced by agents from those specifications.
+    Governance of UX is a prerequisite for generative UI, not an optional discipline layered on
+    top of it. When the author is an agent, the blueprint is the only backstop against invented
+    vocabularies, unverifiable quality claims, and specifications that drift from any reproducible
+    grammar. Without a blueprint, generative UI produces output that is individually plausible and
+    collectively incoherent; with a blueprint, it produces interfaces that are auditable,
+    comparable, and demonstrably correct at scale. The remainder of this document defines that
+    blueprint: the controlled vocabularies, derivation rules, and conformance gates required for
+    generative UI to be trustworthy.
+
+    Beauty is a gate condition, not a preference. A Superfield application that is not visually
+    polished and immediately comprehensible will not survive management review — regardless of its
+    technical correctness. The interface is the product to every non-technical stakeholder. UX
+    quality must be established from the first screen, the first prototype, and the first demo. An
+    ugly early version sets an anchor that is nearly impossible to reverse. Applications that are
+    not beautiful from the start do not ship.
+
+    Service delivery is designed before interfaces. The question "how do we deliver this capability
+    to a user?" precedes "what does the screen look like?" The channel — visual browser interface,
+    API, command-line, voice, structured text — is a consequence of the service design, not its
+    premise. A service designed around a visual browser interface produces a service that only works
+    in a visual browser. A service designed around the delivery of a capability to a user produces
+    something that can be expressed in any appropriate medium.
+
+    Every user type receives an interface appropriate to their medium. A human end-user navigates a
+    visual interface. An administrator manages operations through a purpose-built interface — never
+    through raw database tooling or developer consoles. An AI agent interacts through structured,
+    machine-readable interfaces — not through screen scraping, browser automation, or interfaces
+    designed for human perception. Designing only for the human end-user produces a system where
+    administration is painful and agent integration is fragile.
+
+    The AI agent is a first-class user with a defined presence on the end-user account. It is not a
+    background process operating invisibly. Its participation in the account is declared, visible to
+    the human account holder, and governed by a clearly specified scope. The end-user knows the
+    agent is there. The service is designed to make that shared-account relationship explicit and
+    auditable, not to obscure it.
+
+    A generative-UI product is a chain of three derived artifacts. The compliance framework
+    (per product) is produced by the five-gate sequence defined in the governance architecture
+    — User Contract Clarity, IA Integrity, Design System Compliance, Data Feasibility, and
+    Edge-Case Coverage. The contract specs (per view) are derived from the framework. The
+    implementation (the actual web view code) is derived from the contract specs. Each
+    artifact builds on the prior; an artifact that contradicts the one above it is a defect in
+    the derivation, not a permitted variation. Harmony across the framework, specs, and
+    implementation is the correctness criterion for the product. Production is the agent
+    workflow; verification is orthogonal tooling that detects harmony but does not produce it.
+    Every artifact field records the blueprint rule that constrained it, so the governance
+    loop is auditable end-to-end. Two agents given the same capability and the same blueprint
+    produce artifacts that pass the same gates; divergence is treated as an underdetermined
+    blueprint to be patched, not a tolerated variation.
+
+rules:
+
+  # ── Threats (from Problem Space) ──────────────────────────────────────────────
+
+  - number: UX-T-001
+    hash: 103dbdf604b7
+    name: interface-before-service-design
+    type: threat
+    description: >
+     Interface ships before service is designed. UX is forced to compensate for
+      service design gaps; users encounter dead ends, confusing flows, and
+      tasks that cannot be completed without workarounds.
+    links:
+      - {target: d7f85752c1b1, rel: depends_on}
+      - {target: 173636ad122f, rel: depends_on}
+      - {target: fe86cd8bdfff, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-002
+    hash: ed3622189556
+    name: multiple-paths-same-action
+    type: threat
+    description: >
+     Multiple paths to the same action exist. Users cannot build reliable
+      mental models; onboarding takes longer; support costs increase;
+      automation fails when path selection is non-deterministic.
+    links:
+      - {target: 8d514b83d768, rel: depends_on}
+      - {target: 6723c3820539, rel: depends_on}
+      - {target: c2b183d34453, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-003
+    hash: 5f59ffbb3def
+    name: admin-ui-afterthought
+    type: threat
+    description: >
+     Admin UI is an afterthought. Operational tasks require developer
+      intervention or direct database access; configuration errors are not
+      caught before execution; operations are irreversible without a safety
+      net.
+    links:
+      - {target: e43e9ff85857, rel: depends_on}
+      - {target: 60c41e0c35c7, rel: depends_on}
+      - {target: e450c8a60d0d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-004
+    hash: a2a41eddd7d4
+    name: agent-no-specified-ux
+    type: threat
+    description: >
+     AI agent has no specified UX. Agents resort to browser automation or
+      screen scraping, which breaks on any visual change and is undetectable
+      when it fails silently.
+    links:
+      - {target: e43e9ff85857, rel: depends_on}
+      - {target: 8de237165c47, rel: depends_on}
+      - {target: 5af7abcb16da, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-005
+    hash: f1508d8f738f
+    name: agent-presence-invisible
+    type: threat
+    description: >
+     AI agent's presence on the account is invisible. End-users do not know
+      what the agent can see or do; trust is violated when the agent acts on
+      data the user did not understand was shared.
+    links:
+      - {target: b6f0649c24cf, rel: depends_on}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-006
+    hash: d6f18baa5d77
+    name: beautiful-prototype-replaced
+    type: threat
+    description: >
+     Beautiful prototype replaced by utilitarian production code. Management
+      anchor on the prototype quality is broken; stakeholders lose confidence;
+      remediation requires a design retrofit more expensive than building
+      correctly from the start.
+    links:
+      - {target: 95f2b6bff569, rel: depends_on}
+      - {target: f7986c534086, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-007
+    hash: 099bffc7e55a
+    name: design-coupled-to-framework
+    type: threat
+    description: >
+     Design is coupled to a front-end framework. Redesigning or porting the UX
+      requires rewriting both design and implementation; design decisions are
+      constrained by framework capabilities rather than user needs.
+    links:
+      - {target: e49ebcb9644c, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-008
+    hash: 6c3fb70bfa32
+    name: complexity-exposed-by-default
+    type: threat
+    description: >
+     Complexity is exposed by default. Users encounter features they do not
+      need before they understand the ones they do; first-use abandonment
+      increases; the product appears more complex than its core value warrants.
+    links:
+      - {target: 9b929c73ac69, rel: depends_on}
+      - {target: 52bdae16f26b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-T-009
+    hash: c165af9c20b4
+    name: agent-scope-undefined
+    type: threat
+    description: >
+     Agent scope on the account is undefined. Agent writes, reads, or triggers
+      actions beyond the user's expectation; the system has no mechanism to
+      audit or limit what the agent did on the user's behalf.
+    links:
+      - {target: b6f0649c24cf, rel: depends_on}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+
+  # ── Principles (from Core Principles) ─────────────────────────────────────────
+
+  - number: UX-P-001
+    hash: d7f85752c1b1
+    name: service-delivery-precedes-surface-design
+    type: principle
+    description: >
+     The UX of a capability is defined as the sequence of states a user moves
+      through to accomplish a goal, not as the visual or interactive elements
+      that render those states. Interfaces are outputs of service design, not
+      inputs. Designing the screen before the service produces a screen that
+      cannot change without breaking the service.
+    links:
+      - {target: 103dbdf604b7, rel: mitigates}
+      - {target: 173636ad122f, rel: refines}
+      - {target: fe86cd8bdfff, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-002
+    hash: 8d514b83d768
+    name: one-obvious-path-per-task
+    type: principle
+    description: >
+     For every user goal, there is exactly one path through the system that is
+      clearly correct and clearly available. Alternative paths either do not
+      exist or are hidden behind an explicit escalation. Ambiguity about which
+      path to take is a design defect. This applies equally to human and
+      machine interfaces.
+    links:
+      - {target: ed3622189556, rel: mitigates}
+      - {target: 6723c3820539, rel: refines}
+      - {target: c2b183d34453, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-003
+    hash: e43e9ff85857
+    name: medium-appropriate-interface-per-user-type
+    type: principle
+    description: >
+     Human end-users interact through visual, touch, or voice surfaces.
+      Administrators interact through operational interfaces that surface
+      system state and protect against dangerous operations. AI agents interact
+      through structured, machine-readable interfaces. Exposing an agent to a
+      human interface, or an administrator to a raw API, is a design failure.
+    links:
+      - {target: 5f59ffbb3def, rel: mitigates}
+      - {target: a2a41eddd7d4, rel: mitigates}
+      - {target: 8de237165c47, rel: refines}
+      - {target: 60c41e0c35c7, rel: refines}
+      - {target: e450c8a60d0d, rel: depends_on}
+      - {target: 5af7abcb16da, rel: depends_on}
+      - {target: 96e80a0c1f27, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-004
+    hash: 95f2b6bff569
+    name: beauty-is-functional-requirement
+    type: principle
+    description: >
+     Visual quality determines whether a product survives stakeholder review,
+      earns user trust, and sets the baseline for future development. A
+      polished interface signals the product is under control. Beauty is
+      evaluated at every milestone, not deferred.
+    links:
+      - {target: d6f18baa5d77, rel: mitigates}
+      - {target: f7986c534086, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-005
+    hash: b6f0649c24cf
+    name: agent-presence-explicit-and-bounded
+    type: principle
+    description: >
+     An AI agent operating on a user's account is a shared participant, not an
+      invisible background process. The system declares the agent's presence,
+      surfaces its scope, and logs its actions in a form the account holder can
+      review. Unbounded, invisible agent access is a UX failure.
+    links:
+      - {target: f1508d8f738f, rel: mitigates}
+      - {target: c165af9c20b4, rel: mitigates}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-006
+    hash: e49ebcb9644c
+    name: specifications-describe-needs-not-implementations
+    type: principle
+    description: >
+     A UX specification describes what a user needs to accomplish, the states
+      they move through, and the feedback they receive — not the components,
+      frameworks, or libraries used to render those states. A specification
+      that references specific front-end technologies has conflated design with
+      implementation.
+    links:
+      - {target: 099bffc7e55a, rel: mitigates}
+    deprecated: false
+
+  - number: UX-P-007
+    hash: 2f4a8b1c6d9e
+    name: blueprint-grammar-constrains-specification
+    type: principle
+    description: >
+     A UX specification is not improvised; it is generated by an agent
+      according to blueprint rules. The blueprint is a grammar of controlled
+      vocabularies, derivation rules, and field schemas from which every
+      specification is produced. Specification fields draw only from
+      vocabularies declared in the blueprint. A specification that invents
+      fields, labels, or categories outside the grammar is a conformance
+      failure regardless of its visible quality.
+    links:
+      - {target: d7f85752c1b1, rel: depends_on}
+      - {target: e49ebcb9644c, rel: refines}
+      - {target: 1f7f7b6a4c21, rel: refines}
+    deprecated: false
+
+  - number: UX-P-008
+    hash: 3e7b9d1f4c8a
+    name: generative-ui-artifact-harmony
+    type: principle
+    description: >
+     A generative-UI product is a chain of three derived artifacts: the
+      compliance framework (per product, produced by the five framework
+      gates), the contract specs (per view, derived from the framework),
+      and the implementation (code, derived from the contract specs).
+      Each artifact builds on the prior by derivation. Harmony across
+      the framework, specs, and implementation is the correctness
+      criterion — an artifact that contradicts the one above it is a
+      defect in the derivation, not a permitted variation. Production of
+      the artifacts is the agent workflow; verification of harmony is
+      orthogonal tooling. Conflating the two (treating verification
+      reports as the source of correctness, or treating derivation as a
+      tooling concern) is a category error.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: 1f7f7b6a4c21, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-009
+    hash: 5c8e2a7b3f1d
+    name: spec-field-provenance
+    type: principle
+    description: >
+     Every field in a governance artifact records the blueprint rule (by
+      hash or number) that constrained its value. An unconstrained field is
+      either a blueprint gap or an agent invention; both are audit failures.
+      Provenance makes the governance loop debuggable: when two agents
+      produce divergent specifications for the same capability, provenance
+      identifies the rule that underdetermined the decision. Modeled on W3C
+      PROV-style lineage, adapted for design artifacts.
+    links:
+      - {target: 2f4a8b1c6d9e, rel: refines}
+      - {target: 1f7f7b6a4c21, rel: depends_on}
+    deprecated: false
+
+  - number: UX-P-010
+    hash: 6b8d3e1c9a4f
+    name: canonical-ux-vocabulary
+    type: principle
+    description: >
+     The blueprint uses a fixed vocabulary for the structural units of UX
+      governance.
+
+      **Compliance framework**, **contract spec**, **implementation** —
+      the three derived artifacts of a generative-UI product. The
+      compliance framework is produced once per product by the framework
+      gate sequence. Contract specs are per-view and derived from the
+      framework. The implementation is the code and is derived from the
+      contract specs. Each is derived from the prior; harmony across all
+      three is the correctness criterion.
+
+      **Framework gate** — one of the five steps that produce the
+      compliance framework: User Contract Clarity, IA Integrity, Design
+      System Compliance, Data Feasibility, Edge-Case Coverage. Each gate
+      emits its own addressable artifact; the framework is the union of
+      the five artifacts.
+
+      **Deterministic gate** — a check whose outcome is binary pass/fail
+      against an invariant (e.g., a selector resolving in the DOM, an
+      enum value drawn from a controlled vocabulary, an ARIA snapshot
+      matching). All framework gates are deterministic. **Threshold-
+      scored gate** — a check that emits a numeric score and passes or
+      fails against a calibrated threshold declared in the blueprint;
+      threshold-scored checks are advisory (warning-only) until their
+      threshold is published, at which point they block merge like any
+      deterministic gate.
+
+      **View** — a single renderable surface (one route, modal, or
+      equivalent atomic screen) with its own contract spec and state
+      matrix. **Scope** — a group of related views that share a user
+      contract or flow; scope-level artifacts govern transitions between
+      views.
+
+      **Artifact** — a canonical JSON document in any stage of the
+      governance chain. **Report** — a machine-readable CI output
+      emitted by verification tooling; reports may be per-view
+      (*.ux-conformance.json, *.spec-conformance.json) or aggregate
+      (ux-conformance-report.json, spec-conformance-report.json).
+
+      Synonyms ("page," "screen," "UX scope," "doc," "tier," "layer")
+      are not used in governance artifacts. Where legacy terms appear,
+      they are mapped onto this vocabulary.
+    links:
+      - {target: 2f4a8b1c6d9e, rel: refines}
+      - {target: 2f8d6e4b1c5a, rel: refines}
+      - {target: 3e7b9d1f4c8a, rel: refines}
+    deprecated: false
+
+
+  # ── Design Patterns ───────────────────────────────────────────────────────────
+
+  - number: UX-D-001
+    hash: 173636ad122f
+    name: service-flow-mapping
+    type: design_pattern
+    description: >
+     Before any visual design begins, map the service flow as a state machine.
+      Define entry state, terminal state, every intermediate state, and every
+      transition. Annotate each transition with its trigger and feedback. The
+      resulting map is the authoritative UX specification from which interfaces
+      in any medium are derived. Trade-off: adds time before design begins;
+      wrong when the service is exploratory — prototype first, formalize once
+      the happy path is stable.
+    problem: |
+      Teams design interfaces before understanding the sequence of states a user must traverse to
+      accomplish a goal, producing interfaces that cannot be consistently navigated.
+    solution: |
+      Before any visual design begins, map the service flow as a state machine. Define: the entry
+      state, the terminal state (goal achieved), every intermediate state, and every transition.
+      Annotate each transition with what triggers it (user action, system event, agent action) and
+      what feedback the system provides. The resulting map is the authoritative UX specification
+      from which interfaces in any medium are derived.
+    tradeoffs: |
+      Service flow mapping adds time before design begins. It is the wrong pattern when the service
+      is exploratory or rapidly evolving — in those cases, prototype first and formalize the flow
+      once the happy path is stable.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: 103dbdf604b7, rel: mitigates}
+      - {target: fe86cd8bdfff, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-002
+    hash: 6723c3820539
+    name: single-path-navigation
+    type: design_pattern
+    description: >
+     For every user goal, design exactly one primary path. Secondary paths for
+      power users are explicitly labeled as alternatives and not surfaced in
+      the default flow. At every point, the next correct action is either the
+      only visible action or the most visually prominent one. Applies to visual
+      interfaces, CLI, and API. Trade-off: creates friction for teams wanting
+      multiple options; wrong when the user population is expert and expects
+      direct access to multiple routes.
+    problem: |
+      Multiple routes to the same destination cause users to question whether they are in the right
+      place, whether the routes produce different outcomes, and which one to use next time.
+    solution: |
+      For every user goal, design exactly one primary path. If a secondary path exists for power
+      users or edge cases, it is explicitly labeled as an alternative and is not surfaced in the
+      default flow. Navigation is structured so that at every point, the next correct action is
+      either the only visible action or the most visually prominent one.
+    tradeoffs: |
+      Single-path navigation requires deliberate choices about what is primary. This creates
+      friction for teams that want to surface multiple options simultaneously. The pattern is wrong
+      when the user population is expert and expects direct access to multiple routes — in those
+      cases, expose alternatives explicitly rather than hiding them.
+    links:
+      - {target: 8d514b83d768, rel: refines}
+      - {target: ed3622189556, rel: mitigates}
+      - {target: c2b183d34453, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-003
+    hash: 8de237165c47
+    name: agent-native-interface
+    type: design_pattern
+    description: >
+     Every capability an agent must access is exposed through a structured,
+      machine-readable interface with a stable schema. This interface is a
+      first-class product surface — versioned, documented, and tested to the
+      same standard as the human-facing interface. The human interface is built
+      on top of the same underlying capability. Trade-off: increases design and
+      implementation scope; wrong when agent access is genuinely never
+      required.
+    problem: |
+      AI agents are forced to interact with interfaces designed for human perception, producing
+      integrations that are fragile, opaque, and break silently when visual layouts change.
+    solution: |
+      Every capability that an agent must access is exposed through a structured, machine-readable
+      interface with a stable schema. This interface is a first-class product surface — versioned,
+      documented, and tested to the same standard as the human-facing interface. The agent's
+      interface is not a workaround for the absence of a visual interface; it is the canonical
+      interface for that user type. The human-facing interface is built on top of the same
+      underlying capability.
+    tradeoffs: |
+      Maintaining two interface surfaces (human and agent) increases design and implementation
+      scope. This cost is lower than the cost of maintaining fragile browser automation against a
+      changing visual interface. The pattern is wrong when agent access is genuinely never required
+      — do not pre-build an agent interface for capabilities that have no agent use case.
+    links:
+      - {target: e43e9ff85857, rel: refines}
+      - {target: a2a41eddd7d4, rel: mitigates}
+      - {target: 67863239eb85, rel: depends_on}
+      - {target: 300c0e349c72, rel: depends_on}
+      - {target: 5af7abcb16da, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-004
+    hash: 60c41e0c35c7
+    name: unified-design-system-across-user-types
+    type: design_pattern
+    description: >
+     A single design system governs all visual interfaces including admin.
+      Interaction patterns, information hierarchy, form behavior, feedback, and
+      error handling are specified once and applied everywhere. Role-specific
+      elements are expressed within the design system, not outside it.
+      Trade-off: requires more design investment upfront; allow layout and
+      navigation to diverge when admin and end-user workflows are fundamentally
+      different.
+    problem: |
+      Admin interfaces and end-user interfaces are designed independently, producing systems where
+      administrators are unable to form accurate mental models of what users experience, and where
+      users see inconsistency if they access admin-adjacent views.
+    solution: |
+      A single design system governs all visual interfaces in the application, including
+      administrative interfaces. Interaction patterns, information hierarchy, form behavior,
+      feedback, and error handling are specified once and applied everywhere. The admin interface
+      is not exempt from visual and UX standards. Role-specific elements are expressed within the
+      design system rather than outside it.
+    tradeoffs: |
+      Applying the design system to admin interfaces requires more design investment upfront. The
+      pattern is wrong when admin and end-user workflows are so different in nature that a shared
+      system produces confusing ambiguity — in those cases, maintain shared foundations (color,
+      typography, component library) while allowing layout and navigation to diverge.
+    links:
+      - {target: e43e9ff85857, rel: refines}
+      - {target: 5f59ffbb3def, rel: mitigates}
+      - {target: e450c8a60d0d, rel: contradicts}
+      - {target: 96e80a0c1f27, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-005
+    hash: 9b929c73ac69
+    name: progressive-disclosure
+    type: design_pattern
+    description: >
+     The default state of any view shows only what is needed for the primary
+      task. Secondary capabilities and advanced options are accessible but not
+      immediately visible. Disclosure is triggered by explicit user intent, not
+      by scrolling. Each disclosure level is stable — once revealed, the
+      advanced state persists for the session or preference. Trade-off:
+      deciding disclosure levels requires user research; audit levels regularly
+      against actual usage.
+    problem: |
+      Full system complexity shown at first contact causes abandonment and slows onboarding; but
+      hiding capabilities from experienced users creates frustration.
+    solution: |
+      The default state of any view shows only what is needed for the primary task at that moment.
+      Secondary capabilities, advanced options, and edge-case controls are accessible but not
+      immediately visible. Disclosure is triggered by explicit user intent (a labeled "advanced"
+      toggle, a secondary navigation level) not by scrolling past primary content. Each disclosure
+      level is stable — once revealed, the advanced state persists for that user session or
+      preference.
+    tradeoffs: |
+      Deciding what belongs at each disclosure level is a judgment call that requires user research
+      or iteration. The pattern can be used to hide capabilities that should be primary; audit
+      disclosure levels regularly against actual usage patterns.
+    links:
+      - {target: 6c3fb70bfa32, rel: mitigates}
+      - {target: 52bdae16f26b, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-006
+    hash: 1f7f7b6a4c21
+    name: artifact-contracts-as-source-of-truth
+    type: design_pattern
+    description: >
+     UX governance is expressed as a chain of canonical JSON artifacts by
+      phase: intake, domain capability map, information architecture, screen
+      spec, review findings, and handoff contract. Human-readable Markdown,
+      Mermaid, HTML, and SVG outputs are derived from those JSON artifacts and
+      never become the authoritative source. Trade-off: introduces more
+      structure and file discipline; wrong only when the work is an
+      exploratory sketch that will not be reused.
+    problem: |
+      UX teams drift when notes, diagrams, mockups, and review comments are all treated as equal
+      sources of truth. Later phases invent fields, forget constraints, or overwrite earlier
+      decisions with presentation artifacts.
+    solution: |
+      Express UX governance as a chain of canonical JSON artifacts by phase. The required phases
+      are intake, domain capability map, information architecture, screen spec, review findings,
+      and handoff contract. Each canonical JSON artifact records the metadata needed to trace its
+      origin, status, and outputs. Human-readable Markdown, Mermaid, HTML, and SVG files are
+      generated from the canonical JSON and are derived artifacts only.
+    tradeoffs: |
+      This approach adds structure and file discipline to the UX workflow. That cost is justified
+      because the purpose of UX governance is to keep the review system auditable and consistent.
+      It is wrong only for disposable exploratory sketches that will not become part of the
+      product contract.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: e49ebcb9644c, rel: refines}
+    deprecated: false
+
+  - number: UX-D-007
+    hash: 130d0ff25610
+    name: implementation-conformance-report
+    type: design_pattern
+    description: >
+     The implementation is verified against its contract spec by
+      orthogonal tooling that emits a machine-readable report,
+      ux-conformance-report.json. The report records run identity,
+      commit identity, the view under test, deterministic-check
+      results, evidence pointers, and the blocking decision. Markdown
+      summaries are derived artifacts only. The report detects harmony
+      between implementation and spec; it is not itself the source of
+      correctness.
+    problem: |
+      Merge decisions for implementation correctness become subjective when evidence is
+      scattered across screenshots, logs, and comments with no canonical machine-readable
+      report.
+    solution: |
+      Require every implementation-conformance run to emit ux-conformance-report.json with
+      stable fields for run identity, commit identity, per-view hard checks, evidence
+      references, and blocking issues. The report is the canonical CI artifact for merge
+      decisions at the implementation-vs-spec boundary.
+    tradeoffs: |
+      Adds reporting overhead, but makes implementation conformance auditable and lets CI fail
+      on concrete missing or invalid evidence instead of subjective commentary.
+    links:
+      - {target: 5efd041cefe4, rel: refines}
+    deprecated: false
+
+  - number: UX-D-008
+    hash: 4bf26c1a8d31
+    name: threshold-scored-signal-analysis
+    type: design_pattern
+    description: >
+     Some UX checks do not admit a binary pass/fail against an invariant
+      — saliency ranking, screenshot layout parsing, model-assisted UX
+      lint, synthetic walkthrough quality. These are threshold-scored
+      gates: each emits a numeric score and evidence into
+      ux-conformance-report.json under a soft_signals section. A
+      threshold-scored gate is advisory (warning-only) until a labeled
+      calibration set, an explicit threshold, and a blueprint update
+      reclassify it as a deterministic gate, at which point it blocks
+      merge like any other gate. A threshold-scored check without a
+      published threshold never blocks merge.
+    problem: |
+      Heuristic UX analysis is useful for ranking risk and exposing likely issues, but teams
+      mistake scores for proof when advisory signals are mixed into merge-blocking checks.
+    solution: |
+      Keep threshold-scored UX analysis in a separate lane from deterministic checks. Each job
+      emits warning-only scores and evidence into ux-conformance-report.json under
+      soft_signals. Promotion to blocking requires a labeled calibration set, an explicit
+      threshold, and a blueprint update that reclassifies the signal as a deterministic gate.
+    tradeoffs: |
+      Keeping scored and deterministic checks in separate lanes produces more artifacts and
+      more review surface. Acceptable because it keeps the blocking path deterministic and
+      prevents heuristic tools from silently becoming policy.
+    deprecated: false
+
+  - number: UX-D-010
+    hash: 6a3d1f8b2e9c
+    name: user-goal-declaration-per-view
+    type: design_pattern
+    description: >
+     Every view declares its primary user goal drawn from the
+      jobs-to-be-done (JTBD) controlled vocabulary — the outcome the user is
+      trying to achieve. Secondary goals are enumerated separately. The
+      declared primary goal is the anchor for every downstream check:
+      primary-action placement, density budget, and interaction inventory
+      are all evaluated relative to it.
+    problem: |
+      Views are designed without an explicit statement of what the user is trying to accomplish,
+      leaving every other UX check without a reference point. Primary-action placement,
+      dominance, and reachability cannot be checked when the primary goal is implicit.
+    solution: |
+      Require each view in the screen spec to declare a primary user goal from a controlled JTBD
+      taxonomy, plus any secondary goals. The taxonomy is declared in the blueprint and reused
+      across views. The primary goal names the action the user takes to accomplish the job;
+      downstream spec fields (primary action selector, expected region, affordance kind) all
+      reference it.
+    tradeoffs: |
+      Forces view-level intent to be explicit. Wrong when a view genuinely serves no user goal —
+      in which case the view should not exist.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: 8d514b83d768, rel: refines}
+      - {target: 2f4a8b1c6d9e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-011
+    hash: 7b4e2f9c1a8d
+    name: reading-pattern-and-primary-action-placement
+    type: design_pattern
+    description: >
+     Each view declares a reading pattern from a controlled set (F-pattern,
+      Z-pattern, layer-cake, centered-hero, modal-focus) grounded in
+      Nielsen Norman Group eye-tracking research. The declared pattern
+      assigns a named region to the primary action. CI computes the primary
+      action's bounding box at each declared breakpoint and fails when it
+      falls outside the declared region. The check is deterministic: the
+      research fixes the regions; the spec selects one.
+    problem: |
+      "Primary-action placement" is invoked as a check but never defined. Without a declared
+      region grounded in reading-pattern research, any placement is defensible and the check
+      reduces to taste judgment.
+    solution: |
+      Declare the reading pattern per view and per breakpoint from a controlled vocabulary. The
+      vocabulary maps each pattern to fixed regions (F-pattern top-left quadrant, Z-pattern
+      terminal, layer-cake header band, etc.). The spec assigns the primary action to one named
+      region. CI extracts the primary action's bounding box from headless capture and asserts
+      containment.
+    tradeoffs: |
+      Adds a required spec field and a CI check. Wrong when a view deliberately uses a novel
+      reading pattern — extend the controlled vocabulary in the blueprint rather than bypass
+      the check.
+    links:
+      - {target: 8d514b83d768, rel: refines}
+      - {target: 95f2b6bff569, rel: refines}
+      - {target: 6a3d1f8b2e9c, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-012
+    hash: 8c5f3a1e7b2d
+    name: information-density-budget
+    type: design_pattern
+    description: >
+     Each view declares numeric caps on interactive elements, text blocks,
+      nesting depth, and above-fold element count. The budget is grounded
+      in Hick's Law (decision time grows with option count) and Tufte's
+      data-ink ratio (non-informational chrome is waste). CI counts DOM
+      elements and fails on exceedance. The check is fully deterministic.
+    problem: |
+      "Complexity exposed by default" has no numeric definition. Progressive disclosure tells you
+      to hide things but not how much is too much. Density is left to judgment, so overcrowding
+      is caught only in late review.
+    solution: |
+      Require each view spec to declare numeric caps: max interactive elements, max text blocks,
+      max nesting depth, max above-fold elements. Default caps live in the blueprint; view-level
+      overrides require explicit rationale. CI counts DOM elements and fails when any count
+      exceeds the declared cap.
+    tradeoffs: |
+      Discrete caps feel arbitrary at the margin. Calibrate defaults against shipped views
+      periodically rather than guessing once and freezing.
+    links:
+      - {target: 9b929c73ac69, rel: refines}
+      - {target: 6c3fb70bfa32, rel: mitigates}
+      - {target: 6a3d1f8b2e9c, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-013
+    hash: 9d6a4b2f8c1e
+    name: baseline-grid-conformance
+    type: design_pattern
+    description: >
+     Spacing is constrained to multiples of a declared baseline-grid unit
+      (8pt is the industry default; 4pt for dense interfaces). Every
+      inter-element gap, padding value, and margin in CI-rendered output
+      must resolve to an integer multiple of the unit. Off-grid spacing
+      fails CI. Extends design-token conformance from "tokens used" to
+      "rhythm preserved."
+    problem: |
+      Design-token conformance verifies that a token was used but not that the result is
+      rhythmic. A view can consume valid tokens in an arrangement that breaks vertical rhythm,
+      producing a visually incoherent result.
+    solution: |
+      Declare a baseline-grid unit in the blueprint (e.g., 8px). Require spacing tokens to be
+      multiples of the unit. In CI, walk the rendered layout and assert that every measured gap
+      resolves to an integer multiple. Off-grid spacing fails.
+    tradeoffs: |
+      Rules out fractional or off-grid spacing even where local composition might want it. The
+      tradeoff is rhythm over occasional local optimization.
+    links:
+      - {target: 95f2b6bff569, rel: refines}
+      - {target: 60c41e0c35c7, rel: refines}
+    deprecated: false
+
+  - number: UX-D-014
+    hash: 1e7c5d3a9b4f
+    name: interaction-inventory
+    type: design_pattern
+    description: >
+     The screen spec enumerates every interactive element on the view: its
+      affordance kind (button, link, input, toggle, menu, …) from a
+      controlled vocabulary; its label; its selector; the user goal it
+      serves. CI extracts the rendered DOM's interactive surface and
+      asserts bidirectional match: every declared affordance is
+      implemented, and nothing implemented is undeclared. False affordances
+      — elements that compute as clickable without being interactive — also
+      fail.
+    problem: |
+      Affordance correctness is asserted in principle but not checked. An element can look
+      clickable without being interactive, or be interactive without being declared, and neither
+      case surfaces until a user encounters it.
+    solution: |
+      Require the spec to list every interactive element with its affordance kind from a
+      controlled vocabulary. CI extracts the DOM interaction surface and compares to the
+      declaration. Mismatches fail. False affordances — non-interactive elements whose computed
+      style (cursor, contrast, hover behavior) signals interactivity — are detected by layout
+      heuristics and fail on the implementation side.
+    tradeoffs: |
+      Requires the spec to enumerate elements that might otherwise be left implicit. This is the
+      cost of making affordance a gate instead of a guideline.
+    links:
+      - {target: 8d514b83d768, rel: refines}
+      - {target: e43e9ff85857, rel: refines}
+      - {target: 6a3d1f8b2e9c, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-015
+    hash: 2f8d6e4b1c5a
+    name: controlled-vocabularies-for-spec-fields
+    type: design_pattern
+    description: >
+     Every spec field whose value would otherwise be free-text is bound to
+      a controlled vocabulary declared in the blueprint. Vocabularies cover
+      user goal (JTBD taxonomy), reading pattern, gaze region, affordance
+      kind, state kind, and transition trigger. Free-text values are
+      rejected at spec-conformance time. Extending a vocabulary requires a
+      blueprint change, not a per-view exception.
+    problem: |
+      Free-text spec fields are gameable. Two agents producing specs for the same capability
+      will choose different labels for the same concept, making spec-to-spec comparison
+      impossible and machine gating unreliable.
+    solution: |
+      Declare a controlled vocabulary for each enumerable spec field. Store the vocabularies in
+      a blueprint artifact (e.g., vocabularies.json) and require spec fields to draw from it. A
+      spec that references an undeclared term fails the spec-conformance gate.
+    tradeoffs: |
+      Vocabulary maintenance becomes a governance task. Acceptable because the alternative —
+      free-text drift — defeats the entire layered-conformance model.
+    links:
+      - {target: 2f4a8b1c6d9e, rel: refines}
+      - {target: e49ebcb9644c, rel: refines}
+    deprecated: false
+
+  - number: UX-D-016
+    hash: 3a9e7f5c2b6d
+    name: artifact-derivation-rules
+    type: design_pattern
+    description: >
+     Each governance phase in the artifact chain (intake → capability map
+      → information architecture → screen spec → review findings →
+      handoff contract) has explicit derivation rules: required inputs,
+      required outputs, controlled vocabularies that apply, and the
+      blueprint rules that constrain the transformation. An agent runs the
+      derivation; two agents given the same inputs produce artifacts that
+      pass the same gates. Divergence indicates an underdetermined
+      blueprint and triggers a blueprint patch, not a per-run exception.
+    problem: |
+      The artifact chain names phases but does not specify how to derive one phase from the
+      next. Without derivation rules, each transformation is improvised per run and results are
+      non-reproducible. "Agent writes the spec" without derivation rules is just "agent
+      improvises the spec" — and the same applies to review findings and the handoff contract
+      if their derivations are left implicit.
+    solution: |
+      For each phase transition, declare in the blueprint: input artifacts, output artifact
+      schema, controlled vocabularies that apply, and the blueprint rules that constrain the
+      output. The chain covers all six phases end-to-end (intake → capability map → IA →
+      screen spec → review findings → handoff contract). Agent runs that produce artifacts
+      record each output field's provenance back to the derivation rule that generated it.
+    tradeoffs: |
+      Specifying derivation is more work than leaving it implicit. The payoff is
+      reproducibility: a blueprint defect surfaces when two agents disagree, rather than being
+      absorbed as creative variance.
+    links:
+      - {target: 1f7f7b6a4c21, rel: refines}
+      - {target: 2f4a8b1c6d9e, rel: refines}
+      - {target: 5c8e2a7b3f1d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-017
+    hash: 4b1f8d6a3c7e
+    name: spec-conformance-report
+    type: design_pattern
+    description: >
+     The contract spec is verified against the compliance framework by
+      orthogonal tooling that emits a machine-readable report,
+      spec-conformance-report.json. The report validates that every
+      required spec field is present, every controlled-vocabulary value
+      is valid, every provenance reference resolves to a blueprint rule
+      or framework artifact, and every derivation step has completed.
+      Implementation-conformance verification runs only after the
+      spec-conformance report has reached pass for the committed spec.
+    problem: |
+      Implementation is checked against a spec, but the spec itself is unchecked. An invalid
+      spec can produce a passing implementation against an invalid contract. Without a
+      verification report at the spec-vs-framework boundary, harmony is verified only at the
+      final step.
+    solution: |
+      Require spec-conformance tooling to emit spec-conformance-report.json validating required
+      fields, controlled-vocabulary values, provenance references, and derivation completeness
+      against the compliance framework. Implementation-conformance runs only when the
+      spec-conformance report has passed for the commit of the spec being implemented.
+    tradeoffs: |
+      Adds a report artifact at the spec-vs-framework boundary. Acceptable because the
+      alternative is a verification system with a blind spot at exactly the layer the
+      methodology relies on.
+    links:
+      - {target: 3e7b9d1f4c8a, rel: refines}
+      - {target: 130d0ff25610, rel: refines}
+      - {target: 1f4c2d9a7b8e, rel: refines}
+    deprecated: false
+
+  - number: UX-D-009
+    hash: 8a969646ab51
+    name: state-matrix-contract
+    type: design_pattern
+    description: >
+     Every approved UX flow is backed by a machine-readable state-matrix.json
+      artifact that enumerates required routes, breakpoints, and states.
+      The matrix is the contract between the service-flow map and CI: a route
+      is not considered complete unless its loading, empty, error, success,
+      and permission_denied states are explicitly accounted for, along with
+      route-step limits and critical-action reachability.
+    problem: |
+      Flow documentation is easy to discuss and hard to enforce. Teams ship
+      routes that work in one viewport or one happy-path state but fail when
+      the screen is empty, loading, denied, or rendered at a different
+      breakpoint. The result is dead ends that do not show up until late QA.
+    solution: |
+      Define a state-matrix.json artifact for each UX scope. The matrix lists
+      approved routes, breakpoints, required states, max step thresholds, and
+      critical actions. CI reads the matrix, drives headless browser capture
+      against the declared route/state combinations, and fails when the
+      implemented flow diverges from the approved matrix.
+    tradeoffs: |
+      The matrix adds maintenance overhead and forces teams to name routes and
+      states explicitly. That cost is acceptable because it converts flow
+      coverage from an informal review judgment into a deterministic gate.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: 173636ad122f, rel: refines}
+      - {target: 8d514b83d768, rel: refines}
+      - {target: 6723c3820539, rel: refines}
+    deprecated: false
+
+  - number: UX-D-018
+    hash: 8e5c3a9f2b1d
+    name: ui-source-co-locates-view-artifacts
+    type: design_pattern
+    description: >
+     Every view's UI source directory contains the canonical view
+      artifacts (*.view.json, *.state-matrix.json), the last-passing
+      conformance reports (*.spec-conformance.json, *.ux-conformance.json),
+      a generated human-readable README.md, and an __evidence__/ directory
+      holding visual-regression baselines and accessibility snapshots.
+      Scope-level artifacts (_scope.view.json, _scope.state-matrix.json)
+      live at the scope directory boundary. Agents working on a view open
+      one file and reach every artifact by adjacency; no convention lookup
+      is required.
+    problem: |
+      When spec and conformance artifacts are stored outside the UI directory (in /docs, in a
+      governance repo, in CI artifact storage only), an agent editing the source cannot see the
+      contract or the last passing evidence. Drift becomes invisible until CI runs.
+    solution: |
+      Co-locate every canonical view artifact (*.view.json, *.state-matrix.json) in the view's
+      source directory, alongside its last-passing conformance reports (*.spec-conformance.json,
+      *.ux-conformance.json), a generated README.md derived from the JSONs, and an __evidence__/
+      directory containing visual-regression baselines and accessibility snapshots. Scope-level
+      artifacts live at the scope-directory boundary.
+    tradeoffs: |
+      Increases the file count per view directory. Acceptable because the alternative — remote
+      artifacts — defeats agentic legibility. Generated files are explicitly labeled (README.md,
+      conformance reports, evidence baselines) so that agents do not mistake them for
+      source-of-truth.
+    links:
+      - {target: 1f7f7b6a4c21, rel: refines}
+      - {target: 3a9e7f5c2b6d, rel: refines}
+      - {target: 4b1f8d6a3c7e, rel: depends_on}
+      - {target: 8c1b6d4f2a90, rel: contradicts}
+    deprecated: false
+
+  - number: UX-D-019
+    hash: 9f6d4b1a3c8e
+    name: source-imports-view-spec
+    type: design_pattern
+    description: >
+     The view's source file (e.g., the React component module) imports
+      its canonical spec JSON directly — not as documentation, but as a
+      build-time binding. Interactive-element selectors, breakpoint
+      definitions, and state identifiers are read from the spec. A view
+      module without a spec import fails the build. A brief inline marker
+      at the top of the source file names the adjacent artifacts and
+      their status for agents who open the source first; the marker
+      points to the canonical files and does not duplicate their content.
+    problem: |
+      If the source and the spec are independent files with no build-enforced link, one can be
+      edited or renamed without the other. Agents may edit the source without updating the spec,
+      or rename the spec without the source noticing. The contract becomes advisory.
+    solution: |
+      Require the view's source module to import the canonical spec JSON (and state matrix where
+      applicable) as data. Use the imported values at runtime where practical — at minimum for
+      data-testid attributes drawn from the interaction inventory — so that a missing or renamed
+      spec breaks the build. A short comment at the top of the source file points to the
+      adjacent spec, state matrix, and last conformance report.
+    tradeoffs: |
+      Couples source to a data format at import time. Acceptable because coupling is the
+      mechanism that prevents drift. When the source's build toolchain cannot import JSON
+      directly, a generated typed module derived from the JSON serves the same role.
+    links:
+      - {target: 3e7b9d1f4c8a, rel: refines}
+      - {target: 2f4a8b1c6d9e, rel: refines}
+      - {target: 8e5c3a9f2b1d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-020
+    hash: 9e4c7a3b1d8f
+    name: user-contract-clarity-gate
+    type: design_pattern
+    description: >
+     Framework Gate 1. Every user action supported by the product is
+      paired with a declared promised outcome: "if the user does X, the
+      system delivers Y." The gate emits user-contracts.json recording,
+      for each action, the principal (end-user, admin, agent), the
+      outcome verb from a controlled vocabulary (confirm, persist,
+      notify, redirect, reveal, reject, defer, ...), the target state,
+      and the precondition. This is the anchor artifact of the entire
+      framework — IA (Gate 2), Data Feasibility (Gate 4), and Edge-Case
+      Coverage (Gate 5) all derive from it. No dependencies on other
+      gates.
+    problem: |
+      Products promise outcomes implicitly. Users form mental models of "what happens next" by
+      observation, and the model may diverge from actual behavior. Without a declared contract,
+      the next-state promise is ambiguous, data needs cannot be derived, edges cannot be
+      enumerated, and the product cannot be audited against user expectation.
+    solution: |
+      Gate 1 produces user-contracts.json enumerating every supported user action paired with
+      its declared outcome (from the outcome-verb vocabulary) and target state. Each contract
+      also records principal and precondition. The gate passes only when every product
+      capability has at least one declared user contract.
+    tradeoffs: |
+      Forces the product to enumerate user promises before anything else is designed. More work
+      up front, but every downstream artifact derives from this and is blocked until it exists.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: 2f8d6e4b1c5a, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-021
+    hash: 1c5b9d7e4a2f
+    name: information-architecture-integrity-gate
+    type: design_pattern
+    description: >
+     Framework Gate 2. The IA — the graph of navigation nodes and
+      transitions that reaches every declared user contract — is
+      enumerated and checked for integrity. Every contract from Gate 1
+      has a declared path from at least one entry point, path length is
+      within the declared max-step threshold, there are no islands, and
+      every branch terminates at a known state. The gate emits
+      information-architecture.json and is the source of scope-level
+      state matrices. Depends on Gate 1.
+    problem: |
+      Products are built without an explicit structural model; users can't find what they need;
+      some flows are unreachable from nominal entry points; wayfinding is inconsistent across
+      surfaces.
+    solution: |
+      Gate 2 produces information-architecture.json declaring the node-and-transition graph of
+      the product. The gate asserts that every user contract (Gate 1 output) is reachable,
+      within the declared max-step threshold, and that every node has a defined terminal state.
+    tradeoffs: |
+      The IA graph must be maintained as contracts change. Acceptable because the alternative
+      is a product whose navigation drifts away from its declared promises.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: 173636ad122f, rel: refines}
+      - {target: 9e4c7a3b1d8f, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-022
+    hash: 2d8a6f4c3b9e
+    name: design-system-compliance-gate
+    type: design_pattern
+    description: >
+     Framework Gate 3. The product's design system is declared: name,
+      version, reference URL, token catalog (color, typography, spacing,
+      radii, elevation), baseline-grid unit, component library, and the
+      scopes to which it applies (should be "all"). The gate emits
+      design-system-binding.json. This is the input that every
+      implementation surface — end-user, admin, agent-adjacent — draws
+      from. No dependencies on other gates; can run at any time.
+    problem: |
+      Without a declared design system, visual quality varies per surface, tokens drift, and
+      the product lacks coherent rhythm. Admin interfaces are the worst offender because
+      they're treated as exempt.
+    solution: |
+      Gate 3 produces design-system-binding.json naming the adopted design system and its
+      token, grid, and component catalog. Every downstream implementation check references this
+      file. A product with no declared design system fails Gate 3.
+    tradeoffs: |
+      Couples the product to a declared system that may later need migrating. Migration is a
+      Gate 3 re-run, isolated from the rest of the framework — which is precisely why the gate
+      is dependency-free.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: 60c41e0c35c7, rel: refines}
+      - {target: 95f2b6bff569, rel: refines}
+    deprecated: false
+
+  - number: UX-D-023
+    hash: 3e1f5b8d7a6c
+    name: data-feasibility-gate
+    type: design_pattern
+    description: >
+     Framework Gate 4. For each user contract from Gate 1, the data
+      required to deliver the promised outcome is declared: source
+      (service, capability, or store), availability guarantees (latency,
+      freshness, reachability), and fallback behavior when the data is
+      absent. The gate emits data-availability.json. Contracts whose data
+      is not available fail Gate 4. Depends on Gate 1.
+    problem: |
+      Interfaces are designed assuming data that doesn't exist, isn't accessible in time, or
+      isn't reachable from the delivery surface. Users see loading spinners that never
+      resolve, empty states that shouldn't be empty, or contracts that silently fail.
+    solution: |
+      Gate 4 produces data-availability.json mapping each user contract to its data
+      requirements, sources, availability guarantees, and fallback behavior. The gate passes
+      when every contract is backed by available data or has a declared fallback.
+    tradeoffs: |
+      Requires the product team to declare data contracts early, which may surface capability
+      gaps that would otherwise be absorbed by "we'll figure it out at implementation." That is
+      the point — the earlier the gap surfaces, the cheaper it is to address.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: 9e4c7a3b1d8f, rel: depends_on}
+    deprecated: false
+
+  - number: UX-D-024
+    hash: 4f7e2c9a5b3d
+    name: edge-case-coverage-gate
+    type: design_pattern
+    description: >
+     Framework Gate 5. For every user contract, the non-happy-path
+      branches are enumerated with declared handling: data unavailable
+      (from Gate 4), permission denied, validation failure, conflict,
+      timeout, empty result, unreachable (from Gate 2). Each branch has a
+      declared UX outcome — redirect, explain, retry option, fallback
+      action. The gate emits edge-case-coverage.json. Branches without
+      declared handling fail Gate 5. Depends on Gates 1, 2, 4.
+    problem: |
+      The happy path is designed; edges are improvised at implementation time; users hit error
+      states that show stack traces or dead ends. Edge-case coverage is the UX debt that
+      accrues fastest.
+    solution: |
+      Gate 5 produces edge-case-coverage.json enumerating the branches of each user contract
+      and their declared UX outcomes. Inputs include the contracts (Gate 1), the IA graph
+      (Gate 2), and the data availability report (Gate 4). The gate passes only when every
+      enumerated branch has a declared handling.
+    tradeoffs: |
+      Enumeration is tedious and the set of edges grows with product complexity. The tradeoff
+      is shippable vs demo-grade — products that skip Gate 5 look polished and break in
+      production.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: refines}
+      - {target: 8a969646ab51, rel: refines}
+      - {target: 9e4c7a3b1d8f, rel: depends_on}
+      - {target: 1c5b9d7e4a2f, rel: depends_on}
+      - {target: 3e1f5b8d7a6c, rel: depends_on}
+    deprecated: false
+
+
+  # ── Architectures ─────────────────────────────────────────────────────────────
+
+  - number: UX-A-001
+    hash: 67863239eb85
+    name: unified-service-layer-multiple-surfaces
+    type: architecture
+    description: >
+     A single service layer encapsulates capabilities, state, business logic,
+      and access control. End-user, admin, and agent interfaces are separate
+      rendering surfaces derived from the same service layer. Appropriate for
+      products with heterogeneous user types. Trade-off: adds abstraction that
+      teams unfamiliar with service-first design find counterintuitive.
+    diagram: |2
+                        ┌───────────────────────────────────┐
+                        │           Service Layer            │
+                        │  (capabilities, state, business   │
+                        │         logic, access control)     │
+                        └──────┬───────────┬──────────┬─────┘
+                               │           │          │
+                   ┌───────────▼─┐  ┌──────▼───┐  ┌──▼──────────────┐
+                   │  End-User   │  │  Admin   │  │  Agent Interface │
+                   │  Web/Mobile │  │  Web UI  │  │  (Structured API │
+                   │  Interface  │  │          │  │   / CLI / SDK)   │
+                   └─────────────┘  └──────────┘  └─────────────────┘
+    when_appropriate: |
+      Products with heterogeneous user types (human end-users, human admins, AI agents) requiring
+      access to the same service capabilities. Small to mid-scale teams.
+    tradeoffs: |
+      The service layer is a single point of design governance — all surfaces inherit the same
+      capability definitions. Adds abstraction between service and surface that teams unfamiliar
+      with service-first design find counterintuitive.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: e43e9ff85857, rel: refines}
+      - {target: 8de237165c47, rel: refines}
+    deprecated: false
+
+  - number: UX-A-002
+    hash: 300c0e349c72
+    name: api-first-client-agnostic
+    type: architecture
+    description: >
+     A versioned, typed-schema, access-scoped capability API is the primary
+      product surface. First-party web client, admin CLI, agent SDK, and
+      third-party clients all build against this API contract. Appropriate when
+      the set of interface surfaces is unknown at design time or third-party
+      clients are expected. Trade-off: requires disciplined API design;
+      breaking changes affect all surfaces simultaneously.
+    diagram: |
+      ┌───────────────────────────────────────────────────────────┐
+      │                    Capability API                          │
+      │         (versioned, typed schema, access-scoped)          │
+      └──┬──────────────┬──────────────┬──────────────────────────┘
+         │              │              │
+      ┌──▼──────────┐  ┌▼──────────┐  ┌▼────────────────────────┐
+      │ First-Party │  │ First-Party│  │  Agent SDK / CLI Tool   │
+      │  Web Client │  │ Admin CLI  │  │  (machine-readable      │
+      │             │  │            │  │   output, typed schema) │
+      └─────────────┘  └───────────┘  └─────────────────────────┘
+                                                │
+                                     ┌──────────▼──────────┐
+                                     │  Third-Party Clients │
+                                     │  (partner apps,      │
+                                     │   integrations)      │
+                                     └──────────────────────┘
+    when_appropriate: |
+      Products where the set of interface surfaces is unknown at design time, or where third-party
+      clients are expected. Also appropriate when the agent interface is the primary interface and
+      the human interface is secondary.
+    tradeoffs: |
+      Maximum flexibility for surface diversity. Requires disciplined API design — the API is the
+      product, and breaking changes affect all surfaces simultaneously. Client teams must build
+      against a contract rather than a shared codebase.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: e43e9ff85857, rel: refines}
+      - {target: 8de237165c47, rel: refines}
+    deprecated: false
+
+  - number: UX-A-003
+    hash: 63355717824e
+    name: agent-mediated-administration
+    type: architecture
+    description: >
+     Administrative operations are predominantly performed by AI agents on
+      behalf of human principals. Humans review, approve, or veto via an
+      approval interface. The agent executes approved actions via a structured
+      capability API against the same service layer as human-facing interfaces.
+      Trade-off: requires robust approval and audit surface; wrong when agents
+      lack sufficient reliability to initiate actions.
+    diagram: |
+      Human Admin
+          │  (reviews, approves, or vetoes)
+          ▼
+      ┌───────────────────────────────┐
+      │   Approval Interface          │
+      │   (human-readable action log, │
+      │    approval/rejection UI)     │
+      └──────────────┬────────────────┘
+                     │ approved actions
+                     ▼
+      ┌───────────────────────────────┐
+      │   Agent Execution Layer       │
+      │   (agent operates via         │
+      │    structured capability API) │
+      └──────────────┬────────────────┘
+                     │
+                     ▼
+      ┌───────────────────────────────┐
+      │   Service Layer               │
+      │   (same capabilities as       │
+      │    human-facing interface)    │
+      └───────────────────────────────┘
+    when_appropriate: |
+      Products where administrative operations are predominantly performed by AI agents on behalf
+      of human principals, with humans approving rather than executing.
+    tradeoffs: |
+      Reduces human operational burden at the cost of requiring a robust approval and audit surface.
+      Wrong when agents do not yet have sufficient reliability to be trusted with initiating actions
+      — in those cases, agents should propose, and humans should execute.
+    links:
+      - {target: b6f0649c24cf, rel: refines}
+      - {target: 8de237165c47, rel: refines}
+    deprecated: false
+
+
+  - number: UX-A-004
+    hash: 1f4c2d9a7b8e
+    name: compliance-framework-gate-dag
+    type: architecture
+    description: >
+     The compliance framework for a generative-UI product is produced
+      once per product by a five-gate DAG. Each gate emits its own
+      separately-addressable JSON artifact; the framework is the union
+      of the five artifacts. Gates execute in dependency order: a gate
+      may run as soon as all its prerequisite gates have reached pass or
+      pass_with_revisions. Gate outputs feed into per-view contract
+      specs and, through them, into implementation. Each gate returns
+      one of three statuses: pass, pass_with_revisions, or fail.
+      High-severity findings block framework approval until the
+      synthesizer revises the affected artifacts and reruns the affected
+      gates.
+    diagram: |
+      Framework Gate DAG (per product):
+
+          Gate 1  User Contract Clarity  ──┬──▶  Gate 2  IA Integrity      ──┐
+                                           │                                 │
+                                           └──▶  Gate 4  Data Feasibility  ──┤
+                                                                             ▼
+                                                                 Gate 5  Edge-Case Coverage
+
+          Gate 3  Design System Compliance    (no dependencies)
+
+      Gate artifacts:
+          Gate 1  →  user-contracts.json
+          Gate 2  →  information-architecture.json
+          Gate 3  →  design-system-binding.json
+          Gate 4  →  data-availability.json
+          Gate 5  →  edge-case-coverage.json
+
+      Compliance Framework = union of the five gate artifacts.
+
+      Derivation:
+          Compliance Framework  ──▶  Contract Spec (per view)  ──▶  Implementation
+
+      Verification (orthogonal):
+          framework gate status           (per-gate pass/fail)
+          spec-conformance-report.json    (contract spec vs framework)
+          ux-conformance-report.json      (implementation vs contract spec)
+    when_appropriate: |
+      All generative-UI products under this blueprint. The framework is produced once per
+      product; re-running a gate occurs only when its inputs change (capability revision,
+      design-system migration, etc.).
+    tradeoffs: |
+      Five addressable gate artifacts plus DAG execution adds coordination cost compared to a
+      single monolithic framework doc. Acceptable because independent artifacts are
+      independently revisable; a design-system migration (Gate 3) does not force a re-run of
+      the user-contract gate (Gate 1), and gate-specific provenance is preserved end-to-end.
+    links:
+      - {target: d7f85752c1b1, rel: refines}
+      - {target: e49ebcb9644c, rel: refines}
+      - {target: 95f2b6bff569, rel: refines}
+      - {target: 3e7b9d1f4c8a, rel: refines}
+    deprecated: false
+
+
+  # ── Checklist ─────────────────────────────────────────────────────────────────
+
+  - number: UX-C-001
+    hash: f3f42fba19c6
+    name: service-flow-maps-before-implementation
+    type: checklist
+    description: >
+     Service flow maps are written and reviewed for all primary user goals
+      before any interface implementation begins.
+    links:
+      - {target: d7f85752c1b1, rel: verifies}
+      - {target: 173636ad122f, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-002
+    hash: 0ed222dbe4b0
+    name: design-system-initialized
+    type: checklist
+    description: >
+     Design system initialized with color tokens, typography scale, spacing
+      scale, and at least one primitive component (button) defined.
+    links:
+      - {target: 95f2b6bff569, rel: verifies}
+      - {target: 60c41e0c35c7, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-003
+    hash: 48d70253181f
+    name: end-user-primary-paths-complete
+    type: checklist
+    description: >
+     End-user interface implements all primary-path flows without dead ends.
+    links:
+      - {target: 8d514b83d768, rel: verifies}
+      - {target: 6723c3820539, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-004
+    hash: 276120e155fd
+    name: admin-interface-uses-shared-design-system
+    type: checklist
+    description: >
+     Admin interface exists as a distinct surface and uses the shared design
+      system; no raw database UI in use.
+    links:
+      - {target: e43e9ff85857, rel: verifies}
+      - {target: 60c41e0c35c7, rel: verifies}
+      - {target: e450c8a60d0d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-005
+    hash: 3ef7a09c5c2d
+    name: agent-api-routes-typed-json
+    type: checklist
+    description: >
+     Agent API routes exist for every capability declared as allowedActors
+      agent; routes return typed JSON, not HTML.
+    links:
+      - {target: e43e9ff85857, rel: verifies}
+      - {target: 8de237165c47, rel: verifies}
+      - {target: 5af7abcb16da, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-006
+    hash: 623ea5f1b84c
+    name: agent-presence-record-readable
+    type: checklist
+    description: >
+     AgentPresence record created and readable by the account holder for every
+      agent granted account access.
+    links:
+      - {target: b6f0649c24cf, rel: verifies}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-007
+    hash: e8272f3dd267
+    name: agent-action-record-written
+    type: checklist
+    description: >
+     AgentActionRecord written for every agent operation against the account;
+      records are accessible from the account holder's interface.
+    links:
+      - {target: b6f0649c24cf, rel: verifies}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-008
+    hash: 0df7d368541a
+    name: single-path-navigation-verified
+    type: checklist
+    description: >
+     Single-path navigation verified: no user flow has two equally prominent
+      routes to the same destination.
+    links:
+      - {target: 8d514b83d768, rel: verifies}
+      - {target: 6723c3820539, rel: verifies}
+      - {target: c2b183d34453, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-009
+    hash: 5efd041cefe4
+    name: visual-quality-verified-headless
+    type: checklist
+    description: >
+     Visual quality verified in CI via headless screenshot capture;
+      screenshots reviewed by a vision-capable model. CI verification does
+      not require a display server or a live browser session. Manual
+      stakeholder and usability review stages are out of scope for this
+      check.
+    links:
+      - {target: 95f2b6bff569, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-010
+    hash: e7252852006f
+    name: specs-no-framework-references
+    type: checklist
+    description: >
+     No specification references a specific front-end framework, component,
+      library, or CSS property. Specifications describe user needs, states,
+      and feedback only; implementation choices belong downstream.
+    links:
+      - {target: e49ebcb9644c, rel: verifies}
+      - {target: 099bffc7e55a, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-011
+    hash: 8e86d53ebcb9
+    name: progressive-disclosure-implemented
+    type: checklist
+    description: >
+     Progressive disclosure implemented: advanced options are present but not
+      surfaced in the default view; verified with a first-use walkthrough.
+    links:
+      - {target: 9b929c73ac69, rel: verifies}
+      - {target: 52bdae16f26b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-012
+    hash: 4866f47a56ed
+    name: agent-scope-displayed-in-settings
+    type: checklist
+    description: >
+     Agent scope displayed in the account settings UI: account holder can see
+      what the agent is authorized to do and when it last acted.
+    links:
+      - {target: b6f0649c24cf, rel: verifies}
+      - {target: c165af9c20b4, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-013
+    hash: 6e8c829cb252
+    name: agent-action-log-accessible
+    type: checklist
+    description: >
+     Agent action log is paginated, searchable, and accessible without
+      developer tooling.
+    links:
+      - {target: b6f0649c24cf, rel: verifies}
+      - {target: 39003e63eb4b, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-014
+    hash: 567d9fedad29
+    name: admin-no-database-access-required
+    type: checklist
+    description: >
+     Admin interface covers all operational tasks without requiring database
+      access, terminal access, or API calls outside the admin UI.
+    links:
+      - {target: e43e9ff85857, rel: verifies}
+      - {target: 5f59ffbb3def, rel: verifies}
+      - {target: e450c8a60d0d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-015
+    hash: d7eedc296133
+    name: agent-sdk-typed-signatures
+    type: checklist
+    description: >
+     Agent SDK published with typed method signatures matching every
+      agent-authorized capability; no method requires HTML parsing or visual
+      interaction.
+    links:
+      - {target: 8de237165c47, rel: verifies}
+      - {target: 5af7abcb16da, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-016
+    hash: d05e85759b1d
+    name: usability-review-all-user-types
+    type: checklist
+    description: >
+     Usability review completed with at least one human end-user, one
+      administrator, and one agent integration test.
+    links:
+      - {target: e43e9ff85857, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-017
+    hash: 5de6a650de8d
+    name: headless-chromium-testing
+    type: checklist
+    description: >
+     All interface surfaces tested in headless Chromium via Playwright; no
+      surface requires a GUI, display server, or live browser window.
+    links:
+      - {target: 5efd041cefe4, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-018
+    hash: 765b8473bd36
+    name: service-flow-docs-version-controlled
+    type: checklist
+    description: >
+     Full service flow documentation published and version-controlled alongside
+      the implementation.
+    links:
+      - {target: 173636ad122f, rel: verifies}
+      - {target: f3f42fba19c6, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-019
+    hash: 78d3796ac54b
+    name: design-system-documented-static
+    type: checklist
+    description: >
+     Design system documented in a static HTML or markdown catalogue generated
+      by the build pipeline; no dev server or browser-only tooling required to
+      read it.
+    links:
+      - {target: 60c41e0c35c7, rel: verifies}
+      - {target: 0ed222dbe4b0, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-020
+    hash: 8f52557cf80b
+    name: agent-capability-surface-versioned
+    type: checklist
+    description: >
+     Agent capability surface versioned; breaking changes require a new
+      version, not an in-place modification.
+    links:
+      - {target: 8de237165c47, rel: verifies}
+      - {target: 300c0e349c72, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-021
+    hash: a66eccfc3bf1
+    name: agent-data-exported-on-request
+    type: checklist
+    description: >
+     Agent presence and action log exported on account data export request.
+    links:
+      - {target: b6f0649c24cf, rel: verifies}
+      - {target: 623ea5f1b84c, rel: verifies}
+      - {target: e8272f3dd267, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-022
+    hash: 44721418eb8b
+    name: ux-review-non-technical-signoff
+    type: checklist
+    description: >
+     UX review conducted at each milestone with explicit sign-off from a
+      non-technical stakeholder.
+    links:
+      - {target: 95f2b6bff569, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-023
+    hash: 5a3c8e1b6d0f
+    name: ux-governance-artifacts-versioned
+    type: checklist
+    description: >
+     Required UX governance artifacts exist for each phase and are stored as
+      canonical JSON with the required metadata fields: artifact_id,
+      artifact_type, phase, version, status, owner, updated_at,
+      source_artifacts, and derived_artifacts.
+    links:
+      - {target: 1f7f7b6a4c21, rel: verifies}
+      - {target: d7f85752c1b1, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-024
+    hash: 2b7d1e9f4a6c
+    name: governance-gates-declared
+    type: checklist
+    description: >
+     UX governance artifacts declare the ordered gate sequence, the three
+      gate statuses (pass, pass_with_revisions, fail), and the explicit fail
+      conditions for each gate before high-fidelity design is approved.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: verifies}
+      - {target: f3f42fba19c6, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-025
+    hash: 7c2e1a9d5b4f
+    name: structured-critiques-and-revision-loop
+    type: checklist
+    description: >
+     All review findings use the structured critique format and the synthesis
+      loop continues until all high-severity issues are cleared. A
+      pass_with_revisions result is acceptable only when the remaining
+      revisions are non-blocking and explicitly tracked.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: verifies}
+      - {target: 2b7d1e9f4a6c, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-026
+    hash: e25d3654327e
+    name: accessibility-structure-invariants-enforced
+    type: checklist
+    description: >
+     Accessibility structure invariants are enforced in CI. Critical views
+      must match the approved ARIA snapshot and fail on critical axe
+      violations.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: 5efd041cefe4, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-027
+    hash: 46ed8e8e96d6
+    name: dom-css-design-token-layout-conformance
+    type: checklist
+    description: >
+     DOM and CSS conformance is enforced in CI. Critical views must use
+      approved tokens and components, avoid hardcoded spacing or color where
+      tokens exist, and pass layout invariants for overflow, overlap, and
+      primary-action placement.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: 0ed222dbe4b0, rel: verifies}
+      - {target: 0df7d368541a, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-028
+    hash: ab7ab23512ad
+    name: flow-graph-invariants-enforced
+    type: checklist
+    description: >
+     Flow graph invariants are enforced in CI. Implemented navigation and
+      task transitions must cover the approved state graph without dead ends,
+      missing states, or unreachable critical actions.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: f3f42fba19c6, rel: verifies}
+      - {target: 173636ad122f, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-029
+    hash: 8b04a200f070
+    name: targeted-visual-regression-enforced
+    type: checklist
+    description: >
+     Targeted visual regression is enforced in CI using headless screenshots
+      for critical views and states. Missing baselines or excessive drift in
+      whitelisted regions blocks merge.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: 5efd041cefe4, rel: verifies}
+      - {target: 95f2b6bff569, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-030
+    hash: 24f52c5dd608
+    name: performance-and-rendering-sanity-enforced
+    type: checklist
+    description: >
+     Performance and rendering sanity are enforced in CI. Critical pages must
+      render without hydration failures, blank first paint, or unacceptable
+      layout instability.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: 95f2b6bff569, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-031
+    hash: f9b2be6bec16
+    name: ux-conformance-report-emitted
+    type: checklist
+    description: >
+     Every deterministic-gate CI run emits ux-conformance-report.json
+      with run identity, per-view check results, evidence pointers,
+      blocking issues, and a final merge decision.
+    links:
+      - {target: 130d0ff25610, rel: verifies}
+      - {target: e25d3654327e, rel: depends_on}
+      - {target: 46ed8e8e96d6, rel: depends_on}
+      - {target: ab7ab23512ad, rel: depends_on}
+      - {target: 8b04a200f070, rel: depends_on}
+      - {target: 24f52c5dd608, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-032
+    hash: d14e2f6a9b01
+    name: saliency-scoring-warning-only
+    type: checklist
+    description: >
+     Saliency scoring runs in CI and emits warning-only scores, heatmaps, and
+      evidence for critical views and states.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-033
+    hash: d14e2f6a9b02
+    name: screenshot-layout-parsing-warning-only
+    type: checklist
+    description: >
+     Screenshot layout parsing runs in CI and emits warning-only structural
+      scores for hierarchy, balance, and focal-point drift.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-034
+    hash: d14e2f6a9b03
+    name: model-assisted-ux-lint-warning-only
+    type: checklist
+    description: >
+     Model-assisted UX linting runs in CI and emits warning-only findings for
+      ambiguous labels, clutter, and unsupported interaction patterns.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-035
+    hash: d14e2f6a9b04
+    name: synthetic-walkthrough-quality-warning-only
+    type: checklist
+    description: >
+     Synthetic walkthrough quality scoring runs in CI and emits warning-only
+      findings for friction, detours, and incomplete state handling.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-036
+    hash: d14e2f6a9b05
+    name: soft-signal-promotion-criteria-defined
+    type: checklist
+    description: >
+     Promotion criteria are defined before any threshold-scored signal
+      can become merge-blocking. Calibration thresholds, labeled
+      baselines, and error rates must be documented.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-037
+    hash: d14e2f6a9b06
+    name: soft-signals-recorded-in-conformance-report
+    type: checklist
+    description: >
+     The UX conformance report includes a soft_signals section with
+      warning status, scores, evidence pointers, and calibration metadata
+      for threshold-scored jobs.
+    links:
+      - {target: 4bf26c1a8d31, rel: verifies}
+      - {target: 130d0ff25610, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-038
+    hash: 68678e6ff182
+    name: state-matrix-coverage-complete
+    type: checklist
+    description: >
+     Approved state-matrix.json exists for each scoped UX surface and covers
+      the required routes, breakpoints, and states for that surface. Every
+      declared route includes explicit loading, empty, error, success, and
+      permission_denied coverage where the state can occur.
+    links:
+      - {target: 8a969646ab51, rel: verifies}
+      - {target: 173636ad122f, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-039
+    hash: 1cdc130608fa
+    name: flow-path-invariants-verified
+    type: checklist
+    description: >
+     Flow path invariants are verified: no approved route is a dead end, the
+      critical action for each primary task is reachable within the configured
+      max-step threshold, and any denied or empty state provides an explicit
+      next step or recovery path.
+    links:
+      - {target: 8d514b83d768, rel: verifies}
+      - {target: 6723c3820539, rel: verifies}
+      - {target: 8a969646ab51, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-040
+    hash: 5c2a9e8f3b7d
+    name: user-goal-declared-from-jtbd-vocabulary
+    type: checklist
+    description: >
+     Every view in the screen spec declares a primary user goal drawn from
+      the jobs-to-be-done (JTBD) controlled vocabulary. Secondary goals,
+      where present, draw from the same vocabulary.
+    links:
+      - {target: 6a3d1f8b2e9c, rel: verifies}
+      - {target: 2f8d6e4b1c5a, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-041
+    hash: 6d3b1a7e4f8c
+    name: primary-action-placement-invariant-verified
+    type: checklist
+    description: >
+     Each view declares a reading pattern and assigns the primary action to
+      a named region. CI computes the primary action's bounding box per
+      declared breakpoint and fails when it falls outside the declared
+      region.
+    links:
+      - {target: 7b4e2f9c1a8d, rel: verifies}
+      - {target: 8a969646ab51, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-042
+    hash: 7e4c2b8a5d1f
+    name: density-budget-declared-and-verified
+    type: checklist
+    description: >
+     Each view declares density caps (max interactive elements, max text
+      blocks, max nesting depth, max above-fold elements) and CI fails when
+      any measured count exceeds the declared cap.
+    links:
+      - {target: 8c5f3a1e7b2d, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-043
+    hash: 8f5d3c9b6e2a
+    name: baseline-grid-conformance-verified
+    type: checklist
+    description: >
+     Every measurable spacing value in CI-rendered critical views resolves
+      to an integer multiple of the declared baseline-grid unit; off-grid
+      spacing fails.
+    links:
+      - {target: 9d6a4b2f8c1e, rel: verifies}
+      - {target: 46ed8e8e96d6, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-044
+    hash: 9a6e4d1c7b3f
+    name: interaction-inventory-matches-dom
+    type: checklist
+    description: >
+     Every interactive element declared in the screen spec is present in
+      the rendered DOM with the declared affordance kind; no rendered
+      element is interactive or computes as a false affordance (clickable
+      appearance without interactivity) without being declared.
+    links:
+      - {target: 1e7c5d3a9b4f, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-045
+    hash: 1b7f5e2d8c4a
+    name: controlled-vocabularies-present-and-referenced
+    type: checklist
+    description: >
+     Controlled vocabularies for user goal, reading pattern, gaze region,
+      affordance kind, state kind, and transition trigger exist in the
+      blueprint, and every spec field that uses them references an existing
+      vocabulary term. Free-text values in bound fields fail the spec
+      gate.
+    links:
+      - {target: 2f8d6e4b1c5a, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-046
+    hash: 2c8a6f3e9d5b
+    name: derivation-artifact-chain-complete
+    type: checklist
+    description: >
+     Each UX scope has a complete derivation chain: intake → capability
+      map → information architecture → screen spec. Each artifact records
+      its inputs, the derivation rule applied, and the output fields
+      produced.
+    links:
+      - {target: 3a9e7f5c2b6d, rel: verifies}
+      - {target: 1f7f7b6a4c21, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-047
+    hash: 3d9b7a4f1e6c
+    name: spec-conformance-gate-passes-before-implementation
+    type: checklist
+    description: >
+     The spec-conformance gate emits spec-conformance-report.json and
+      passes for the committed specification before any implementation CI
+      runs against it. Implementation gates reference the passing
+      spec-conformance report by identifier.
+    links:
+      - {target: 4b1f8d6a3c7e, rel: verifies}
+      - {target: 130d0ff25610, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-048
+    hash: 4e1c8b5a2f7d
+    name: spec-field-provenance-recorded
+    type: checklist
+    description: >
+     Every field in every governance artifact records the blueprint rule
+      (by hash or number) that constrained its value. Fields without
+      provenance fail the spec-conformance gate.
+    links:
+      - {target: 5c8e2a7b3f1d, rel: verifies}
+      - {target: 3a9e7f5c2b6d, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-049
+    hash: 1a9f7e5c4b2d
+    name: view-directory-contains-required-artifacts
+    type: checklist
+    description: >
+     Each view directory contains the required artifacts: one
+      *.view.json, one *.state-matrix.json where the view participates in
+      a flow, the last-passing *.spec-conformance.json and
+      *.ux-conformance.json reports, a generated README.md, and an
+      __evidence__/ directory with baseline screenshots and accessibility
+      snapshots for each declared state-breakpoint pair.
+    links:
+      - {target: 8e5c3a9f2b1d, rel: verifies}
+      - {target: 1f7f7b6a4c21, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-050
+    hash: 2b8e6f4d5c3a
+    name: source-file-imports-view-spec
+    type: checklist
+    description: >
+     Every view source module imports its adjacent *.view.json (and
+      *.state-matrix.json where applicable). The build fails if the
+      import is missing, the target file does not exist, or the imported
+      JSON fails schema validation against the blueprint-derived schema.
+    links:
+      - {target: 9f6d4b1a3c8e, rel: verifies}
+    deprecated: false
+
+  - number: UX-C-051
+    hash: 3c7d5a8e6f1b
+    name: interaction-inventory-selectors-resolve-in-dom
+    type: checklist
+    description: >
+     Every selector declared in the spec's interaction inventory resolves
+      to exactly one DOM element at each declared state-breakpoint pair.
+      Selectors that resolve to zero or to more than one element fail CI.
+      Elements present in the DOM whose computed style signals
+      interactivity (cursor, contrast, hover) but are not declared in the
+      inventory also fail (false-affordance check).
+    links:
+      - {target: 1e7c5d3a9b4f, rel: verifies}
+      - {target: 9f6d4b1a3c8e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-052
+    hash: 5a8c3e7d1f9b
+    name: user-contracts-artifact-present
+    type: checklist
+    description: >
+     user-contracts.json exists for the product, enumerates every
+      supported user action with principal, outcome verb (from the
+      controlled vocabulary), target state, and precondition, and has
+      status pass or pass_with_revisions for Gate 1.
+    links:
+      - {target: 9e4c7a3b1d8f, rel: verifies}
+      - {target: 1f4c2d9a7b8e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-053
+    hash: 6b9d4f8e2c1a
+    name: information-architecture-artifact-present
+    type: checklist
+    description: >
+     information-architecture.json exists, declares the product's
+      navigation graph, and asserts that every user contract is reachable
+      within the declared max-step threshold with no islands or dead
+      ends. Gate 2 status is pass or pass_with_revisions.
+    links:
+      - {target: 1c5b9d7e4a2f, rel: verifies}
+      - {target: 1f4c2d9a7b8e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-054
+    hash: 7c1e5a9f3d8b
+    name: design-system-binding-artifact-present
+    type: checklist
+    description: >
+     design-system-binding.json exists, declares the adopted design
+      system (name, version, reference) together with token catalog,
+      baseline-grid unit, component library, and applicable scopes. Gate
+      3 status is pass or pass_with_revisions.
+    links:
+      - {target: 2d8a6f4c3b9e, rel: verifies}
+      - {target: 1f4c2d9a7b8e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-055
+    hash: 8d2f6b1a4e9c
+    name: data-availability-artifact-present
+    type: checklist
+    description: >
+     data-availability.json exists, maps every user contract to its
+      data requirements, sources, availability guarantees, and fallback
+      behavior. Every contract is either backed by available data or has
+      a declared fallback. Gate 4 status is pass or pass_with_revisions.
+    links:
+      - {target: 3e1f5b8d7a6c, rel: verifies}
+      - {target: 1f4c2d9a7b8e, rel: depends_on}
+    deprecated: false
+
+  - number: UX-C-056
+    hash: 9e3a7c2b5f1d
+    name: edge-case-coverage-artifact-present
+    type: checklist
+    description: >
+     edge-case-coverage.json exists, enumerates the non-happy-path
+      branches of every user contract with a declared UX outcome for
+      each. No enumerated branch is left without declared handling. Gate
+      5 status is pass or pass_with_revisions.
+    links:
+      - {target: 4f7e2c9a5b3d, rel: verifies}
+      - {target: 1f4c2d9a7b8e, rel: depends_on}
+    deprecated: false
+
+
+  # ── Antipatterns ──────────────────────────────────────────────────────────────
+
+  - number: UX-X-001
+    hash: fe86cd8bdfff
+    name: screen-first-design
+    type: antipattern
+    description: >
+     Designing the interface before mapping the service flow produces
+      interfaces that expose gaps in the service design as confusing dead ends
+      or workaround paths. A screen that cannot be explained by a service flow
+      state does not belong in the product.
+    links:
+      - {target: d7f85752c1b1, rel: contradicts}
+      - {target: 173636ad122f, rel: contradicts}
+      - {target: 103dbdf604b7, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-002
+    hash: e450c8a60d0d
+    name: developer-console-as-admin-ui
+    type: antipattern
+    description: >
+     Shipping without an admin interface and substituting direct database
+      access, terminal commands, or API clients for administrative tasks means
+      the admin UX is unspecified, untested, inconsistent, and inaccessible to
+      non-developers. Administration is a product surface with real users.
+    links:
+      - {target: e43e9ff85857, rel: contradicts}
+      - {target: 60c41e0c35c7, rel: contradicts}
+      - {target: 5f59ffbb3def, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-003
+    hash: 5af7abcb16da
+    name: browser-automation-as-agent-integration
+    type: antipattern
+    description: >
+     Pointing an agent at a human-facing browser interface — whether through a
+      headless browser, DOM scraping, or visual element parsing — produces an
+      integration that breaks silently on any layout change and cannot be
+      tested deterministically. The agent interface is a product surface; it
+      must be designed and maintained as one.
+    links:
+      - {target: e43e9ff85857, rel: contradicts}
+      - {target: 8de237165c47, rel: contradicts}
+      - {target: a2a41eddd7d4, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-004
+    hash: 39003e63eb4b
+    name: invisible-agent-participation
+    type: antipattern
+    description: >
+     An AI agent operating on a user account that the user cannot see,
+      scope-limit, or audit is a trust violation regardless of what the agent
+      does. The end-user's mental model of their account does not include the
+      agent; that gap is a UX defect that becomes a support and trust problem.
+    links:
+      - {target: b6f0649c24cf, rel: contradicts}
+      - {target: f1508d8f738f, rel: contradicts}
+      - {target: c165af9c20b4, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-005
+    hash: f7986c534086
+    name: beauty-deferred
+    type: antipattern
+    description: >
+     Treating visual quality as a polish pass at the end of development anchors
+      stakeholders and users on an unpolished baseline that is expensive to
+      correct. The first demo sets the quality anchor. Ship the first demo at
+      the intended quality level or do not demo.
+    links:
+      - {target: 95f2b6bff569, rel: contradicts}
+      - {target: d6f18baa5d77, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-006
+    hash: 96e80a0c1f27
+    name: one-interface-all-actor-types
+    type: antipattern
+    description: >
+     Building a single interface that attempts to serve end-users,
+      administrators, and agents simultaneously produces an interface that
+      serves none of them well. Each actor type has distinct goals, available
+      actions, and appropriate interaction patterns. Shared foundations do not
+      imply a shared surface.
+    links:
+      - {target: e43e9ff85857, rel: contradicts}
+      - {target: 60c41e0c35c7, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-007
+    hash: c2b183d34453
+    name: multiple-prominent-paths-same-action
+    type: antipattern
+    description: >
+     Offering two buttons that appear to do the same thing, two navigation
+      entries for the same destination, or two API endpoints for the same
+      operation forces the user to reason about whether the paths are truly
+      equivalent. One path is a design decision; two paths are an unresolved
+      design conflict.
+    links:
+      - {target: 8d514b83d768, rel: contradicts}
+      - {target: 6723c3820539, rel: contradicts}
+      - {target: ed3622189556, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-008
+    hash: 52bdae16f26b
+    name: complexity-surfaced-by-default
+    type: antipattern
+    description: >
+     Showing all capabilities, settings, and options on first use causes
+      cognitive overload and slows users to the speed of their least-needed
+      feature. Default views must be designed for the primary task; everything
+      else requires deliberate disclosure.
+    links:
+      - {target: 9b929c73ac69, rel: contradicts}
+      - {target: 6c3fb70bfa32, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-009
+    hash: 8c1b6d4f2a90
+    name: derived-artifacts-treated-as-authority
+    type: antipattern
+    description: >
+     Markdown notes, Mermaid diagrams, HTML previews, or SVG mockups become
+      the source of truth instead of being regenerated from canonical JSON.
+      Manual edits to derived artifacts create drift, make review ambiguous,
+      and break the audit trail between phases.
+    links:
+      - {target: 1f7f7b6a4c21, rel: contradicts}
+      - {target: e49ebcb9644c, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-010
+    hash: ad4e1c7f9b20
+    name: single-pass-review-approval
+    type: antipattern
+    description: >
+     Approving UX after a single non-gated critique pass, or accepting vague
+      reviewer comments without explicit issue, evidence, severity, and
+      proposed fix, allows polished-but-invalid designs to escape review.
+      UX approval must be earned through the defined gate sequence and
+      revision loop.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: contradicts}
+      - {target: 7c2e1a9d5b4f, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-011
+    hash: 5f2d9c6b3a8e
+    name: spec-authored-outside-blueprint-grammar
+    type: antipattern
+    description: >
+     An agent or human producing a specification without reference to the
+      blueprint's controlled vocabularies, derivation rules, or field
+      schemas. The resulting spec may be internally coherent and visually
+      plausible, but it cannot be gated, compared, or reproduced. Authoring
+      outside the grammar is equivalent to improvising without a blueprint.
+    links:
+      - {target: 2f4a8b1c6d9e, rel: contradicts}
+      - {target: 2f8d6e4b1c5a, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-012
+    hash: 6a3e1d7c4b9f
+    name: implementation-gated-without-spec-gate
+    type: antipattern
+    description: >
+     Running implementation conformance checks against a specification that
+      has not itself passed the spec-conformance gate. The audit chain is
+      broken: the implementation may conform to an invalid contract, and
+      the blueprint's constraints are enforced only at the final step.
+    links:
+      - {target: 3e7b9d1f4c8a, rel: contradicts}
+      - {target: 4b1f8d6a3c7e, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-013
+    hash: 7b4f2e8d5c1a
+    name: free-text-spec-fields
+    type: antipattern
+    description: >
+     Specification fields accept free-text values where a controlled
+      vocabulary should apply. Two agents producing specs for the same
+      capability will select different labels for the same concept, making
+      spec-to-spec comparison impossible and defeating the provenance
+      chain.
+    links:
+      - {target: 2f8d6e4b1c5a, rel: contradicts}
+      - {target: 5c8e2a7b3f1d, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-014
+    hash: 7c9a4b2e1f6d
+    name: inline-contract-in-source-comments
+    type: antipattern
+    description: >
+     Encoding view specifications, state matrices, or conformance claims
+      as inline comments (JSDoc tags, annotation blocks, banner comments)
+      in source files instead of adjacent canonical JSON. Comments are
+      free-text, not schema-validatable, and drift silently from the
+      rendered contract. The source file's inline marker is a pointer to
+      adjacent canonical artifacts, not a substitute for them.
+    links:
+      - {target: 9f6d4b1a3c8e, rel: contradicts}
+      - {target: 1f7f7b6a4c21, rel: contradicts}
+      - {target: 8c1b6d4f2a90, rel: contradicts}
+    deprecated: false
+
+  - number: UX-X-015
+    hash: 8d1e5f3b2c7a
+    name: view-artifacts-outside-view-directory
+    type: antipattern
+    description: >
+     Storing a view's canonical spec, state matrix, or conformance
+      evidence in a location other than the view's own source directory
+      — e.g., a central /docs tree, a separate governance repository, or
+      CI artifact storage only. An agent editing the source cannot see
+      the contract or last-passing evidence, and drift is invisible until
+      CI runs. The agent's only reliable locator for governance artifacts
+      is adjacency to the source.
+    links:
+      - {target: 8e5c3a9f2b1d, rel: contradicts}
+    deprecated: false

@@ -1,0 +1,968 @@
+meta:
+  domain: ETL
+  title: Journaled ETL & Progressive Sync Blueprint
+  version: 1
+  requires:
+    - DATA
+  vision: |
+    Any system that ingests data from an external source faces a fundamental question: if the
+    process crashes halfway through, what has been lost and where do we resume? Most ETL pipelines
+    answer this question poorly — they either re-import everything (wasteful and fragile at scale)
+    or silently skip what was missed (data loss disguised as success). A journaled ETL system
+    answers it precisely: progress is recorded in a durable journal, and the system resumes exactly
+    where it left off.
+
+    The core invariant is simple: only advance the cursor after data is durably persisted. This
+    single rule — durable-before-advance — eliminates the most common class of ETL failures: the
+    system that claims to have ingested data it never actually stored. Every other design decision
+    in this blueprint flows from making that invariant structural rather than aspirational.
+
+    Sources change. A mailbox resets, a stream is rebuilt, a dataset is replaced. A cursor that was
+    valid yesterday may point into a different sequence today. The system must detect this by
+    tracking source identity (epoch) separately from cursor position. When the source identity
+    changes, the old cursor is meaningless — the system applies a reset policy rather than silently
+    ingesting from a stale position.
+
+    The sink is append-only and idempotent. Because the system assumes at-least-once processing,
+    every write must tolerate being replayed. Duplicates are safe; silent loss is not. This is not
+    a performance optimization — it is a correctness requirement. A system that corrupts on retry
+    is a system that cannot be safely restarted.
+
+    Auditability is not a reporting feature bolted on after the fact. Every run produces a ledger
+    entry. Every stored item carries lineage metadata tracing it back to its source, its cursor
+    position, and the run that imported it. The system can answer "did we miss anything?" by
+    comparing what it claimed to process (run ledger), what it actually stored (item lineage), and
+    what should have been present (source re-enumeration or manifest). Silent loss is the one
+    failure mode this architecture refuses to permit.
+
+    When the sink is a database governed by the DATA blueprint, sink tables inherit the DATA
+    blueprint's security model: application-layer encryption for PII fields, access-control
+    policies, and audit logging. ETL does not create an exception to the data security architecture
+    — it is a data path subject to the same controls as any other write.
+
+    This blueprint is implementation-agnostic. It defines invariants, responsibilities, and failure
+    semantics — not specific tools, languages, or storage engines. The pattern applies equally to
+    ingesting email via IMAP, syncing events from a vendor API, or consuming a Kafka topic. The
+    storage layer may be PostgreSQL, S3, or a local filesystem. The runner may be a cron job, a
+    long-lived service, or a serverless function. ETL runs may also be dispatched via the task
+    queue (TASK-QUEUE blueprint), in which case the runner is a worker task — but the ETL
+    invariants (cursor, journal, idempotent sink) are internal to the runner and independent of
+    the dispatch mechanism. What matters is that the invariants hold.
+
+    When dispatched via the task queue, the two systems serve complementary roles: the task queue
+    provides scheduling and coordination (when to run, which worker claims it, retry on failure),
+    while the ETL journal provides crash recovery (where to resume, what was already persisted,
+    whether the source has changed). These are separate concerns — the task queue does not track
+    ETL cursor position, and the ETL journal does not manage worker assignment. A cron-dispatched
+    ETL task uses the task queue's idempotency key to prevent duplicate scheduling within the same
+    window, and uses the ETL journal's cursor to resume from the correct position regardless of
+    how many times the task is retried.
+
+rules:
+  # ── Threats ──
+
+  - number: ETL-T-001
+    hash: a1b2c3d4e5f6
+    name: cursor-advanced-before-persist
+    type: threat
+    description: >
+      The system advances its cursor (records progress) before data is durably written to the sink.
+      A crash between cursor advancement and persistence silently skips items — the journal says
+      they were processed, but the sink never received them. This is the most dangerous ETL failure
+      mode because it is invisible: the system reports success while losing data.
+    links:
+      - {target: f1e2d3c4b5a6, rel: depends_on}  # ETL-P-001 durable-before-advance
+    deprecated: false
+
+  - number: ETL-T-002
+    hash: b2c3d4e5f6a7
+    name: source-identity-change-corrupts-cursor
+    type: threat
+    description: >
+      The source stream is rebuilt, reset, or replaced (mailbox compaction, stream re-creation,
+      dataset reload) while the journal still holds a cursor from the previous incarnation. The
+      system resumes from a cursor that now points into a different sequence, silently skipping or
+      duplicating items. Source identity must be tracked separately and validated on every run.
+    links:
+      - {target: d4e5f6a7b8c9, rel: depends_on}  # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: ETL-T-003
+    hash: c3d4e5f6a7b8
+    name: silent-data-loss
+    type: threat
+    description: >
+      Items are fetched from the source but fail to persist — due to transient errors, schema
+      mismatches, or partial writes — and the failure is swallowed without logging, quarantining,
+      or halting. The system continues as if the items were processed. Every item must end in one
+      of four states: persisted, quarantined, intentionally skipped (policy), or not yet observed.
+      Silent loss is unacceptable.
+    links:
+      - {target: f1e2d3c4b5a6, rel: depends_on}  # ETL-P-001 durable-before-advance
+      - {target: e5f6a7b8c9d0, rel: depends_on}  # ETL-P-003 replay-safety
+    deprecated: false
+
+  - number: ETL-T-004
+    hash: d4e5f6a7b8c0
+    name: poison-item-blocks-stream
+    type: threat
+    description: >
+      A malformed or unparseable item causes the runner to fail repeatedly on the same batch,
+      blocking all subsequent items behind the poison item. Without an explicit poison-item policy
+      (quarantine, skip, dead-letter), a single bad record stalls the entire pipeline indefinitely.
+    links:
+      - {target: 6a7b8c9d0e1f, rel: depends_on}  # ETL-D-006 poison-item-quarantine
+    deprecated: false
+
+  - number: ETL-T-005
+    hash: e5f6a7b8c9d1
+    name: duplicate-processing-corrupts-sink
+    type: threat
+    description: >
+      The system retries a batch that was partially persisted. If the sink does not enforce
+      idempotency, the retry produces duplicate records — double-counted metrics, duplicate
+      notifications, corrupted aggregations. At-least-once delivery requires idempotent writes
+      as a structural guarantee, not a best-effort aspiration.
+    links:
+      - {target: e5f6a7b8c9d0, rel: depends_on}  # ETL-P-003 replay-safety
+      - {target: 5f6a7b8c9d0e, rel: depends_on}  # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: ETL-T-006
+    hash: f6a7b8c9d0e2
+    name: unstable-cursor-causes-drift
+    type: threat
+    description: >
+      The cursor value is derived from an unstable property (server-assigned timestamp with
+      clock skew, page number in an unpaginated API, implicit ordering without tie-breakers).
+      Retrying the same cursor position returns different items, causing the system to skip or
+      duplicate records non-deterministically. Cursors must be stable, comparable, and
+      deterministic across retries.
+    links:
+      - {target: a6b7c8d9e0f1, rel: depends_on}  # ETL-P-006 deterministic-ordering
+    deprecated: false
+
+  - number: ETL-T-007
+    hash: a2b3c4d5e6f7
+    name: cursor-regression-causes-unbounded-rework
+    type: threat
+    description: >
+      A bug, manual intervention, or misconfigured replay moves the committed cursor backward
+      within a source epoch. The runner re-processes an arbitrary range of already-ingested items.
+      If the sink's idempotency has limits (e.g., upsert semantics that overwrite with stale data,
+      or derived aggregations that double-count), backward movement corrupts state. Even with a
+      perfectly idempotent sink, unbounded rework wastes resources proportional to the regression
+      distance. Cursor regression must be prevented by the journal store's commit logic.
+    links:
+      - {target: c2d3e4f5a6b7, rel: depends_on}  # ETL-P-002 monotonic-cursor
+    deprecated: false
+
+  - number: ETL-T-008
+    hash: b3c4d5e6f7a8
+    name: unbounded-run-exhausts-resources
+    type: threat
+    description: >
+      A runner processing a large backlog or a fast-producing source runs without limits, consuming
+      unbounded memory, CPU, API quota, or wall-clock time. Memory grows with accumulated batch
+      state; API rate limits are exceeded causing cascading 429 errors; long-running processes are
+      killed by orchestrators (Kubernetes OOM, serverless timeouts) losing uncommitted progress.
+      Without explicit budgets, a healthy source can cause runner failure.
+    links:
+      - {target: 7d8e9f0a1b2c, rel: depends_on}  # ETL-D-012 backpressure-and-budget
+    deprecated: false
+
+  - number: ETL-T-009
+    hash: c4d5e6f7a8b9
+    name: sink-exposes-ingested-pii
+    type: threat
+    description: >
+      Source data containing PII (names, emails, credentials, financial data) is ingested into
+      the sink without encryption or access control. The sink table, its indexes, backups, and
+      any downstream consumers inherit the PII exposure. If the sink is in the same database
+      governed by the DATA blueprint, sink tables must comply with the DATA blueprint's encryption
+      and access-control rules. Raw source payloads containing PII must be encrypted at the
+      application layer before storage.
+    links:
+      - {target: 5f6a7b8c9d0e, rel: depends_on}  # ETL-P-005 idempotent-append-only-sink
+      - {target: 3be027de3daf, rel: depends_on}   # DATA-P-002 layered-encryption
+      - {target: 24b0de7f78fe, rel: depends_on}   # DATA-P-005 data-minimization
+    deprecated: false
+
+  # ── Principles ──
+
+  - number: ETL-P-001
+    hash: f1e2d3c4b5a6
+    name: durable-before-advance
+    type: principle
+    description: >
+      The cursor is only advanced after data is durably written to the sink. This is the
+      foundational invariant. If the system crashes between a write and a cursor update, the
+      next run re-fetches and re-persists the same batch — a safe replay. If the system crashes
+      after a cursor update but before a write, data is silently lost. The ordering is
+      non-negotiable: persist first, then commit progress.
+    links:
+      - {target: a1b2c3d4e5f6, rel: mitigates}  # ETL-T-001 cursor-advanced-before-persist
+      - {target: c3d4e5f6a7b8, rel: mitigates}  # ETL-T-003 silent-data-loss
+    deprecated: false
+
+  - number: ETL-P-002
+    hash: c2d3e4f5a6b7
+    name: monotonic-cursor
+    type: principle
+    description: >
+      Within a source epoch, the committed cursor never moves backward. Each committed cursor
+      position represents a strictly forward boundary in the source stream. Backward movement
+      would re-process already-committed ranges, potentially corrupting aggregations or causing
+      unbounded re-work. The journal store's commit operation must reject any cursor value that
+      is not strictly greater than the current committed cursor for that source epoch. Backfill
+      and replay are separate operations with their own cursor state and source key — they are
+      not reversals of the primary cursor. The overlap window (ETL-D-005) does not violate this
+      principle: the fetch window extends behind the committed cursor, but the committed cursor
+      itself only advances forward.
+    links:
+      - {target: a2b3c4d5e6f7, rel: mitigates}  # ETL-T-007 cursor-regression-causes-unbounded-rework
+    deprecated: false
+
+  - number: ETL-P-003
+    hash: e5f6a7b8c9d0
+    name: replay-safety
+    type: principle
+    description: >
+      Reprocessing the same batch — whether from a crash recovery, manual replay, or overlap
+      window — does not corrupt sink state. This requires idempotent writes at the sink layer.
+      The combination of source item identity and a unique constraint or upsert semantic ensures
+      that replayed items produce the same result as the original write. Replay safety is what
+      makes at-least-once delivery practical.
+    links:
+      - {target: e5f6a7b8c9d1, rel: mitigates}  # ETL-T-005 duplicate-processing-corrupts-sink
+    deprecated: false
+
+  - number: ETL-P-004
+    hash: d4e5f6a7b8c9
+    name: stable-source-identity
+    type: principle
+    description: >
+      The system tracks source identity (epoch) separately from cursor position. Source identity
+      is a value that uniquely identifies a specific incarnation of the source stream — a UID
+      validity value, a stream generation ID, a dataset version hash. On every run, the system
+      compares current source identity against the journal. If identity has changed, the old cursor
+      is invalid and a reset policy is applied: full reimport, new epoch with separate cursor, or
+      forked source key. Continuing from a stale cursor in a new epoch is never correct.
+    links:
+      - {target: b2c3d4e5f6a7, rel: mitigates}  # ETL-T-002 source-identity-change-corrupts-cursor
+    deprecated: false
+
+  - number: ETL-P-005
+    hash: 5f6a7b8c9d0e
+    name: idempotent-append-only-sink
+    type: principle
+    description: >
+      The sink accepts writes idempotently and preserves source data in an append-only fashion.
+      "Append-only" refers to the raw storage layer: original source payloads are never overwritten
+      or deleted. Normalized projections and derived views may be mutable — they can be updated,
+      rebuilt, or recomputed from the preserved raw records. Idempotency is enforced structurally —
+      unique constraints on (source key, source item ID), upsert semantics, or dedupe keys — not
+      by trusting the runner to avoid duplicates. This separation (immutable raw + mutable
+      projections) enables replay, re-transformation, and auditing while still supporting business
+      requirements that need in-place updates on derived data.
+    links:
+      - {target: e5f6a7b8c9d1, rel: mitigates}  # ETL-T-005 duplicate-processing-corrupts-sink
+      - {target: 0d599f9046de, rel: refines}     # DATA-D-004 append-only-business-journal
+    deprecated: false
+
+  - number: ETL-P-006
+    hash: a6b7c8d9e0f1
+    name: deterministic-ordering
+    type: principle
+    description: >
+      "Next after cursor" returns the same items across retries. The source adapter must provide
+      a stable ordering — by sequence number, offset, event ID, or composite key (timestamp + ID
+      with tie-breaker). If the source does not natively provide deterministic ordering, the
+      adapter must impose one or document the consistency limitations. Unstable ordering makes
+      replay safety unachievable.
+    links:
+      - {target: f6a7b8c9d0e2, rel: mitigates}  # ETL-T-006 unstable-cursor-causes-drift
+    deprecated: false
+
+  - number: ETL-P-007
+    hash: b7c8d9e0f1a2
+    name: at-least-once-semantics
+    type: principle
+    description: >
+      The system assumes at-least-once processing. Duplicates must be safe. Writes must tolerate
+      retries. Checkpoint advancement must be conservative. Exactly-once delivery is not a goal —
+      it is an emergent property of idempotent writes combined with durable-before-advance
+      checkpointing. The system is designed so that failure delays progress but does not corrupt it.
+    links:
+      - {target: e5f6a7b8c9d0, rel: refines}  # ETL-P-003 replay-safety
+      - {target: f1e2d3c4b5a6, rel: refines}  # ETL-P-001 durable-before-advance
+    deprecated: false
+
+  # ── Design Patterns ──
+
+  - number: ETL-D-001
+    hash: 1a2b3c4d5e6f
+    name: journal-store
+    type: design_pattern
+    description: >
+      A durable store that records cursor state, source identity, and run metadata for each
+      source stream. The journal is the system's memory of progress. It stores: source key,
+      source identity (epoch), last committed cursor, and last successful run metadata. The
+      journal records run history, not just latest state — enabling audit and debugging of
+      ingestion behavior over time.
+    problem: |
+      Without durable progress tracking, the system cannot resume after a crash. It must either
+      re-import everything (wasteful, potentially duplicating) or guess where it left off (unsafe).
+    solution: |
+      A dedicated journal table or file per source stream. Each cursor commit writes a new journal
+      entry with the source key, source identity, cursor position, and run ID. The latest entry
+      for a given source key is the current progress. Historical entries are retained for audit.
+    tradeoffs: |
+      Journal writes add latency to each batch commit. This is acceptable — the journal write is
+      typically a single row upsert or append, and the durability guarantee it provides is the
+      foundation of crash recovery.
+    links:
+      - {target: f1e2d3c4b5a6, rel: refines}  # ETL-P-001 durable-before-advance
+      - {target: d4e5f6a7b8c9, rel: refines}  # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: ETL-D-002
+    hash: 2b3c4d5e6f7a
+    name: run-ledger
+    type: design_pattern
+    description: >
+      Each execution of the runner produces a durable ledger entry recording: run ID, source key,
+      source identity, start cursor, end cursor, item count expected, item count persisted, status
+      (success/failure), timestamps, and error details. The run ledger is the primary audit artifact
+      — it answers "what did we claim to do?" and enables comparison against what was actually stored.
+    problem: |
+      Without run-level records, debugging ingestion failures requires reconstructing history from
+      logs, sink contents, and timestamps. This is fragile and incomplete.
+    solution: |
+      A run_ledger table or structured log entry written atomically with each cursor commit. The
+      ledger includes both expected and actual item counts, enabling detection of partial batches.
+      Failed runs record error details and the cursor position at failure.
+    tradeoffs: |
+      Adds one write per run. At typical ETL batch sizes (tens to thousands of items), this overhead
+      is negligible. The audit value far exceeds the cost.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: refines}  # ETL-D-001 journal-store
+    deprecated: false
+
+  - number: ETL-D-003
+    hash: 3c4d5e6f7a8b
+    name: batch-manifest
+    type: design_pattern
+    description: >
+      For stronger persistence guarantees, each batch records either the identities of all fetched
+      items or a checksum/digest of item IDs. The manifest enables post-hoc verification: "everything
+      we fetched was persisted." Without a manifest, the system can only compare counts (which miss
+      substitution errors) or re-query the source (which may have changed).
+    problem: |
+      Count-based verification detects missing items but not substituted items. Source re-query
+      detects gaps but the source may have changed since the original fetch.
+    solution: |
+      Store a list of source item IDs or a deterministic hash of the batch alongside the run ledger
+      entry. Verification compares the manifest against items actually present in the sink.
+    tradeoffs: |
+      Manifest storage scales with batch size. For large batches, a checksum digest is more practical
+      than a full item list. The manifest is optional but recommended — it converts reconciliation
+      from "we think we got everything" to "we can prove we got everything."
+    links:
+      - {target: 2b3c4d5e6f7a, rel: refines}  # ETL-D-002 run-ledger
+    deprecated: false
+
+  - number: ETL-D-004
+    hash: 4d5e6f7a8b9c
+    name: item-lineage
+    type: design_pattern
+    description: >
+      Each stored item carries metadata tracing it back to its origin: source key, source identity
+      (epoch), source item ID, source cursor position, run ID, and ingest timestamp. Item lineage
+      answers "where did this record come from?" for any item in the sink. Combined with the run
+      ledger, lineage enables full traceability from source to sink.
+    problem: |
+      Without lineage, items in the sink are orphans — their provenance is unknown, making it
+      impossible to debug duplicates, trace data quality issues, or verify completeness.
+    solution: |
+      Each sink record includes lineage columns or metadata fields populated at write time. The
+      lineage is immutable — it records the conditions under which the item was first ingested.
+      Re-ingestion via replay creates a new lineage record or updates the existing one idempotently.
+    tradeoffs: |
+      Lineage metadata increases storage per item. For most use cases this is a small percentage
+      of total item size. The traceability benefit is essential for debugging and audit.
+    links:
+      - {target: 5f6a7b8c9d0e, rel: refines}  # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: ETL-D-005
+    hash: 5e6f7a8b9c0d
+    name: overlap-window
+    type: design_pattern
+    description: >
+      Each run optionally re-reads a small range of items before the current cursor position.
+      The overlap window catches items missed by prior runs due to weak ordering, eventual
+      consistency at the source, or boundary edge cases. The overlap window is bounded (e.g.,
+      last N items or last T seconds before cursor) and requires an idempotent sink. This does
+      not violate monotonic cursor (ETL-P-002): the fetch window extends behind the committed
+      cursor to catch stragglers, but the committed cursor itself only advances forward. The
+      overlap is a read-side safeguard, not a cursor regression.
+    problem: |
+      Sources with eventual consistency or weak ordering guarantees may not surface all items
+      before the cursor advances past them. A strict cursor boundary can miss late-arriving items.
+    solution: |
+      On each run, fetch from (cursor - overlap) rather than exactly from cursor. The overlap
+      range is configurable per source. The sink's idempotency guarantees make re-processing
+      the overlap safe. The committed cursor advances to the end of the new batch, not back to
+      the overlap start.
+    tradeoffs: |
+      Overlap increases fetch volume and sink write load proportional to the window size. The
+      window should be small relative to batch size. For sources with strong ordering guarantees,
+      overlap can be set to zero.
+    links:
+      - {target: e5f6a7b8c9d0, rel: refines}  # ETL-P-003 replay-safety
+      - {target: 5f6a7b8c9d0e, rel: refines}  # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: ETL-D-006
+    hash: 6a7b8c9d0e1f
+    name: poison-item-quarantine
+    type: design_pattern
+    description: >
+      Items that cannot be parsed, validated, or persisted are quarantined rather than blocking the
+      stream. Quarantined items are stored in their raw form with error details, source metadata,
+      and the run ID that encountered them. The runner continues processing subsequent items.
+      Quarantine policy must be explicit — never silently skip or silently retry.
+    problem: |
+      A single malformed item can block the entire pipeline if the runner fails and retries on
+      the same batch repeatedly. The poison item never succeeds, and all items behind it are starved.
+    solution: |
+      Define an explicit policy per source: quarantine and continue, store raw only, retry with
+      backoff and eventual quarantine, or halt stream (only for sources where ordering is critical
+      and gaps are unacceptable). Quarantined items are visible to operators and can be manually
+      reprocessed after the underlying issue is fixed.
+    tradeoffs: |
+      Quarantine means accepting gaps in the processed stream. For most ETL use cases, a visible
+      gap with a quarantined record is strictly better than an invisible block. Sources that
+      require strict ordering and zero gaps need a halt-and-alert policy instead.
+    links:
+      - {target: d4e5f6a7b8c0, rel: mitigates}  # ETL-T-004 poison-item-blocks-stream
+    deprecated: false
+
+  - number: ETL-D-007
+    hash: 7b8c9d0e1f2a
+    name: cursor-design
+    type: design_pattern
+    description: >
+      A well-designed cursor defines a clear ordering boundary, is stable across retries, is
+      comparable, and represents a safe replay frontier. Good cursors: sequence numbers, offsets,
+      event IDs, composite keys (timestamp + ID with tie-breaker). Bad cursors: page numbers,
+      unstable timestamps without tie-breakers, implicit ordering. Cursor choice is the most
+      consequential design decision in a journaled ETL system — an unstable cursor undermines
+      every other guarantee.
+    problem: |
+      The wrong cursor type causes non-deterministic replay, missed items, or unbounded re-work.
+      Page numbers shift as items are inserted. Timestamps without tie-breakers produce
+      non-deterministic ordering for items with identical timestamps.
+    solution: |
+      Choose the most stable identifier the source provides. Prefer sequence numbers or offsets.
+      If only timestamps are available, add a tie-breaker (source item ID) to form a composite
+      cursor. Document the cursor's stability guarantees and any known edge cases.
+    tradeoffs: |
+      Composite cursors are more complex to compare and store. Sequence numbers are simplest but
+      not all sources provide them. The tradeoff is always toward stability — a slightly more
+      complex cursor that is deterministic is better than a simple cursor that drifts.
+    links:
+      - {target: a6b7c8d9e0f1, rel: refines}  # ETL-P-006 deterministic-ordering
+      - {target: c2d3e4f5a6b7, rel: refines}  # ETL-P-002 monotonic-cursor
+    deprecated: false
+
+  # ── Architectures ──
+
+  - number: ETL-A-001
+    hash: 8c9d0e1f2a3b
+    name: four-component-architecture
+    type: architecture
+    description: >
+      A correct journaled ETL system separates responsibilities into four logical components:
+      Source Adapter (reads from upstream, provides source identity, fetches items after cursor,
+      preserves ordering), Sink (persists items durably and idempotently, stores raw and normalized
+      representations), Journal Store (stores cursor state, source identity, and run metadata), and
+      Runner (orchestrates fetch-persist-commit, handles retries, enforces invariants). These
+      components may be separate services, modules, or functions — the separation is logical, not
+      necessarily physical.
+    diagram: |
+      ┌─────────────────────────────────────────────────────────────────────┐
+      │  Runner (orchestrator)                                              │
+      │                                                                     │
+      │  1. Load journal ──────────────────────► Journal Store              │
+      │  2. Validate source identity ──────────► Source Adapter             │
+      │  3. Fetch batch after cursor ──────────► Source Adapter             │
+      │  4. Persist items (idempotent) ────────► Sink                       │
+      │  5. Verify persistence (optional) ─────► Sink                       │
+      │  6. Commit cursor + run record ────────► Journal Store              │
+      │  7. Repeat until done or budget reached                             │
+      └─────────────────────────────────────────────────────────────────────┘
+
+      ┌──────────────┐     ┌──────────────┐     ┌──────────────────────────┐
+      │ Source        │     │ Journal      │     │ Sink                     │
+      │ Adapter       │     │ Store        │     │                          │
+      │               │     │              │     │  ┌─────────┐ ┌────────┐ │
+      │ • identity()  │     │ • load()     │     │  │ raw     │ │ normal │ │
+      │ • fetch(cur)  │     │ • commit()   │     │  │ store   │ │ store  │ │
+      │ • ordering    │     │ • history()  │     │  └─────────┘ └────────┘ │
+      └──────────────┘     └──────────────┘     └──────────────────────────┘
+    when_appropriate: |
+      Any ETL or progressive sync pipeline that must be resumable, auditable, and correct under
+      partial failure. The pattern applies regardless of source type (API, message queue, filesystem,
+      database), sink type (database, object store, search index), or runtime (cron, long-lived
+      service, serverless).
+    tradeoffs: |
+      The four-component separation adds design overhead for simple one-shot imports. For pipelines
+      that run once and are discarded, the full architecture is unnecessary. For any pipeline that
+      will run repeatedly, handle failures, or require auditability, the separation pays for itself
+      on the first crash recovery.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: refines}  # ETL-D-001 journal-store
+      - {target: 5f6a7b8c9d0e, rel: refines}  # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: ETL-A-002
+    hash: 9d0e1f2a3b4c
+    name: synchronization-loop
+    type: architecture
+    description: >
+      The core execution loop that each run follows: (1) load journal state, (2) read current
+      source identity, (3) if identity changed apply reset policy, (4) fetch next batch after
+      cursor, (5) persist items idempotently, (6) validate persistence (optional but recommended),
+      (7) commit cursor + run metadata, (8) repeat until source exhausted or budget reached. This
+      loop is the minimal correct algorithm. Every step is mandatory except (6) which is recommended.
+      Steps must execute in this order — reordering violates the durable-before-advance invariant.
+    diagram: |
+      ┌─────────────┐
+      │ Load journal │
+      └──────┬──────┘
+             ▼
+      ┌──────────────────┐     ┌──────────────┐
+      │ Read source ID   │────►│ ID changed?  │
+      └──────────────────┘     └──────┬───────┘
+                                      │ yes
+                                      ▼
+                               ┌──────────────┐
+                               │ Reset policy │
+                               └──────┬───────┘
+                                      │
+             ┌────────────────────────┘
+             ▼
+      ┌──────────────┐
+      │ Fetch batch  │◄──────────────────────┐
+      └──────┬───────┘                       │
+             ▼                               │
+      ┌──────────────┐                       │
+      │ Persist      │                       │
+      └──────┬───────┘                       │
+             ▼                               │
+      ┌──────────────┐                       │
+      │ Verify       │ (optional)            │
+      └──────┬───────┘                       │
+             ▼                               │
+      ┌──────────────┐     ┌──────────┐      │
+      │ Commit cursor│────►│ More?    │──yes─┘
+      └──────────────┘     └────┬─────┘
+                                │ no
+                                ▼
+                         ┌──────────┐
+                         │   Done   │
+                         └──────────┘
+    when_appropriate: |
+      Every journaled ETL pipeline. This is not an optional pattern — it is the minimal correct
+      algorithm. Variations may add steps (overlap window, manifest recording, reconciliation) but
+      must not remove or reorder the core sequence.
+    tradeoffs: |
+      The loop is sequential within a single source partition. For high-throughput sources,
+      partition the source into independent streams with separate cursors and run the loop
+      concurrently per partition. Multiple writers racing on one cursor is an antipattern.
+
+      When sink and journal share a transactional store (e.g., both in PostgreSQL), steps 5 and 7
+      can be a single transaction — the strongest guarantee. When they are in different stores
+      (e.g., sink is S3, journal is PostgreSQL), the cursor commit must be the last write. A crash
+      after persist but before commit produces a safe replay on restart. A crash after commit but
+      before persist is impossible if commit is last. This ordering — persist then commit, never
+      the reverse — is how durable-before-advance is upheld without two-phase commit. See
+      ETL-D-010 for the explicit cross-store atomicity pattern.
+    links:
+      - {target: f1e2d3c4b5a6, rel: refines}  # ETL-P-001 durable-before-advance
+      - {target: c2d3e4f5a6b7, rel: refines}  # ETL-P-002 monotonic-cursor
+      - {target: d4e5f6a7b8c9, rel: refines}  # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  # ── Checklist ──
+
+  - number: ETL-C-001
+    hash: 0e1f2a3b4c5d
+    name: cursor-monotonicity-tested
+    type: checklist
+    description: >
+      Verified that the cursor never moves backward within a source epoch across multiple
+      consecutive runs. Tested with sequential runs that each advance the cursor and confirmed
+      that no committed cursor value is less than or equal to its predecessor.
+    links:
+      - {target: c2d3e4f5a6b7, rel: verifies}  # ETL-P-002 monotonic-cursor
+    deprecated: false
+
+  - number: ETL-C-002
+    hash: 1f2a3b4c5d6e
+    name: crash-recovery-resumes-correctly
+    type: checklist
+    description: >
+      Runner is killed after persisting items but before committing the cursor. On restart, the
+      runner re-fetches the same batch, re-persists idempotently (no duplicates in sink), and
+      commits the cursor. Verified that no items are lost and no duplicates are created.
+    links:
+      - {target: f1e2d3c4b5a6, rel: verifies}  # ETL-P-001 durable-before-advance
+      - {target: e5f6a7b8c9d0, rel: verifies}  # ETL-P-003 replay-safety
+    deprecated: false
+
+  - number: ETL-C-003
+    hash: 2a3b4c5d6e7f
+    name: duplicate-batch-idempotent
+    type: checklist
+    description: >
+      The same batch is persisted twice to the sink. Verified that the sink contains exactly one
+      copy of each item, not two. Idempotency enforced by unique constraint, upsert, or dedupe key.
+    links:
+      - {target: 5f6a7b8c9d0e, rel: verifies}  # ETL-P-005 idempotent-append-only-sink
+      - {target: e5f6a7b8c9d0, rel: verifies}  # ETL-P-003 replay-safety
+    deprecated: false
+
+  - number: ETL-C-004
+    hash: 3b4c5d6e7f8a
+    name: source-reset-detected
+    type: checklist
+    description: >
+      Source identity is changed (simulated rebuild/reset). Verified that the runner detects the
+      change, does not continue from the old cursor, and applies the configured reset policy
+      (full reimport, new epoch, or forked source key).
+    links:
+      - {target: d4e5f6a7b8c9, rel: verifies}  # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: ETL-C-005
+    hash: 4c5d6e7f8a9b
+    name: run-ledger-complete
+    type: checklist
+    description: >
+      Every run — success or failure — produces a ledger entry with run ID, source key, source
+      identity, start cursor, end cursor, expected count, persisted count, status, timestamps,
+      and error details (if applicable). No silent runs.
+    links:
+      - {target: 2b3c4d5e6f7a, rel: verifies}  # ETL-D-002 run-ledger
+    deprecated: false
+
+  - number: ETL-C-006
+    hash: 5d6e7f8a9b0c
+    name: reconciliation-detects-gaps
+    type: checklist
+    description: >
+      A reconciliation check (manifest comparison or source re-enumeration) detects intentionally
+      introduced gaps. Items removed from the sink are flagged as missing. Tested by deleting a
+      sink record and running reconciliation.
+    links:
+      - {target: 3c4d5e6f7a8b, rel: verifies}  # ETL-D-003 batch-manifest
+      - {target: 4d5e6f7a8b9c, rel: verifies}  # ETL-D-004 item-lineage
+    deprecated: false
+
+  - number: ETL-C-007
+    hash: 6e7f8a9b0c1d
+    name: poison-item-quarantined
+    type: checklist
+    description: >
+      A malformed item is injected into the source stream. Verified that the runner quarantines
+      the item (stored in raw form with error details), continues processing subsequent items,
+      and the quarantined item is visible to operators.
+    links:
+      - {target: 6a7b8c9d0e1f, rel: verifies}  # ETL-D-006 poison-item-quarantine
+    deprecated: false
+
+  - number: ETL-C-008
+    hash: 8f9a0b1c2d3e
+    name: cross-store-crash-recovery-tested
+    type: checklist
+    description: >
+      For pipelines where sink and journal are in different stores: runner is killed after
+      persisting items to the sink but before committing the cursor to the journal. On restart,
+      the runner re-fetches the batch, re-persists idempotently (sink rejects or upserts
+      duplicates), and commits the cursor. Verified that no items are lost, no duplicates
+      appear in the sink, and the cursor advances correctly.
+    links:
+      - {target: 5b6c7d8e9f0a, rel: verifies}  # ETL-D-010 cross-store-atomicity
+      - {target: f1e2d3c4b5a6, rel: verifies}   # ETL-P-001 durable-before-advance
+    deprecated: false
+
+  - number: ETL-C-009
+    hash: 9a0b1c2d3e4f
+    name: budget-exhaustion-commits-cleanly
+    type: checklist
+    description: >
+      Runner is configured with a small budget (e.g., max_items=10). Source contains 100 items.
+      Verified that the runner commits progress after 10 items, exits cleanly (not as error),
+      and the next invocation resumes from the committed position without gaps or duplicates.
+    links:
+      - {target: 7d8e9f0a1b2c, rel: verifies}  # ETL-D-012 backpressure-and-budget
+    deprecated: false
+
+  - number: ETL-C-010
+    hash: 0b1c2d3e4f5a
+    name: sink-pii-encryption-verified
+    type: checklist
+    description: >
+      Sink tables containing raw source payloads with PII are encrypted at the application layer
+      before storage. Verified that querying the sink table directly returns ciphertext for PII
+      fields, and that only the application layer can decrypt. Applies when the sink is in a
+      database governed by the DATA blueprint's encryption rules.
+    links:
+      - {target: c4d5e6f7a8b9, rel: verifies}   # ETL-T-009 sink-exposes-ingested-pii
+      - {target: 8b531a730c7d, rel: verifies}    # DATA-D-001 encrypt-before-insert
+    deprecated: false
+
+  # ── Antipatterns ──
+
+  - number: ETL-X-001
+    hash: 7f8a9b0c1d2e
+    name: timestamp-as-sole-cursor
+    type: antipattern
+    description: >
+      Using a server-assigned timestamp as the sole cursor without a tie-breaking secondary key.
+      Items with identical timestamps produce non-deterministic ordering — retries may return
+      different items for the same cursor position. If timestamps are the only available ordering,
+      they must be combined with a stable secondary key (source item ID) to form a composite cursor.
+    links:
+      - {target: a6b7c8d9e0f1, rel: contradicts}  # ETL-P-006 deterministic-ordering
+    deprecated: false
+
+  - number: ETL-X-002
+    hash: 8a9b0c1d2e3f
+    name: cursor-coupled-to-sink-state
+    type: antipattern
+    description: >
+      Deriving the cursor position from sink state (e.g., MAX(created_at) from the sink table)
+      rather than from the journal. This couples cursor correctness to sink integrity — if sink
+      data is deleted, corrupted, or migrated, the cursor position is lost or invalid. The journal
+      is the authoritative source of progress, not the sink.
+    links:
+      - {target: 1a2b3c4d5e6f, rel: contradicts}  # ETL-D-001 journal-store
+      - {target: c2d3e4f5a6b7, rel: contradicts}  # ETL-P-002 monotonic-cursor
+    deprecated: false
+
+  - number: ETL-X-003
+    hash: 9b0c1d2e3f4a
+    name: destructive-overwrites
+    type: antipattern
+    description: >
+      Overwriting previously ingested items with new versions without preserving the original.
+      Destructive overwrites prevent replay, break audit trails, and make it impossible to
+      diagnose when a data quality issue was introduced. The sink should be append-only; if items
+      change at the source, the new version is stored alongside or as an update to the original,
+      not as a replacement.
+    links:
+      - {target: 5f6a7b8c9d0e, rel: contradicts}  # ETL-P-005 idempotent-append-only-sink
+    deprecated: false
+
+  - number: ETL-X-004
+    hash: 0c1d2e3f4a5b
+    name: implicit-source-reset
+    type: antipattern
+    description: >
+      Continuing from a stored cursor after the source has been rebuilt or reset, without detecting
+      the identity change. The cursor now points into a different sequence. The system either skips
+      items (if the new sequence is shorter) or re-ingests from a random midpoint (if the new
+      sequence is longer). Source identity must be checked on every run.
+    links:
+      - {target: d4e5f6a7b8c9, rel: contradicts}  # ETL-P-004 stable-source-identity
+    deprecated: false
+
+  - number: ETL-X-005
+    hash: 1d2e3f4a5b6c
+    name: silent-error-swallowing
+    type: antipattern
+    description: >
+      Catching and discarding errors during fetch or persist without logging, quarantining, or
+      surfacing them. A swallowed error is indistinguishable from success — the system advances
+      past items it never stored. Every error must produce a visible artifact: a log entry, a
+      quarantine record, a failed run ledger entry, or a halted pipeline.
+    links:
+      - {target: f1e2d3c4b5a6, rel: contradicts}  # ETL-P-001 durable-before-advance
+    deprecated: false
+
+  - number: ETL-X-006
+    hash: 2e3f4a5b6c7d
+    name: page-number-cursor
+    type: antipattern
+    description: >
+      Using API page numbers as cursors. Page boundaries shift when items are inserted or deleted
+      between requests. Page 3 in one request may overlap with or skip items from page 3 in the
+      next request. Page numbers are transport artifacts, not stable positions in a data stream.
+      Use item-level cursors (IDs, offsets, tokens) instead.
+    links:
+      - {target: a6b7c8d9e0f1, rel: contradicts}  # ETL-P-006 deterministic-ordering
+    deprecated: false
+
+  - number: ETL-X-007
+    hash: 3f4a5b6c7d8f
+    name: unbounded-run-without-budget
+    type: antipattern
+    description: >
+      A runner that processes items indefinitely until the source is exhausted, with no limit on
+      items, duration, or memory. A large backlog or fast source causes the runner to grow in
+      memory, exceed API rate limits, or run long enough to be killed by orchestrators — losing
+      all uncommitted progress since the last checkpoint. Runners must operate within explicit
+      budgets, committing progress incrementally and exiting cleanly when limits are reached.
+    links:
+      - {target: 7d8e9f0a1b2c, rel: contradicts}  # ETL-D-012 backpressure-and-budget
+    deprecated: false
+
+  # ── Audit & Reconciliation (Design Patterns) ──
+
+  - number: ETL-D-008
+    hash: 3f4a5b6c7d8e
+    name: reconciliation-levels
+    type: design_pattern
+    description: >
+      Three levels of reconciliation, each providing stronger guarantees. Level 1 (cursor-based):
+      compare expected vs actual item counts — works for dense streams. Level 2 (manifest-based):
+      compare fetched item IDs vs stored items — recommended default. Level 3 (re-enumeration):
+      re-query the source for a lookback window and compare against the sink — strongest guarantee
+      but most expensive. The appropriate level depends on the source's consistency guarantees and
+      the cost tolerance for verification.
+    problem: |
+      The system must be able to answer "did we miss anything?" Count-based checks miss substitution
+      errors. Manifest checks are precise but require manifest storage. Re-enumeration is authoritative
+      but expensive and may not be possible if the source does not support historical queries.
+    solution: |
+      Implement reconciliation as a pluggable strategy. Default to Level 2 (manifest-based) for most
+      sources. Escalate to Level 3 for critical data or after incidents. Level 1 is acceptable only
+      for sources with strict sequential ordering where count comparison is sufficient.
+    tradeoffs: |
+      Higher reconciliation levels increase source load and storage. Level 3 re-enumeration may
+      be rate-limited or impossible for some sources. The reconciliation level should be a per-source
+      configuration, not a system-wide setting.
+    links:
+      - {target: 3c4d5e6f7a8b, rel: refines}  # ETL-D-003 batch-manifest
+      - {target: 4d5e6f7a8b9c, rel: refines}  # ETL-D-004 item-lineage
+    deprecated: false
+
+  - number: ETL-D-009
+    hash: 4a5b6c7d8e9f
+    name: concurrency-partitioning
+    type: design_pattern
+    description: >
+      One logical runner per source stream with serialized checkpoint advancement. For scale,
+      the source is partitioned into independent streams, each with its own cursor and journal
+      entry. Partitions can be processed concurrently because they share no cursor state. Multiple
+      writers racing on one cursor is never correct — it violates the monotonic cursor invariant.
+    problem: |
+      A single-threaded runner may not keep up with high-volume sources. Naive parallelism
+      (multiple runners sharing one cursor) causes race conditions and duplicate processing.
+    solution: |
+      Partition the source into independent sub-streams (by shard key, topic partition, date range,
+      etc.). Each partition gets its own journal entry and cursor. Runners process partitions
+      independently and concurrently. Cross-partition ordering is not guaranteed or required.
+    tradeoffs: |
+      Partitioning adds operational complexity — more journal entries to monitor, more cursors to
+      track. Not all sources support natural partitioning. For sources that don't partition well,
+      a single fast runner is preferable to artificial partitioning.
+    links:
+      - {target: c2d3e4f5a6b7, rel: refines}  # ETL-P-002 monotonic-cursor
+    deprecated: false
+
+  - number: ETL-D-010
+    hash: 5b6c7d8e9f0a
+    name: cross-store-atomicity
+    type: design_pattern
+    description: >
+      When the sink and journal are in different storage systems (e.g., sink is S3 or
+      Elasticsearch, journal is PostgreSQL), true atomicity between persist and commit is
+      impossible without two-phase commit. The system upholds durable-before-advance by
+      enforcing a strict ordering: the journal commit is always the last write operation.
+      This means the only crash window that produces ambiguity is after persist, before commit —
+      which results in a safe replay, not data loss.
+    problem: |
+      If sink and journal are in different stores, a single transaction cannot span both. A crash
+      between the two writes leaves the system in an ambiguous state. Two-phase commit is complex,
+      fragile, and often unavailable across heterogeneous stores.
+    solution: |
+      Order the writes: (1) persist items to sink, (2) optionally verify persistence, (3) commit
+      cursor to journal. If the system crashes after (1) but before (3), the next run re-fetches
+      and re-persists the batch — safe because the sink is idempotent. If sink and journal share a
+      transactional store (e.g., both in PostgreSQL), wrap persist + commit in a single transaction
+      for the strongest guarantee. The cross-store pattern is a graceful degradation, not a
+      compromise — it produces the same correctness properties via idempotent replay.
+    tradeoffs: |
+      The crash window between persist and commit grows with batch size and sink write latency.
+      Smaller batches reduce the window. For critical pipelines with non-transactional sinks,
+      the batch manifest (ETL-D-003) provides post-hoc verification that the replay was complete.
+    links:
+      - {target: f1e2d3c4b5a6, rel: refines}  # ETL-P-001 durable-before-advance
+      - {target: e5f6a7b8c9d0, rel: refines}  # ETL-P-003 replay-safety
+    deprecated: false
+
+  - number: ETL-D-011
+    hash: 6c7d8e9f0a1b
+    name: batch-atomicity-policy
+    type: design_pattern
+    description: >
+      Defines whether the atomicity unit is the entire batch or individual items. In batch-atomic
+      mode, either all items in a batch are persisted or none are — the cursor advances only on
+      full batch success. In item-granular mode, each item is persisted independently, and the
+      cursor advances to the last successfully persisted item. Batch-atomic is simpler and
+      preferred when the sink supports transactions (PostgreSQL). Item-granular is necessary for
+      non-transactional sinks (S3, filesystem) where all-or-nothing writes are impractical for
+      large batches.
+    problem: |
+      If the system crashes after persisting 57 of 100 items, what is the cursor? Batch-atomic
+      mode says "the cursor doesn't advance — replay the whole batch." Item-granular mode says
+      "the cursor advances to item 57 — resume from item 58." Without an explicit policy, the
+      answer is undefined and the system may lose or duplicate items on recovery.
+    solution: |
+      Choose one policy per source and document it. Batch-atomic: wrap all item writes in a
+      transaction; on failure, roll back everything and retry the full batch. Item-granular: track
+      the last successfully persisted item within the batch; on commit, advance the cursor to that
+      item's position. Item-granular requires per-item idempotency and a finer-grained cursor
+      (item-level rather than batch-level).
+    tradeoffs: |
+      Batch-atomic is simpler but limits maximum batch size to what fits in a single transaction.
+      Item-granular handles arbitrarily large batches but requires more bookkeeping and a cursor
+      type that can address individual items within a batch. For transactional sinks, prefer
+      batch-atomic. For non-transactional sinks or very large batches, use item-granular.
+    links:
+      - {target: f1e2d3c4b5a6, rel: refines}  # ETL-P-001 durable-before-advance
+      - {target: 5b6c7d8e9f0a, rel: refines}  # ETL-D-010 cross-store-atomicity
+    deprecated: false
+
+  - number: ETL-D-012
+    hash: 7d8e9f0a1b2c
+    name: backpressure-and-budget
+    type: design_pattern
+    description: >
+      Each run operates within a budget that bounds resource consumption: maximum items per run,
+      maximum wall-clock time per run, and maximum bytes fetched per run. When the budget is
+      exhausted, the runner commits progress and exits cleanly rather than consuming unbounded
+      resources. For sources with API rate limits, the source adapter enforces rate-limiting
+      internally (backoff, token bucket) so the runner does not exceed source quotas. Budget
+      exhaustion is a normal exit condition, not an error.
+    problem: |
+      Without a budget, a runner processing a large backlog consumes unbounded memory, CPU, API
+      quota, or wall-clock time. A source that delivers faster than the sink can absorb causes
+      memory growth or OOM. API rate limits cause cascading failures if not respected.
+    solution: |
+      The runner accepts budget parameters (max_items, max_duration, max_bytes). The sync loop
+      checks the budget after each batch commit. When any limit is reached, the runner commits
+      the current cursor and exits. The next invocation resumes from the committed position.
+      Source adapters implement rate-limiting as a concern separate from the runner's budget.
+    tradeoffs: |
+      Budget limits mean a single run may not drain the source. This is by design — multiple
+      shorter runs with committed progress are safer than one long run. Budget values should be
+      tuned per source based on observed throughput, memory usage, and source API limits.
+    links:
+      - {target: 9d0e1f2a3b4c, rel: refines}  # ETL-A-002 synchronization-loop
+    deprecated: false

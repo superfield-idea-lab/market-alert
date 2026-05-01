@@ -1,0 +1,21 @@
+name: Notify dependents
+
+# Fires a repository_dispatch to all repos that embed this blueprint as a subtree,
+# so they can pull the latest changes automatically.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger inbound sync on superfield-ts
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.BLUEPRINT_SYNC_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/dot-matrix-labs/superfield-ts/dispatches \
+            -d '{"event_type":"blueprint-updated"}'
