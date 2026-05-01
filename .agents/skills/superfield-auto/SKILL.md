@@ -117,6 +117,5 @@ stop condition.
 
 ## Reference
 
-Full command specification: `.agents/commands/superfield-auto.md`
 Worker reference doc: `.agents/skills/develop-issue/SKILL.md`
 Plan-driven workflow rules: `CLAUDE.md`

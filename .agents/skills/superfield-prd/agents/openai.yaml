@@ -1,0 +1,5 @@
+interface:
+  display_name: 'superfield-prd'
+  short_description: 'Conduct a Product Owner interview and produce a validated PRD'
+policy:
+  allow_implicit_invocation: false

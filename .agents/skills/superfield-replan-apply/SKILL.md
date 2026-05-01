@@ -5,14 +5,21 @@ description: User-facing wrapper for the Superfield replan apply workflow. Use w
 
 # Superfield Replan Apply
 
-This skill exists because Codex currently discovers repository skills, but does not expose repository `.agents/commands/*.md` files as custom slash commands.
+Use this skill to apply a structured phase-aware plan after evaluation is done.
 
-Use this skill only when the user explicitly invokes `superfield-replan-apply` or clearly asks to run that command workflow.
+## Must do
 
-## Workflow
+- Rewrite the `Plan` issue from structured data only.
+- Keep planned entries as plain issue references.
+- Preserve stable phase metadata in issue bodies and keep the dependency tree in
+  the `Plan` only.
 
-1. Read [`../../commands/superfield-replan-apply.md`](../../commands/superfield-replan-apply.md).
-2. Treat that command file as the orchestration source of truth.
-3. Apply the prepared Plan result using the deterministic helpers it references.
-4. Keep cross-phase ordering metadata in the Plan issue while preserving stable
-   phase metadata in issue bodies.
+## Deterministic flow
+
+```bash
+.agents/scripts/replan/validate-plan-json.sh {plan-json-file}
+.agents/scripts/replan/apply-plan.sh {plan-json-file}
+.agents/scripts/replan/sync-dependents.sh {plan-json-file}
+```
+
+Do not hand-edit the `Plan` issue body when the structured scripts can apply it.

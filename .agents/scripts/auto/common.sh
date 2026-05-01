@@ -266,7 +266,7 @@ issue_worktree_path() {
   local branch_name="$1"
   local repo_name
   repo_name="$(basename "$(repo_root)")"
-  printf '/tmp/superfield-worktrees/%s/%s\n' "$repo_name" "${branch_name//\//-}"
+  printf '%s/tmp/superfield-worktrees/%s/%s\n' "$HOME" "$repo_name" "${branch_name//\//-}"
 }
 
 managed_issue_branch_regex() {
