@@ -1,0 +1,148 @@
+entries:
+- version: 1
+  date: 2026-03-13
+  changes:
+  - action: initial
+    summary: Extracted rules from 17 markdown files into YAML rule system
+- version: 2
+  date: '2026-04-03'
+  changes:
+  - action: added
+    summary: 25 rules added
+    rules:
+    - DEPLOY-C-038
+    - DEPLOY-C-039
+    - DEPLOY-C-040
+    - DEPLOY-C-041
+    - DEPLOY-C-042
+    - DEPLOY-C-043
+    - DEPLOY-C-044
+    - DEPLOY-C-045
+    - DEPLOY-D-007
+    - DEPLOY-D-008
+    - DEPLOY-P-019
+    - DEPLOY-P-020
+    - DEPLOY-P-021
+    - DEPLOY-T-011
+    - DEPLOY-T-012
+    - DEPLOY-T-013
+    - IMPL-DEPLOY-025
+    - IMPL-DEPLOY-026
+    - IMPL-DEPLOY-027
+    - IMPL-DEPLOY-028
+    - IMPL-DEPLOY-029
+    - IMPL-DEPLOY-030
+    - IMPL-DEPLOY-031
+    - IMPL-DEPLOY-032
+    - IMPL-DEPLOY-033
+  - action: modified
+    summary: 43 rules modified
+    rules:
+    - ARCH-C-003
+    - ARCH-C-004
+    - ARCH-C-007
+    - ARCH-C-008
+    - ARCH-C-009
+    - ARCH-C-010
+    - ARCH-C-012
+    - ARCH-C-016
+    - ARCH-C-018
+    - ARCH-D-004
+    - DEPLOY-A-003
+    - DEPLOY-C-027
+    - DEPLOY-C-029
+    - DEPLOY-C-030
+    - DEPLOY-C-031
+    - DEPLOY-C-032
+    - DEPLOY-C-033
+    - DEPLOY-P-008
+    - DEPLOY-P-010
+    - DEPLOY-P-013
+    - DEPLOY-P-016
+    - DEPLOY-P-017
+    - DEPLOY-T-009
+    - DEPLOY-X-008
+    - ENV-A-001
+    - ENV-C-001
+    - ENV-C-004
+    - ENV-C-008
+    - ENV-C-011
+    - ENV-C-013
+    - ENV-C-024
+    - ENV-D-004
+    - ENV-D-005
+    - ENV-P-006
+    - IMPL-DEPLOY-021
+    - IMPL-DEPLOY-RS-021
+    - IMPL-DEPLOY-RS-022
+    - IMPL-DEPLOY-RS-023
+    - IMPL-DEPLOY-RS-024
+    - IMPL-DEPLOY-RS-025
+    - DEPLOY-D-005
+    - DEPLOY-P-015
+    - DEPLOY-T-010
+  - action: deprecated
+    summary: 2 rules deprecated
+    rules:
+    - DEPLOY-C-014
+    - DEPLOY-C-015
+- version: 3
+  date: '2026-04-04'
+  changes:
+  - action: added
+    summary: 9 rules added
+    rules:
+    - ENV-C-026
+    - ENV-C-027
+    - ENV-C-028
+    - ENV-D-007
+    - ENV-D-008
+    - ENV-T-011
+    - ENV-T-012
+    - ENV-X-012
+    - ENV-X-013
+- version: 4
+  date: '2026-04-04'
+  changes:
+  - action: added
+    summary: 7 rules added
+    rules:
+    - DATA-C-036
+    - DATA-D-013
+    - DATA-D-014
+    - DATA-X-010
+    - DEPLOY-C-046
+    - DEPLOY-D-009
+    - DEPLOY-X-009
+- version: 5
+  date: '2026-04-04'
+  changes:
+  - action: added
+    summary: 2 rules added
+    rules:
+    - TEST-D-008
+    - TEST-X-010
+  - action: modified
+    summary: 1 rules modified
+    rules:
+    - TEST-D-001
+- version: 6
+  date: '2026-04-04'
+  changes:
+  - action: added
+    summary: 5 rules added
+    rules:
+    - TQ-D-007
+    - TQ-D-008
+    - TQ-X-005
+    - WORKER-D-008
+    - WORKER-P-009
+- version: 7
+  date: '2026-04-04'
+  changes:
+  - action: added
+    summary: 3 rules added
+    rules:
+    - DATA-A-003
+    - DATA-D-015
+    - DATA-D-016

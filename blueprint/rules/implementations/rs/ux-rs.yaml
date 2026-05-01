@@ -1,0 +1,411 @@
+meta:
+  domain: IMPL-UX-RS
+  title: UX - Rust Implementation
+  implements: UX
+  version: 1
+
+rules:
+  # ── Crate Structure ───────────────────────────────────────────────────────
+
+  - number: IMPL-UX-RS-001
+    hash: 197fab2bb25e
+    name: workspace-surface-layout
+    type: implementation
+    description: >
+      Workspace organized into crates/web (Leptos WASM end-user UI),
+      crates/server (Axum API with agent router), crates/core (capability
+      types, service flow types). Each actor type maps to a distinct crate
+      or module consuming shared types from crates/core.
+    links:
+      - {target: 67863239eb85, rel: implements}  # UX-A-001 unified-service-layer
+      - {target: 60c41e0c35c7, rel: implements}  # UX-D-004 unified-design-system
+    deprecated: false
+
+  # ── Core Types ──────────────────────────────────────────────────────────────
+
+  - number: IMPL-UX-RS-002
+    hash: ba72955e21bb
+    name: capability-struct
+    type: implementation
+    description: >
+      Capability struct with id (String), allowed_actors (Vec<ActorType>),
+      and required_scopes (Vec<String>). Defined in crates/core. Derives
+      Serialize, Deserialize, Clone. Serves as the atomic unit of UX design
+      and access control.
+    links:
+      - {target: 8de237165c47, rel: implements}  # UX-D-003 agent-native-interface
+      - {target: 300c0e349c72, rel: implements}  # UX-A-002 api-first-client-agnostic
+    deprecated: false
+
+  - number: IMPL-UX-RS-003
+    hash: 75c3f8045b0e
+    name: actor-type-enum
+    type: implementation
+    description: >
+      ActorType enum (EndUser, Admin, Agent) in crates/core. Determines which
+      interface surface is appropriate. Exhaustive match ensures all actor
+      types are handled at compile time.
+    links:
+      - {target: e43e9ff85857, rel: implements}  # UX-P-003 medium-appropriate-interface
+    deprecated: false
+
+  - number: IMPL-UX-RS-004
+    hash: 3ad118ae80c9
+    name: agent-presence-struct
+    type: implementation
+    description: >
+      AgentPresence struct with agent_id, account_id, authorized_scopes
+      (Vec<String>), granted_at, last_active_at, and visible_to_account_holder
+      (always true, enforced by constructor). Defined in crates/core.
+    links:
+      - {target: b6f0649c24cf, rel: implements}  # UX-P-005 agent-presence-explicit
+    deprecated: false
+
+  - number: IMPL-UX-RS-005
+    hash: 81f5a40e3f43
+    name: agent-action-record-struct
+    type: implementation
+    description: >
+      AgentActionRecord struct with agent_id, account_id, capability_id,
+      input_summary (String), outcome (Success | Rejected | Failed enum),
+      and timestamp. Defined in crates/core.
+    links:
+      - {target: b6f0649c24cf, rel: implements}  # UX-P-005 agent-presence-explicit
+    deprecated: false
+
+  - number: IMPL-UX-RS-006
+    hash: e75d682cb5b1
+    name: service-flow-state-struct
+    type: implementation
+    description: >
+      ServiceFlowState struct with id, label, and available_transitions
+      (Vec<ServiceFlowTransition>). The authoritative UX specification unit
+      from which Leptos components are derived.
+    links:
+      - {target: 173636ad122f, rel: implements}  # UX-D-001 service-flow-mapping
+      - {target: d7f85752c1b1, rel: implements}  # UX-P-001 service-delivery-precedes-surface
+    deprecated: false
+
+  # ── Dependency Decisions ───────────────────────────────────────────────────
+
+  - number: IMPL-UX-RS-007
+    hash: 9e3ab29688c9
+    name: leptos-buy-decision
+    type: implementation
+    description: >
+      Leptos is a buy decision for the WASM UI framework. Fine-grained
+      reactivity, SSR + hydration, and Rust-native component model. No viable
+      DIY alternative for browser rendering via WASM.
+    links:
+      - {target: 95f2b6bff569, rel: implements}  # UX-P-004 beauty-is-functional-requirement
+    deprecated: false
+
+  - number: IMPL-UX-RS-008
+    hash: 4e16f38acdca
+    name: tailwind-buy-decision
+    type: implementation
+    description: >
+      Tailwind CSS is a buy decision for design tokens and utility classes.
+      Provides the token system for the shared design system across all
+      surfaces. Integrated via the WASM build pipeline.
+    links:
+      - {target: 95f2b6bff569, rel: implements}  # UX-P-004 beauty-is-functional-requirement
+      - {target: 60c41e0c35c7, rel: implements}  # UX-D-004 unified-design-system
+    deprecated: false
+
+  - number: IMPL-UX-RS-009
+    hash: 678db4f10fdc
+    name: agent-sdk-typed-http-client
+    type: implementation
+    description: >
+      Agent SDK HTTP client built using reqwest with typed request/response
+      structs from crates/core. The same types used by the server ensure
+      compile-time API contract compatibility. DIY thin wrapper.
+    links:
+      - {target: 8de237165c47, rel: implements}  # UX-D-003 agent-native-interface
+    deprecated: false
+
+  - number: IMPL-UX-RS-010
+    hash: 16f58daa9dd8
+    name: design-token-diy
+    type: implementation
+    description: >
+      Design token definitions are a JSON/TOML file consumed by the Tailwind
+      config. No external design token package needed.
+    links:
+      - {target: 60c41e0c35c7, rel: implements}  # UX-D-004 unified-design-system
+    deprecated: false
+
+  # ── Antipatterns (Rust/WASM-Specific) ──────────────────────────────────────
+
+  - number: IMPL-UX-RS-011
+    hash: 53676df514bf
+    name: no-technology-specific-specs
+    type: implementation
+    description: >
+      Design documents must not specify "use a Leptos component" or "apply
+      Tailwind flex." Specifications describe user states and transitions;
+      implementations satisfy them independently.
+    links:
+      - {target: e49ebcb9644c, rel: implements}  # UX-P-006 specifications-describe-needs-not-implementations
+      - {target: 099bffc7e55a, rel: implements}  # UX-T-007 design-coupled-to-framework
+    deprecated: false
+
+  - number: IMPL-UX-RS-012
+    hash: 0d46ff382cb6
+    name: no-gui-dependent-tooling
+    type: implementation
+    description: >
+      Superfield runs on hosted Linux with no display server. Any tool requiring
+      a live browser window or native GUI is prohibited. Headless Playwright
+      screenshot capture and comparison is allowed for targeted visual
+      regression because it produces deterministic evidence without an
+      interactive GUI.
+    links:
+      - {target: 95f2b6bff569, rel: implements}  # UX-P-004 beauty-is-functional-requirement
+    deprecated: false
+
+  - number: IMPL-UX-RS-013
+    hash: 4c9d1a7e3b52
+    name: ux-governance-canonical-json-contracts
+    type: implementation
+    description: >
+      UX governance canonical artifacts are stored as JSON under
+      docs/technical/ux-governance/ and treated as the authoritative source.
+      Required phase artifacts are intake, domain capability map,
+      information architecture, screen specs, review findings, handoff
+      contract, state matrix, and conformance report. Each canonical JSON
+      artifact includes artifact_id, artifact_type, phase, version, status,
+      owner, updated_at, source_artifacts, and derived_artifacts. Markdown,
+      Mermaid, HTML, and SVG outputs are derived from those JSON files and
+      may be regenerated, but never edited as the source of truth.
+    links:
+      - {target: 1f7f7b6a4c21, rel: implements}
+      - {target: d7f85752c1b1, rel: implements}
+      - {target: e49ebcb9644c, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-014
+    hash: f6e5d4c3b2a1
+    name: ux-governance-gate-status
+    type: implementation
+    description: >
+      UX governance gate status is a closed enum: Pass, PassWithRevisions, or
+      Fail. The status is attached to each gate result and drives the
+      revision loop and approval decision.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: implements}
+      - {target: 2b7d1e9f4a6c, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-015
+    hash: e6d5c4b3a2f1
+    name: ux-governance-gate-definition
+    type: implementation
+    description: >
+      UXGovernanceGate struct captures gate id, sequence number, reviewer
+      role, explicit fail conditions, status, and evidence references. Each
+      gate is deterministic enough to be evaluated without subjective
+      approval language.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: implements}
+      - {target: 2b7d1e9f4a6c, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-016
+    hash: d6c5b4a3f2e1
+    name: ux-governance-critique-record
+    type: implementation
+    description: >
+      UXGovernanceCritiqueRecord captures issue, why_it_matters, evidence,
+      severity, proposed_fix, gate_id, and blocking. The record format is the
+      canonical output of all review agents.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: implements}
+      - {target: 7c2e1a9d5b4f, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-017
+    hash: c6b5a4f3e2d1
+    name: ux-governance-revision-loop
+    type: implementation
+    description: >
+      UX governance revision loop re-runs the affected gates after
+      synthesis. High-severity findings remain blocking until they are
+      cleared. The loop terminates only when all gates are pass or
+      pass_with_revisions with no remaining high-severity findings.
+    links:
+      - {target: 1f4c2d9a7b8e, rel: implements}
+      - {target: 7c2e1a9d5b4f, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-018
+    hash: 9b9c58337afc
+    name: rs-ci-conformance-report-json
+    type: implementation
+    description: >
+      CI emits ux-conformance-report.json for every deterministic-gate UX validation run.
+      The report records run identity, commit identity, per-page hard checks,
+      evidence locations, blocking issues, and the final merge decision.
+    links:
+      - {target: 130d0ff25610, rel: implements}
+      - {target: f9b2be6bec16, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-019
+    hash: 426a543e01fe
+    name: rs-accessibility-structure-gate
+    type: implementation
+    description: >
+      Headless Playwright accessibility gate validates critical views against
+      ARIA snapshots and axe-core checks. Critical violations or structure
+      drift in the approved state are merge blockers.
+    links:
+      - {target: e25d3654327e, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-020
+    hash: 9010ca853a3b
+    name: rs-dom-css-layout-token-gate
+    type: implementation
+    description: >
+      DOM and CSS gate validates approved design token usage, component
+      vocabulary, spacing, typography, overflow, overlap, clipped content,
+      and primary-action placement in critical views.
+    links:
+      - {target: 46ed8e8e96d6, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-021
+    hash: 7a11dfdbfea0
+    name: rs-flow-graph-gate
+    type: implementation
+    description: >
+      Flow graph gate compares implemented routes and task transitions to the
+      approved service-flow graph and fails on missing states, dead ends,
+      unreachable critical actions, or unexpected branching.
+    links:
+      - {target: ab7ab23512ad, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-022
+    hash: 2ad505fd6f2b
+    name: rs-targeted-visual-regression-gate
+    type: implementation
+    description: >
+      Targeted visual regression gate captures headless Playwright
+      screenshots for whitelisted critical screens and states, then compares
+      them against approved baselines. Missing baselines or excessive drift
+      block merge.
+    links:
+      - {target: 8b04a200f070, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-023
+    hash: d028d5a8f1bb
+    name: rs-performance-rendering-sanity-gate
+    type: implementation
+    description: >
+      Performance and rendering sanity gate checks that critical pages render
+      without hydration failures, blank first paint, or unacceptable layout
+      instability before merge.
+    links:
+      - {target: 24f52c5dd608, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-024
+    hash: 8a7f2c4e1101
+    name: rs-saliency-scoring-warning
+    type: implementation
+    description: >
+      Saliency scoring job computes warning-only focal-point scores and
+      heatmaps for critical pages and states. Output is advisory until a
+      calibrated threshold promotes it to a gate.
+    links:
+      - {target: d14e2f6a9b01, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-025
+    hash: 8a7f2c4e1102
+    name: rs-screenshot-layout-parsing-warning
+    type: implementation
+    description: >
+      Screenshot layout parsing job extracts warning-only hierarchy and
+      balance signals from headless screenshots. Output is recorded for
+      review, not used as a merge blocker.
+    links:
+      - {target: d14e2f6a9b02, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-026
+    hash: 8a7f2c4e1103
+    name: rs-model-assisted-ux-lint-warning
+    type: implementation
+    description: >
+      Model-assisted UX lint job produces warning-only findings for clutter,
+      ambiguous labels, and unsupported interaction patterns. Promotion to a
+      blocking signal requires calibration evidence.
+    links:
+      - {target: d14e2f6a9b03, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-027
+    hash: 8a7f2c4e1104
+    name: rs-synthetic-walkthrough-quality-warning
+    type: implementation
+    description: >
+      Synthetic walkthrough quality job scores end-to-end journeys for
+      friction, detours, and state-coverage gaps. Output stays warning-only
+      until calibrated and explicitly promoted.
+    links:
+      - {target: d14e2f6a9b04, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-028
+    hash: 8a7f2c4e1105
+    name: rs-soft-signal-promotion-criteria
+    type: implementation
+    description: >
+      Soft-signal promotion criteria define the labeled baseline, threshold,
+      and error-budget requirements that must exist before any threshold-scored signal
+      can become merge-blocking.
+    links:
+      - {target: d14e2f6a9b05, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-029
+    hash: 8a7f2c4e1106
+    name: rs-soft-signal-report-section
+    type: implementation
+    description: >
+      UX conformance report includes a soft_signals section with per-page
+      threshold-scored signal scores, evidence pointers, warning status, and calibration
+      metadata. It remains separate from blocking hard checks.
+    links:
+      - {target: d14e2f6a9b06, rel: implements}
+      - {target: 4bf26c1a8d31, rel: implements}
+    deprecated: false
+
+  - number: IMPL-UX-RS-030
+    hash: 6e6af3d5c695
+    name: state-matrix-json-contract
+    type: implementation
+    description: >
+      state-matrix.json is the authoritative flow/state coverage contract for
+      each UX surface. In Rust it contains route ids, breakpoint sets,
+      required state coverage, max step thresholds, and critical actions. The
+      CI gate reads the contract, compares it against headless Playwright and
+      ARIA evidence, and fails on missing loading, empty, error, success, or
+      permission_denied coverage; dead-end screens; unreachable critical
+      actions; or paths that exceed the configured step threshold.
+    links:
+      - {target: 8a969646ab51, rel: implements}
+      - {target: 68678e6ff182, rel: verifies}
+      - {target: 1cdc130608fa, rel: verifies}
+      - {target: 173636ad122f, rel: implements}
+    deprecated: false

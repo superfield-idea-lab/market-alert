@@ -1,0 +1,234 @@
+meta:
+  domain: IMPL-TASK-QUEUE
+  title: Task Queue - TypeScript Implementation
+  implements: TASK-QUEUE
+  version: 1
+
+rules:
+  # ── API Server: LISTEN/NOTIFY and SSE Fan-out ──────────────────────────────
+
+  - number: IMPL-TQ-TS-001
+    hash: a3f7d2e1b490
+    name: api-server-pg-listen-manager
+    type: implementation
+    description: >
+      The API server maintains one persistent PostgreSQL LISTEN connection per agent type using
+      a dedicated Bun postgres client (separate from the main connection pool). On startup, the
+      server calls LISTEN task_queue_<type> for each registered agent type. pg_notify payloads
+      (task_id) are forwarded to the in-process SSE fan-out registry. The LISTEN client
+      reconnects automatically on connection loss and re-issues LISTEN commands on reconnect.
+      Workers never hold a LISTEN connection.
+    links:
+      - {target: 869d373d9461, rel: implements}  # TQ-D-005 api-server-listen-notify-sse-fanout
+      - {target: d3356916c05d, rel: implements}  # TQ-P-005 notification-assists-polling-not-replaces
+    deprecated: false
+
+  - number: IMPL-TQ-TS-002
+    hash: c8b1e4a09f23
+    name: sse-fan-out-registry
+    type: implementation
+    description: >
+      An in-process registry maps agent_type → Set<ReadableStreamController>. When the LISTEN
+      manager receives a pg_notify event, it looks up the set for that agent type and writes
+      `data: task_available\n\n` to each open SSE controller. Controllers that have been
+      closed (worker disconnected) are removed from the set. The registry is a plain Map; no
+      external pub/sub broker is required. Implemented in apps/server/src/task-queue/sse.ts.
+    links:
+      - {target: 869d373d9461, rel: implements}  # TQ-D-005 api-server-listen-notify-sse-fanout
+      - {target: fec546a4edeb, rel: implements}  # WORKER-D-001 api-streaming-task-discovery
+    deprecated: false
+
+  - number: IMPL-TQ-TS-003
+    hash: e2d5f8c0a174
+    name: sse-heartbeat-poll-loop
+    type: implementation
+    description: >
+      A setInterval loop runs on the API server at TASK_QUEUE_POLL_INTERVAL_MS (default 5000).
+      On each tick it unconditionally writes `data: heartbeat\n\n` to every connected SSE client,
+      regardless of whether any pending tasks exist. The heartbeat is time-driven, not
+      task-driven: its purpose is to guarantee that a worker wakes within one poll interval even
+      if every pg_notify for that period was missed. Workers treat heartbeat events identically to
+      task_available events and attempt a claim, receiving 0 rows if the queue is empty. This
+      unconditional behaviour is what makes the poll interval a firm discovery bound.
+    links:
+      - {target: d3356916c05d, rel: implements}  # TQ-P-005 notification-assists-polling-not-replaces
+      - {target: 0718a9a15e3f, rel: mitigates}   # TQ-X-004 notification-as-sole-trigger
+      - {target: 4573785143b4, rel: mitigates}   # TQ-X-001 polling-without-backoff
+    deprecated: false
+
+  # ── API Server: SSE Endpoint ───────────────────────────────────────────────
+
+  - number: IMPL-TQ-TS-004
+    hash: f91a3c7d2e05
+    name: task-stream-sse-endpoint
+    type: implementation
+    description: >
+      GET /api/v1/tasks/stream is a Server-Sent Events endpoint. Because the browser EventSource
+      API does not support custom request headers, the service token is passed as a query
+      parameter: GET /api/v1/tasks/stream?token=<service_token>. The API server validates the
+      token from the query parameter, extracts the agent_type claim, creates a ReadableStream
+      with a cancel handler that removes the controller from the fan-out registry, and returns a
+      Response with Content-Type: text/event-stream and Cache-Control: no-cache. The token query
+      parameter is redacted from all access log entries (see IMPL-TQ-TS-011). The endpoint is
+      implemented using Bun's native Response streaming. Workers reconnect automatically using
+      the EventSource API's built-in retry logic.
+    links:
+      - {target: fec546a4edeb, rel: implements}  # WORKER-D-001 api-streaming-task-discovery
+      - {target: cebee7387f5b, rel: implements}  # WORKER-D-007 per-agent-type-service-token
+    deprecated: false
+
+  - number: IMPL-TQ-TS-005
+    hash: b70e9d1c3f48
+    name: service-token-validation
+    type: implementation
+    description: >
+      The SSE endpoint and claim endpoint validate the service token on every request. The service
+      token is a signed JWT with claims: { sub: "<agent_type>_service", agent_type: "<type>",
+      scope: ["tasks:stream", "tasks:claim"] }. The API server verifies the signature using the
+      SERVICE_TOKEN_SECRET environment variable. Requests with an expired, malformed, or
+      wrong-type token receive 401 or 403. Service tokens are distinct from user session tokens
+      and delegated task tokens.
+    links:
+      - {target: cebee7387f5b, rel: implements}  # WORKER-D-007 per-agent-type-service-token
+      - {target: f020f72a449a, rel: implements}  # WORKER-C-014 per-type-api-token-isolation
+    deprecated: false
+
+  # ── API Server: Claim and Result Endpoints ─────────────────────────────────
+
+  - number: IMPL-TQ-TS-006
+    hash: d4a8f2c1e937
+    name: atomic-claim-endpoint
+    type: implementation
+    description: >
+      POST /api/v1/tasks/claim accepts { agent_type, max_tasks?: number } and executes an atomic
+      UPDATE task_queue SET status = 'claimed', claimed_by = $worker_instance_id, claimed_at = now(),
+      claim_expires_at = now() + $CLAIM_TTL_SECONDS WHERE id IN (SELECT id FROM task_queue WHERE
+      status = 'pending' AND agent_type = $agent_type ORDER BY priority ASC, created_at ASC LIMIT
+      $max_tasks FOR UPDATE SKIP LOCKED) RETURNING *. Returns the claimed task rows including the
+      delegated_token. The service token's agent_type must match the requested agent_type.
+      $worker_instance_id is a stable UUID generated at worker process startup (not per-claim),
+      stored in the task record for audit attribution and stale-claim diagnosis.
+    links:
+      - {target: c838af843858, rel: implements}  # TQ-P-001 atomic-claim-exactly-one-winner
+      - {target: fec546a4edeb, rel: implements}  # WORKER-D-001 api-streaming-task-discovery
+      - {target: e9256535c69a, rel: implements}  # TQ-D-004 per-type-filtered-views
+    deprecated: false
+
+  # ── Worker: SSE Client ─────────────────────────────────────────────────────
+
+  - number: IMPL-TQ-TS-007
+    hash: c1b5e8f0d362
+    name: worker-sse-client
+    type: implementation
+    description: >
+      The worker daemon connects to the API's SSE endpoint using the native EventSource API
+      (available in Bun). The service token is passed as a query parameter since EventSource
+      does not support custom headers: GET /api/v1/tasks/stream?token=<service_token>. On each
+      task_available or heartbeat event, the worker calls POST /api/v1/tasks/claim with its
+      service token. EventSource reconnects automatically with exponential backoff on connection
+      loss. No database connection is opened; no DATABASE_URL is present in the environment.
+    links:
+      - {target: fec546a4edeb, rel: implements}  # WORKER-D-001 api-streaming-task-discovery
+      - {target: 828eead860c0, rel: implements}  # WORKER-P-001 zero-database-connectivity
+    deprecated: false
+
+  - number: IMPL-TQ-TS-008
+    hash: a9f3d0e7b215
+    name: worker-startup-credential-guard
+    type: implementation
+    description: >
+      The worker binary checks for database credential environment variables at startup
+      (DATABASE_URL, PGPASSWORD, PGHOST, PGUSER, PGDATABASE). If any are present, the worker
+      logs an error and exits with status 1 before opening any connections. This is a safety net
+      that prevents accidental injection of database credentials into the worker container from
+      misconfigured Kubernetes Secrets or ConfigMaps. Implemented in
+      apps/worker/src/startup-guard.ts, called before any other initialization.
+    links:
+      - {target: 828eead860c0, rel: implements}  # WORKER-P-001 zero-database-connectivity
+      - {target: ba3b855fc0a5, rel: implements}  # WORKER-C-002 no-database-credentials
+      - {target: 9110f8b7a172, rel: implements}  # TQ-C-008 startup-credential-absence-verified
+    deprecated: false
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
+  - number: IMPL-TQ-TS-009
+    hash: f6c2b8a1d047
+    name: pg-notify-trigger
+    type: implementation
+    description: >
+      A PostgreSQL AFTER INSERT OR UPDATE trigger on task_queue calls pg_notify when a row
+      transitions to status = 'pending'. The trigger function: CREATE OR REPLACE FUNCTION
+      notify_task_queue() RETURNS trigger AS $$ BEGIN IF NEW.status = 'pending' THEN PERFORM
+      pg_notify('task_queue_' || NEW.agent_type, NEW.id::text); END IF; RETURN NEW; END; $$
+      LANGUAGE plpgsql. The trigger fires on INSERT and on UPDATE (to cover stale-claim recovery
+      returning tasks to pending). Channel name uses the agent_type value, matching the LISTEN
+      channel the API server subscribes to.
+    links:
+      - {target: 869d373d9461, rel: implements}  # TQ-D-005 api-server-listen-notify-sse-fanout
+      - {target: add350cf11b9, rel: implements}  # TQ-C-006 notification-channel-per-type
+    deprecated: false
+
+  - number: IMPL-TQ-TS-010
+    hash: e3a9c0f7b182
+    name: worker-kubernetes-manifest
+    type: implementation
+    description: >
+      Each agent type has a dedicated Kubernetes Deployment. The pod spec includes: (1) a single
+      Secret mount for the per-type SERVICE_TOKEN (not a DATABASE_URL); (2) a NetworkPolicy that
+      allows egress to the API server and declared vendor API hostnames only — port 5432 is not
+      listed; (3) TASK_QUEUE_STREAM_URL pointing to the API server's SSE endpoint. No database
+      connection strings appear in the manifest, ConfigMap, or Secret for worker deployments.
+    links:
+      - {target: cebee7387f5b, rel: implements}  # WORKER-D-007 per-agent-type-service-token
+      - {target: ba3b855fc0a5, rel: implements}  # WORKER-C-002 no-database-credentials
+      - {target: bf7fc36b1d50, rel: implements}  # WORKER-C-006 network-policy-blocks-direct-db
+    deprecated: false
+
+  - number: IMPL-TQ-TS-011
+    hash: a7e2d0f9c341
+    name: sse-token-query-param-redaction
+    type: implementation
+    description: >
+      Because the service token is passed as a query parameter, it appears in raw access logs.
+      The API server's request logger must redact the token value before writing the log entry.
+      Implementation: a logging middleware runs before route handlers and rewrites the request
+      URL, replacing the token query parameter value with [REDACTED]:
+      `url.searchParams.set('token', '[REDACTED]')`. The rewritten URL is logged; the original
+      is used for request processing. This applies to all logging sinks (stdout, file, external
+      aggregator). Verified in CI by asserting that access log output for SSE requests contains
+      `token=[REDACTED]` and not a valid JWT string.
+    links:
+      - {target: cebee7387f5b, rel: implements}  # WORKER-D-007 per-agent-type-service-token
+      - {target: c5f0a3d8e917, rel: mitigates}   # IMPL-TQ-TS-X-002 sse-token-in-url-logged
+    deprecated: false
+
+  # ── Antipatterns ───────────────────────────────────────────────────────────
+
+  - number: IMPL-TQ-TS-X-001
+    hash: b8d1f4e2a039
+    name: worker-pg-import
+    type: antipattern
+    description: >
+      Importing postgres, pg, or any PostgreSQL client library into the worker package. Even if
+      no connection is opened, the import signals intent and makes the violation easier to
+      introduce later. The worker package must not list any database client as a dependency.
+      CI must verify via package.json inspection that no database client is present in
+      apps/worker/package.json or any package it depends on.
+    links:
+      - {target: 828eead860c0, rel: contradicts}  # WORKER-P-001 zero-database-connectivity
+      - {target: d9c4e1b72a30, rel: contradicts}  # TQ-X-006 worker-direct-database-connection
+    deprecated: false
+
+  - number: IMPL-TQ-TS-X-002
+    hash: c5f0a3d8e917
+    name: sse-token-in-url-logged
+    type: antipattern
+    description: >
+      Since the service token is passed as a query parameter (EventSource limitation), access
+      logs will contain the token in the URL. The API server must strip or redact the token
+      query parameter from all access log entries. Failure to do so leaks valid service tokens
+      into log aggregators. The alternative — rotating the token frequently — does not eliminate
+      the leak; redaction is the correct fix.
+    links:
+      - {target: cebee7387f5b, rel: contradicts}  # WORKER-D-007 per-agent-type-service-token
+    deprecated: false
