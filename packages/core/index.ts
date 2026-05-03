@@ -9,4 +9,5 @@ export * from './scrub-pii';
 export * from './secrets';
 export * from './pii-tokeniser';
 export * from './chunker';
+export * from './feature-flags';
 export const coreHelper = () => true;

@@ -199,6 +199,73 @@ export async function migrate(options: MigrateOptions = {}) {
   }
 }
 
+/**
+ * Resolve the path to mkt-schema.sql (market-alert specific DDL).
+ *
+ * This schema contains the mkt_feature_flags table and other market-alert
+ * tables that are separate from the Superfield KB base schema.
+ *
+ * Blueprint refs: PRUNE-D-002, DATA-D-006 (mkt_app pool).
+ */
+export function resolveMktSchemaSqlPath(
+  moduleUrl: string = import.meta.url,
+  cwd: string = process.cwd(),
+): string {
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    resolve(moduleDir, 'mkt-schema.sql'),
+    resolve(moduleDir, '../packages/db/mkt-schema.sql'),
+    resolve(cwd, 'packages/db/mkt-schema.sql'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
+/**
+ * Apply the market-alert schema (mkt-schema.sql) to the target database.
+ *
+ * Idempotent — uses CREATE TABLE IF NOT EXISTS and ON CONFLICT DO NOTHING.
+ * Called at server startup after the base migrate() completes.
+ *
+ * Blueprint refs: PRUNE-D-002 (DB-backed feature gates).
+ */
+export async function migrateMkt(options: MigrateOptions = {}): Promise<void> {
+  console.log('[db] Applying market-alert schema (mkt-schema.sql)...');
+  const schemaSql = readFileSync(resolveMktSchemaSqlPath(), 'utf-8');
+  const databaseUrl = options.databaseUrl ?? databaseUrls.app;
+  const migrationSql =
+    options.databaseUrl === undefined
+      ? sql
+      : postgres(databaseUrl, {
+          max: 1,
+          idle_timeout: 10,
+          connect_timeout: 10,
+          connection: { client_min_messages: 'warning' },
+        });
+
+  try {
+    const cleanSql = schemaSql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    const statements = splitSqlStatements(cleanSql).filter((s) => s.length > 0);
+
+    for (const statement of statements) {
+      await migrationSql.unsafe(statement);
+    }
+    console.log('[db] Market-alert schema applied.');
+  } catch (err) {
+    console.error('[db] Market-alert schema migration failed:', err);
+    throw err;
+  } finally {
+    if (migrationSql !== sql) {
+      await migrationSql.end({ timeout: 5 });
+    }
+  }
+}
+
 export function resolveDictionarySchemaSqlPath(
   moduleUrl: string = import.meta.url,
   cwd: string = process.cwd(),
