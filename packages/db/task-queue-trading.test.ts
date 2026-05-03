@@ -147,6 +147,12 @@ describe('EDGAR_POLL idempotency (integration)', () => {
     const ikey = buildEdgarPollIdempotencyKey(formType, accessionNumber);
     const agentType = TASK_TYPE_AGENT_MAP[TaskType.EDGAR_POLL];
 
+    const payloadJson = JSON.stringify({
+      alert_id: 'test-uuid',
+      form_type: formType,
+      accession_number: accessionNumber,
+    });
+
     // Insert directly using the test's sql connection (bypasses global pool).
     // ON CONFLICT DO NOTHING is the idempotency guarantee (TQ-P-003).
     const insertOnce = () =>
@@ -155,7 +161,7 @@ describe('EDGAR_POLL idempotency (integration)', () => {
           (idempotency_key, agent_type, job_type, payload, created_by)
         VALUES
           (${ikey}, ${agentType}, ${TaskType.EDGAR_POLL},
-           ${{ alert_id: 'test-uuid', form_type: formType, accession_number: accessionNumber }}::jsonb,
+           ${payloadJson}::jsonb,
            'test')
         ON CONFLICT (idempotency_key) DO NOTHING
         RETURNING id
@@ -168,7 +174,7 @@ describe('EDGAR_POLL idempotency (integration)', () => {
     expect(second.count).toBe(0);
 
     // Exactly one row in the database
-    const [{ count }] = await sql<[{ count: number }]>`
+    const [{ count }] = await sql<{ count: number }[]>`
       SELECT COUNT(*)::INTEGER AS count FROM task_queue WHERE idempotency_key = ${ikey}
     `;
     expect(count).toBe(1);
@@ -228,13 +234,19 @@ describe('task_queue_view_* trading views (integration)', () => {
     const ikey = `edgar-view-test-${Date.now()}`;
     const agentType = TASK_TYPE_AGENT_MAP[TaskType.EDGAR_POLL];
 
+    const viewPayloadJson = JSON.stringify({
+      alert_id: 'view-test-uuid',
+      form_type: '10-K',
+      accession_number: 'test-001',
+    });
+
     // Insert into the underlying table and get back the id
-    const [inserted] = await sql<[{ id: string }]>`
+    const [inserted] = await sql<{ id: string }[]>`
       INSERT INTO task_queue
         (idempotency_key, agent_type, job_type, payload, created_by)
       VALUES
         (${ikey}, ${agentType}, ${TaskType.EDGAR_POLL},
-         ${{ alert_id: 'view-test-uuid', form_type: '10-K', accession_number: 'test-001' }}::jsonb,
+         ${viewPayloadJson}::jsonb,
          'test')
       ON CONFLICT (idempotency_key) DO NOTHING
       RETURNING id
