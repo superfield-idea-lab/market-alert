@@ -148,6 +148,43 @@ CREATE OR REPLACE VIEW task_queue_view_bdm_summary AS
     FROM task_queue
     WHERE agent_type = 'bdm_summary';
 
+-- Trading platform per-type views (issue #5, TQ-D-001).
+-- Four views covering the four trading agent_type buckets:
+--   edgar_ingest, enrichment, notification, scheduler.
+-- Sensitive columns excluded: delegated_token, created_by, result, error_message.
+
+CREATE OR REPLACE VIEW task_queue_view_edgar_ingest AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'edgar_ingest';
+
+CREATE OR REPLACE VIEW task_queue_view_enrichment AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'enrichment';
+
+CREATE OR REPLACE VIEW task_queue_view_notification AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'notification';
+
+CREATE OR REPLACE VIEW task_queue_view_scheduler AS
+    SELECT
+        id, agent_type, job_type, status, payload, correlation_id,
+        claimed_by, claimed_at, claim_expires_at,
+        attempt, max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE agent_type = 'scheduler';
+
 -- LISTEN/NOTIFY trigger: wake the appropriate worker channel on task insertion.
 -- Blueprint: TQ-D-005 (listen-notify-wake)
 CREATE OR REPLACE FUNCTION notify_task_queue_insert()
