@@ -1,9 +1,9 @@
 import { sql } from './index';
 
 /**
- * TaskType enum — canonical job types for the kb-demo worker pipeline.
+ * TaskType enum — canonical job types for the worker pipeline.
  *
- * Each variant corresponds to a distinct worker phase:
+ * KB-demo worker phases:
  *   EMAIL_INGEST   — Phase 2: pull emails into the KB (agent_type: email_ingest)
  *   AUTOLEARN      — Phase 3: autolearning from ingested content (agent_type: autolearn)
  *   TRANSCRIPTION  — Phase 5: audio/video transcription (agent_type: transcription)
@@ -11,7 +11,16 @@ import { sql } from './index';
  *   DEEPCLEAN      — Phase 4: deep PII cleaning pass (agent_type: deepclean)
  *   BDM_SUMMARY    — Phase 7: BDM-ready summary generation (agent_type: bdm_summary)
  *
- * Blueprint refs: TQ-D-001 (single-table multi-type queue), issue #95.
+ * Trading platform task types (issue #5, TQ-D-001):
+ *   EDGAR_POLL          — Ingestion: poll EDGAR for new filings (agent_type: edgar_ingest)
+ *   ALERT_ENRICH        — Enrichment: enrich alert from filing data (agent_type: enrichment)
+ *   ALERT_DEDUP         — Enrichment: deduplicate alert records (agent_type: enrichment)
+ *   ALERT_NOTIFY        — Notification: send alert to subscribers (agent_type: notification)
+ *   ALERT_SUPPLEMENT    — Enrichment: supplement alert with additional data (agent_type: enrichment)
+ *   CORP_ACTION_ADVANCE — Scheduler: advance corporate action state machine (agent_type: scheduler)
+ *   TRADE_SETTLE        — Scheduler: advance trade settlement state machine (agent_type: scheduler)
+ *
+ * Blueprint refs: TQ-D-001 (single-table multi-type queue).
  */
 export const TaskType = {
   EMAIL_INGEST: 'EMAIL_INGEST',
@@ -20,6 +29,14 @@ export const TaskType = {
   ANNOTATION: 'ANNOTATION',
   DEEPCLEAN: 'DEEPCLEAN',
   BDM_SUMMARY: 'BDM_SUMMARY',
+  // Trading platform task types (issue #5)
+  EDGAR_POLL: 'EDGAR_POLL',
+  ALERT_ENRICH: 'ALERT_ENRICH',
+  ALERT_DEDUP: 'ALERT_DEDUP',
+  ALERT_NOTIFY: 'ALERT_NOTIFY',
+  ALERT_SUPPLEMENT: 'ALERT_SUPPLEMENT',
+  CORP_ACTION_ADVANCE: 'CORP_ACTION_ADVANCE',
+  TRADE_SETTLE: 'TRADE_SETTLE',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -35,7 +52,100 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.ANNOTATION]: 'annotation',
   [TaskType.DEEPCLEAN]: 'deepclean',
   [TaskType.BDM_SUMMARY]: 'bdm_summary',
+  // Trading platform task types (issue #5)
+  [TaskType.EDGAR_POLL]: 'edgar_ingest',
+  [TaskType.ALERT_ENRICH]: 'enrichment',
+  [TaskType.ALERT_DEDUP]: 'enrichment',
+  [TaskType.ALERT_NOTIFY]: 'notification',
+  [TaskType.ALERT_SUPPLEMENT]: 'enrichment',
+  [TaskType.CORP_ACTION_ADVANCE]: 'scheduler',
+  [TaskType.TRADE_SETTLE]: 'scheduler',
 };
+
+/**
+ * PII field names that must never appear in task payloads (TQ-C-004, TQ-P-002).
+ *
+ * Payloads carry only UUIDs, routing metadata, and action descriptors —
+ * never PII, business content, or credentials. Workers fetch business data
+ * through authenticated API reads at execution time.
+ */
+export const PAYLOAD_PII_FIELDS: readonly string[] = [
+  'email',
+  'phone',
+  'ssn',
+  'dob',
+  'date_of_birth',
+  'full_name',
+  'first_name',
+  'last_name',
+  'address',
+  'street',
+  'postal_code',
+  'zip',
+  'national_id',
+  'passport',
+  'credit_card',
+  'bank_account',
+  'ip_address',
+];
+
+/**
+ * Set of trading task types that require the no-PII payload validator (TQ-C-004).
+ */
+const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
+  TaskType.EDGAR_POLL,
+  TaskType.ALERT_ENRICH,
+  TaskType.ALERT_DEDUP,
+  TaskType.ALERT_NOTIFY,
+  TaskType.ALERT_SUPPLEMENT,
+  TaskType.CORP_ACTION_ADVANCE,
+  TaskType.TRADE_SETTLE,
+]);
+
+/**
+ * Validates that a task payload contains no PII fields (TQ-C-004, TQ-P-002).
+ *
+ * Throws a `PayloadPiiError` if any key in the payload (top-level) matches a
+ * known PII field name. Workers are responsible for fetching sensitive data
+ * through authenticated API reads, not storing it in the task queue.
+ *
+ * @throws {PayloadPiiError} when a PII field is detected in the payload.
+ */
+export function assertNoPiiInPayload(payload: Record<string, unknown>): void {
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (PAYLOAD_PII_FIELDS.includes(key.toLowerCase())) {
+      throw new PayloadPiiError(key);
+    }
+  }
+}
+
+/**
+ * Error thrown when a task payload contains a PII field that is not allowed
+ * in the task queue (TQ-C-004).
+ */
+export class PayloadPiiError extends Error {
+  readonly field: string;
+
+  constructor(field: string) {
+    super(
+      `Task payload must not contain PII field "${field}". ` +
+        'Payloads carry only UUIDs, routing metadata, and action descriptors (TQ-P-002, TQ-C-004).',
+    );
+    this.name = 'PayloadPiiError';
+    this.field = field;
+  }
+}
+
+/**
+ * Builds an idempotency key for EDGAR_POLL tasks.
+ *
+ * Format: edgar_poll:<form_type>:<accession_number>
+ * Example: edgar_poll:8-K:0001234567-24-000001
+ */
+export function buildEdgarPollIdempotencyKey(formType: string, accessionNumber: string): string {
+  return `edgar_poll:${formType}:${accessionNumber}`;
+}
 
 /**
  * Task status values matching the CHECK constraint in schema.sql.
@@ -106,6 +216,13 @@ export async function enqueueTask(options: EnqueueOptions): Promise<TaskQueueRow
     priority = 5,
     max_attempts = 3,
   } = options;
+
+  // Apply no-PII validator to all trading platform task types (TQ-C-004, TQ-P-002).
+  // Payloads for trading tasks must carry only UUIDs and routing metadata —
+  // never PII, business content, or credentials.
+  if (TRADING_TASK_TYPES.has(job_type as TaskType)) {
+    assertNoPiiInPayload(payload);
+  }
 
   const [row] = await sql<TaskQueueRow[]>`
     INSERT INTO task_queue
