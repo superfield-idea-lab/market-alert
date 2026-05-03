@@ -120,19 +120,55 @@ export async function handleDeepCheck(
 }
 
 /**
- * Route dispatcher for /health/* paths.
+ * Startup probe — DEPLOY-C-033 (Phase 0 stub).
+ *
+ * Returns 200 once the server has finished its initialisation sequence.
+ * k8s uses this to gate liveness/readiness probes during slow startup
+ * (e.g. initial migration run). In Phase 0 this always returns 200 because
+ * the full migration/secret-init sequence is handled by bootstrap.ts before
+ * the HTTP server binds.
+ *
+ * NOTE (Phase 0 stub): Replace with real startup-completion flag in Phase 1
+ * once the four-pool migration sequence is wired.
+ */
+export function handleStartupCheck(): Response {
+  const result: HealthCheckResult = {
+    status: 'ok',
+    version: process.env.RELEASE_TAG ?? 'dev',
+    message: 'startup complete', // stub — Phase 1 will gate on migration finish
+  };
+  return Response.json(result, { status: 200 });
+}
+
+/**
+ * Route dispatcher for /health/* and /healthz/* paths.
  *
  * Handles:
- *   /health/live   → liveness (DEPLOY-C-030)
- *   /health/ready  → readiness (DEPLOY-C-031)
- *   /health/deep   → deep check (DEPLOY-C-032)
- *   /health        → alias for /health/live (backward compat)
- *   /healthz       → alias for /health/live (k8s convention)
+ *   /health/live        → liveness (DEPLOY-C-030)
+ *   /health/ready       → readiness (DEPLOY-C-031)
+ *   /health/deep        → deep check (DEPLOY-C-032)
+ *   /health             → alias for /health/live (backward compat)
+ *   /healthz            → alias for /health/live (k8s legacy)
+ *   /healthz/live       → liveness (k8s standard probe path)
+ *   /healthz/ready      → readiness (k8s standard probe path)
+ *   /healthz/startup    → startup probe (k8s standard probe path, DEPLOY-C-033)
  */
 export async function handleHealthRequest(
   pathname: string,
   appState: AppState,
 ): Promise<Response | null> {
+  // /healthz/* — k8s-standard probe paths (Phase 0 addition)
+  if (pathname === '/healthz/live') {
+    return handleLivenessCheck();
+  }
+  if (pathname === '/healthz/ready') {
+    return handleReadinessCheck(appState);
+  }
+  if (pathname === '/healthz/startup') {
+    return handleStartupCheck();
+  }
+
+  // /health/* — original probe paths + legacy aliases
   if (pathname === '/health/live' || pathname === '/health' || pathname === '/healthz') {
     return handleLivenessCheck();
   }
