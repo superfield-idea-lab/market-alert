@@ -26,6 +26,7 @@ import {
   handleLivenessCheck,
   handleReadinessCheck,
   handleDeepCheck,
+  handleStartupCheck,
   handleHealthRequest,
   type HealthCheckResult,
 } from '../../src/api/health';
@@ -82,6 +83,21 @@ describe('handleDeepCheck (Phase 0 stub)', () => {
   });
 });
 
+describe('handleStartupCheck (Phase 0 stub)', () => {
+  test('returns 200 with status ok', async () => {
+    const res = handleStartupCheck();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as HealthCheckResult;
+    expect(body.status).toBe('ok');
+  });
+
+  test('includes startup complete message', async () => {
+    const res = handleStartupCheck();
+    const body = (await res.json()) as HealthCheckResult;
+    expect(body.message).toBe('startup complete');
+  });
+});
+
 describe('handleHealthRequest — route dispatch', () => {
   test('/health/live routes to liveness', async () => {
     const res = await handleHealthRequest('/health/live', stubAppState);
@@ -115,6 +131,32 @@ describe('handleHealthRequest — route dispatch', () => {
     expect(res!.status).toBe(200);
     const body = (await res!.json()) as HealthCheckResult;
     expect(body.checks?.db_app).toBe('ok');
+  });
+
+  // /healthz/* — k8s-standard probe paths (Phase 0 addition)
+  test('/healthz/live routes to liveness', async () => {
+    const res = await handleHealthRequest('/healthz/live', stubAppState);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as HealthCheckResult;
+    expect(body.status).toBe('ok');
+  });
+
+  test('/healthz/ready routes to readiness', async () => {
+    const res = await handleHealthRequest('/healthz/ready', stubAppState);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as HealthCheckResult;
+    expect(body.status).toBe('ok');
+  });
+
+  test('/healthz/startup routes to startup check', async () => {
+    const res = await handleHealthRequest('/healthz/startup', stubAppState);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as HealthCheckResult;
+    expect(body.status).toBe('ok');
+    expect(body.message).toBe('startup complete');
   });
 
   test('unknown path returns null', async () => {

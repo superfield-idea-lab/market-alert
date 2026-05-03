@@ -1,0 +1,15 @@
+{
+  "name": "integrations",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'integrations: no build step in Phase 0 stub'"
+  },
+  "dependencies": {
+    "core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
