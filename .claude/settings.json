@@ -5,8 +5,7 @@
     "commit": "none"
   },
   "permissions": {
-    "allow": ["Bash(*)", "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)"],
-    "defaultMode": "bypassPermissions"
+    "allow": ["Bash(*)", "Read(*)", "Write(*)", "Edit(*)", "Glob(*)", "Grep(*)"]
   },
   "hooks": {
     "SessionStart": [
