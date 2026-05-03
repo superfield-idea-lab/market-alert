@@ -184,11 +184,12 @@ export default {
       return res;
     }
 
-    // Health check endpoints — liveness, readiness, deep (DEPLOY-C-030/031/032)
+    // Health check endpoints — liveness, readiness, startup, deep (DEPLOY-C-030/031/032/033)
     // Routes: /health/live, /health/ready, /health/deep
+    //         /healthz/live, /healthz/ready, /healthz/startup  (k8s-standard paths, Phase 0)
     // Legacy aliases: /health, /healthz -> liveness
     // See apps/server/src/api/health.ts for three-tier probe design.
-    if (url.pathname.startsWith('/health') || url.pathname === '/healthz') {
+    if (url.pathname.startsWith('/health') || url.pathname.startsWith('/healthz')) {
       const healthRes = await handleHealthRequest(url.pathname, appState);
       if (healthRes !== null) return withTrace(healthRes);
     }
