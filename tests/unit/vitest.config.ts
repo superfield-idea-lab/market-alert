@@ -13,6 +13,7 @@
  *  - autolearn-pod-spec.test.ts          — distroless pod spec manifest assertions (issue #35)
  *  - autolearn-network-policy.test.ts    — autolearn worker NetworkPolicy validation (issue #102)
  *  - cookie-config.test.ts               — auth cookie SameSite=Strict decision record (issue #228)
+ *  - design-system-tokens.test.ts        — Tailwind token values vs. design spec (issue #8)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -38,6 +39,7 @@ export default defineConfig({
       'autolearn-pod-spec.test.ts',
       'autolearn-network-policy.test.ts',
       'cookie-config.test.ts',
+      'design-system-tokens.test.ts',
     ],
     root: resolve(import.meta.dirname),
   },

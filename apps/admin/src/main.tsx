@@ -24,6 +24,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+// Design system token CSS custom properties — must be imported before any
+// component CSS so Tailwind utilities and inline styles share the same variables.
+import '../../../packages/ui/design-system/tokens.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Settings, User, Smartphone, Shield, BookOpen, BarChart2 } from 'lucide-react';
+import { Settings, User, Smartphone, Shield, BookOpen, BarChart2, Palette } from 'lucide-react';
 import { PwaDemoPage } from './pages/pwa-demo';
 import { AdminDashboard } from './pages/admin-dashboard';
 import { MobileInstallPage } from './pages/mobile-install';
 import { SettingsPage } from './pages/settings';
 import { WikiViewPage } from './pages/wiki-view';
 import { CampaignAnalysisPage } from './pages/campaign-analysis';
+import DesignSystemCatalogPage from './pages/design-system-catalog';
 import { usePlatform } from './hooks/use-platform';
 import { isDismissalActive, DISMISSED_KEY } from './components/pwa/install-prompt';
 
@@ -53,9 +54,9 @@ function App() {
   const { user, logout, loading } = useAuth();
 
   // Core Layout State
-  const [activeView, setActiveView] = useState<'settings' | 'pwa' | 'admin' | 'wiki' | 'campaign'>(
-    'wiki',
-  );
+  const [activeView, setActiveView] = useState<
+    'settings' | 'pwa' | 'admin' | 'wiki' | 'campaign' | 'design-system'
+  >('wiki');
   // Default customer ID for wiki view — shows most-recently-viewed or a placeholder.
   const [wikiCustomerId] = useState<string>('demo-customer');
 
@@ -113,6 +114,14 @@ function App() {
             >
               <BarChart2 size={20} strokeWidth={2.5} />
             </button>
+            <button
+              onClick={() => setActiveView('design-system')}
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'design-system' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+              title="Design System Catalog"
+              data-testid="nav-design-system"
+            >
+              <Palette size={20} strokeWidth={2.5} />
+            </button>
             {canAccessAdmin && (
               <button
                 onClick={() => setActiveView('admin')}
@@ -143,6 +152,7 @@ function App() {
             {activeView === 'pwa' && <PwaDemoPage />}
             {activeView === 'wiki' && <WikiViewPage customerId={wikiCustomerId} />}
             {activeView === 'campaign' && <CampaignAnalysisPage />}
+            {activeView === 'design-system' && <DesignSystemCatalogPage />}
             {activeView === 'admin' && canAccessAdmin && <AdminDashboard />}
             {activeView === 'admin' && !canAccessAdmin && (
               <div className="p-8 text-zinc-400 text-sm">

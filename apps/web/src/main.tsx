@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 // Design system token CSS custom properties — must be imported before index.css
 // so Tailwind utilities can build on the same variables.
-import '../../../packages/ui/tokens.css';
+// Canonical location: packages/ui/design-system/tokens.css
+import '../../../packages/ui/design-system/tokens.css';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

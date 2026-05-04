@@ -4,10 +4,9 @@
  * Import this file once at the application root so that all design system
  * components and pages can reference these variables.
  *
- * Canonical definition: packages/ui/design-system/tokens.css
- * This file is kept for backward-compatibility; it mirrors the canonical file.
- *
  * Canonical docs: calypso-blueprint/rules/blueprints/ux.yaml
+ *
+ * Note: packages/ui/tokens.css re-exports from this canonical location.
  */
 
 :root {
