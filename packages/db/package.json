@@ -17,6 +17,7 @@
     "./entity-type-registry": "./entity-type-registry.ts",
     "./phase1-entity-types": "./phase1-entity-types.ts",
     "./feature-flags": "./feature-flags.ts",
+    "./mkt-feature-flags": "./mkt-feature-flags.ts",
     "./auth-lockout": "./auth-lockout.ts",
     "./recovery": "./recovery.ts",
     "./business-journal": "./business-journal.ts",
