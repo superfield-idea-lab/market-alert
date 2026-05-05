@@ -67,11 +67,14 @@ beforeAll(async () => {
   const regular = await createTestSession(BASE, { username: `reg_${Date.now()}` });
   authCookie = regular.cookie;
 
-  const su = await createTestSession(BASE, { username: `su_${Date.now()}` });
+  const suUsername = `su_${Date.now()}`;
+  const su = await createTestSession(BASE, { username: suUsername });
   superuserId = su.userId;
-  superuserCookie = su.cookie;
 
-  // Restart with real SUPERUSER_ID
+  // Restart with real SUPERUSER_ID. The server generates a fresh ephemeral JWT
+  // key pair on each startup, so cookies from the first instance are invalid.
+  // Re-authenticate with the same username after restart so superuserCookie is
+  // signed by the new key pair for the same userId that equals SUPERUSER_ID.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -87,6 +90,10 @@ beforeAll(async () => {
     stderr: 'ignore',
   });
   await waitForServer(BASE);
+
+  // Re-authenticate as the same user to get a token signed by the new key pair.
+  const su2 = await createTestSession(BASE, { username: suUsername });
+  superuserCookie = su2.cookie;
 
   // Seed a source entity directly via SQL so we have a valid source_id.
   // The /api/tasks CRUD handler was removed in issue #210 (template cleanup).
