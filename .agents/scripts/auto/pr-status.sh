@@ -9,12 +9,27 @@ TARGET="${1:-}"
 REPO="$(canonical_repo)"
 
 if [[ -z "$TARGET" ]]; then
-  PR_JSON="$(gh pr view --repo "$REPO" --json number,title,url,body,state,isDraft,mergeable,mergeStateStatus,headRefName,baseRefName,mergedAt)"
-  CHECKS_JSON="$(gh pr checks --repo "$REPO" --json name,state,bucket,workflow,link)"
+  PR_JSON="$(gh pr view --repo "$REPO" --json number,title,url,body,state,isDraft,mergeable,mergeStateStatus,headRefName,baseRefName,mergedAt,headRefOid)"
 else
-  PR_JSON="$(gh pr view "$TARGET" --repo "$REPO" --json number,title,url,body,state,isDraft,mergeable,mergeStateStatus,headRefName,baseRefName,mergedAt)"
-  CHECKS_JSON="$(gh pr checks "$TARGET" --repo "$REPO" --json name,state,bucket,workflow,link)"
+  PR_JSON="$(gh pr view "$TARGET" --repo "$REPO" --json number,title,url,body,state,isDraft,mergeable,mergeStateStatus,headRefName,baseRefName,mergedAt,headRefOid)"
 fi
+
+HEAD_SHA="$(jq -r '.headRefOid' <<<"$PR_JSON")"
+RAW_CHECKS="$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" --paginate --jq '.check_runs[]' 2>/dev/null | jq -s '.' || echo '[]')"
+CHECKS_JSON="$(jq 'map({
+  name: .name,
+  state: (if .status == "completed" then .conclusion else .status end),
+  bucket: (
+    if .status != "completed" then "pending"
+    elif .conclusion == "success" or .conclusion == "skipped" or .conclusion == "neutral" then "pass"
+    elif .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" then "fail"
+    elif .conclusion == "cancelled" then "cancel"
+    else "pending"
+    end
+  ),
+  workflow: (.app.name // ""),
+  link: (.html_url // "")
+})' <<<"$RAW_CHECKS")"
 
 linked_issue_number="$(jq -r '.body' <<<"$PR_JSON" | extract_closing_issue_number || true)"
 if [[ -n "$linked_issue_number" ]]; then
