@@ -105,21 +105,18 @@ beforeAll(async () => {
     AGENT_EMAIL_INGEST_PASSWORD: TEST_PASSWORDS.email_ingest,
   } as NodeJS.ProcessEnv);
 
-  // Start the server pointing at the test container.
-  // DATABASE_URL is used by app_rw (the server's normal pool).
-  // AUDIT_DATABASE_URL points to superfield_audit (the audit database created by
-  // runInitRemote) using the admin credentials — the audit_events table lives there,
-  // not in the default postgres database the admin URL points to.
-  // Using admin credentials (same pattern as wiki-version-embed.test.ts) avoids
-  // the audit_w role connection restrictions in the testcontainer environment.
+  // Start the server with admin credentials on both databases (same pattern as
+  // wiki-version-embed.test.ts). Using admin (postgres superuser) bypasses the
+  // FORCE ROW LEVEL SECURITY on entities — the ingestion handler inserts with a
+  // non-null tenant_id without setting app.current_tenant_id, which would be
+  // blocked under app_rw's RLS context.
   // ENCRYPTION_DISABLED=true skips field encryption for test speed.
-  const appRwUrl = makeRoleUrl(pg.url, DB_NAMES.app, 'app_rw', TEST_PASSWORDS.app);
   const auditAdminUrl = dbUrl(pg.url, 'superfield_audit');
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      DATABASE_URL: appRwUrl,
+      DATABASE_URL: dbUrl(pg.url, DB_NAMES.app),
       AUDIT_DATABASE_URL: auditAdminUrl,
       PORT: String(PORT),
       TEST_MODE: 'true',
