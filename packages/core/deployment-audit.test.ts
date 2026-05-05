@@ -117,7 +117,7 @@ describe('writeDeploymentAudit', () => {
     const lines = readJsonlLines(auditFile);
     expect(lines).toHaveLength(1);
 
-    const written = lines[0] as DeploymentRecord;
+    const written = lines[0] as unknown as DeploymentRecord;
     expect(written.ts).toBe(record.ts);
     expect(written.operator).toBe(record.operator);
     expect(written.release_tag).toBe(record.release_tag);
