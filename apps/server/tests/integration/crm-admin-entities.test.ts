@@ -167,7 +167,7 @@ async function waitForServer(base: string): Promise<void> {
   const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      await fetch(`${base}/api/tasks`);
+      await fetch(`${base}/health/live`);
       return;
     } catch {
       await Bun.sleep(300);
