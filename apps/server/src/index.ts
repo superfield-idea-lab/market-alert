@@ -64,6 +64,7 @@ import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLegalHoldRequest } from './api/legal-hold';
 import { handleLabelClearanceRequest } from './api/label-clearance';
+import { handleTasksRequest } from './api/tasks';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -273,9 +274,12 @@ export default {
 
     if (url.pathname.startsWith('/api/tasks')) {
       // Delegated-token result submission route — workers submit results here.
-      // The generic task CRUD handler (handleTasksRequest) was removed in issue #210.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
       if (resultRes) return withTrace(resultRes);
+
+      // Task CRUD handler (GET/POST/PATCH/DELETE /api/tasks[/:id])
+      const tasksRes = await handleTasksRequest(req, url, appState);
+      if (tasksRes) return withTrace(tasksRes);
     }
 
     if (url.pathname.startsWith('/api/tasks-queue')) {
