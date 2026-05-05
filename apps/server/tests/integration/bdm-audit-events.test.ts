@@ -94,11 +94,16 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session1 = await createTestSession(BASE, { username: `bdm_audit_${Date.now()}` });
+  // Phase 1: create the superuser identity, capture username for re-auth after restart.
+  const suUsername = `bdm_audit_${Date.now()}`;
+  const session1 = await createTestSession(BASE, { username: suUsername });
   userId = session1.userId;
 
   // Phase 2: restart with userId as SUPERUSER_ID (Compliance Officer role)
   // so GET /api/audit/verify is accessible.
+  // The server generates a fresh ephemeral JWT key pair on each startup, so
+  // re-authenticate with the same username to get a valid cookie for the new
+  // key pair (createTestSession upserts by username, returning the same userId).
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -118,35 +123,11 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // The JWT key is freshly generated at startup — get a new session cookie.
-  const session2 = await createTestSession(BASE, { username: `bdm_audit2_${Date.now()}` });
+  // Re-authenticate as the same user so authCookie is signed by the new key pair
+  // and the cookie holder IS the superuser (userId === SUPERUSER_ID).
+  const session2 = await createTestSession(BASE, { username: suUsername });
   userId = session2.userId;
   authCookie = session2.cookie;
-
-  // Phase 3: restart once more so session2's userId IS the superuser.
-  server.kill();
-  server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      DATABASE_URL: pg.url,
-      AUDIT_DATABASE_URL: pg.url,
-      ANALYTICS_DATABASE_URL: pg.url,
-      DICTIONARY_DATABASE_URL: pg.url,
-      PORT: String(PORT),
-      TEST_MODE: 'true',
-      SUPERUSER_ID: userId,
-    },
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-
-  await waitForServer(BASE);
-
-  // Get a final session valid for this server process.
-  const session3 = await createTestSession(BASE, { username: `bdm_audit3_${Date.now()}` });
-  userId = session3.userId;
-  authCookie = session3.cookie;
 }, 120_000);
 
 afterAll(async () => {
