@@ -35,6 +35,7 @@ let pg: PgContainer;
 let server: Subprocess;
 let authCookie = '';
 let userId = '';
+let suUsername = '';
 // Admin SQL pool connected to the same PG container
 let adminSql: ReturnType<typeof postgres>;
 
@@ -81,7 +82,7 @@ beforeAll(async () => {
     )
   `);
 
-  // Phase 1: start server to create a user and capture their userId.
+  // Phase 1: start server with placeholder superuser to create the test user.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -100,10 +101,14 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session = await createTestSession(BASE, { username: `su_reident_${Date.now()}` });
+  suUsername = `su_reident_${Date.now()}`;
+  const session = await createTestSession(BASE, { username: suUsername });
   userId = session.userId;
 
-  // Phase 2: restart with SUPERUSER_ID=userId and get a fresh session cookie.
+  // Phase 2: restart with userId as SUPERUSER_ID. Re-authenticate with the same
+  // username so the cookie holder IS the superuser (userId === SUPERUSER_ID).
+  // The server generates a fresh JWT key pair on each startup — createTestSession
+  // upserts by username, returning the same userId with a fresh signed cookie.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -123,63 +128,9 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // Create a new session on the restarted server. Because the JWT key is freshly
-  // generated at startup, the old cookie is invalid — we must get a new one.
-  // We use a new username to create a different entity row (simpler than re-using).
-  // That new user won't be the superuser yet, so we do one more restart pass.
-  const session2 = await createTestSession(BASE, { username: `su_reident2_${Date.now()}` });
+  const session2 = await createTestSession(BASE, { username: suUsername });
   userId = session2.userId;
   authCookie = session2.cookie;
-
-  // Phase 3: restart once more with session2.userId as superuser, and re-authenticate.
-  server.kill();
-  server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      DATABASE_URL: pg.url,
-      AUDIT_DATABASE_URL: pg.url,
-      ANALYTICS_DATABASE_URL: pg.url,
-      DICTIONARY_DATABASE_URL: pg.url,
-      PORT: String(PORT),
-      TEST_MODE: 'true',
-      SUPERUSER_ID: userId,
-    },
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-
-  await waitForServer(BASE);
-
-  // Create final session — this user's ID IS the superuser on this server.
-  const session3 = await createTestSession(BASE, { username: `su_reident3_${Date.now()}` });
-  userId = session3.userId;
-  authCookie = session3.cookie;
-
-  // Final restart with session3's userId as superuser.
-  server.kill();
-  server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      DATABASE_URL: pg.url,
-      AUDIT_DATABASE_URL: pg.url,
-      ANALYTICS_DATABASE_URL: pg.url,
-      DICTIONARY_DATABASE_URL: pg.url,
-      PORT: String(PORT),
-      TEST_MODE: 'true',
-      SUPERUSER_ID: userId,
-    },
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-
-  await waitForServer(BASE);
-
-  // Get a final cookie valid on this server.
-  const session4 = await createTestSession(BASE, { username: `su_reident4_${Date.now()}` });
-  userId = session4.userId;
-  authCookie = session4.cookie;
 }, 120_000);
 
 afterAll(async () => {
