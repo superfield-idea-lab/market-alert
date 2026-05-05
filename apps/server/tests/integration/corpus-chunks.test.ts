@@ -63,9 +63,10 @@ beforeAll(async () => {
   });
   await waitForServer(BASE);
 
-  // Create test sessions
-  const regular = await createTestSession(BASE, { username: `reg_${Date.now()}` });
-  authCookie = regular.cookie;
+  // Create test sessions. Save usernames so we can re-authenticate after the
+  // server restarts — each restart generates a new ephemeral JWT key pair.
+  const regUsername = `reg_${Date.now()}`;
+  await createTestSession(BASE, { username: regUsername });
 
   const suUsername = `su_${Date.now()}`;
   const su = await createTestSession(BASE, { username: suUsername });
@@ -73,8 +74,8 @@ beforeAll(async () => {
 
   // Restart with real SUPERUSER_ID. The server generates a fresh ephemeral JWT
   // key pair on each startup, so cookies from the first instance are invalid.
-  // Re-authenticate with the same username after restart so superuserCookie is
-  // signed by the new key pair for the same userId that equals SUPERUSER_ID.
+  // Re-authenticate both users with the same usernames after restart so all
+  // cookies are signed by the new key pair.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -91,7 +92,10 @@ beforeAll(async () => {
   });
   await waitForServer(BASE);
 
-  // Re-authenticate as the same user to get a token signed by the new key pair.
+  // Re-authenticate on the new server instance. createTestSession upserts by
+  // username so the same userIds are returned with fresh signed tokens.
+  const reg2 = await createTestSession(BASE, { username: regUsername });
+  authCookie = reg2.cookie;
   const su2 = await createTestSession(BASE, { username: suUsername });
   superuserCookie = su2.cookie;
 
