@@ -39,12 +39,15 @@ WORKDIR /app
 # All workspace member package.json files must be present so bun can resolve
 # the full workspace graph against the frozen lockfile.
 COPY package.json bun.lock ./
+COPY apps/admin/package.json apps/admin/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/embedding/package.json packages/embedding/
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 
 # Install all workspace dependencies with frozen lockfile for reproducibility.
@@ -263,12 +266,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 
 # Copy workspace manifests and lockfile for dependency installation
 COPY package.json bun.lock ./
+COPY apps/admin/package.json apps/admin/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/embedding/package.json packages/embedding/
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 
 # Install all workspace dependencies
@@ -300,12 +306,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
+COPY apps/admin/package.json apps/admin/
 COPY apps/worker/package.json apps/worker/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
 COPY packages/embedding/package.json packages/embedding/
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/services/package.json packages/services/
 COPY packages/ui/package.json packages/ui/
 
 RUN bun install --frozen-lockfile

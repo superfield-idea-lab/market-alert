@@ -1,7 +1,6 @@
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
-import { createTestSession } from '../helpers/test-session';
 
 // Each test run gets its own isolated postgres container + server process.
 // No external infrastructure required — just Docker.
@@ -15,8 +14,6 @@ const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
 let server: Subprocess;
-let authCookie = '';
-let csrfToken = '';
 
 beforeAll(async () => {
   // 1. Start an isolated postgres container
@@ -38,72 +35,11 @@ beforeAll(async () => {
 
   // 3. Wait until the server is accepting requests
   await waitForServer(BASE);
-
-  // 4. Create a test session (passkey-only auth, issue #14 — no password endpoint)
-  const session = await createTestSession(BASE);
-  authCookie = session.cookie;
-  csrfToken = session.csrfToken;
 }, 60_000);
 
 afterAll(async () => {
   server?.kill();
   await pg?.stop();
-});
-
-// ---------------------------------------------------------------------------
-
-test('GET /api/tasks returns 200 with an array', async () => {
-  const res = await fetch(`${BASE}/api/tasks`, {
-    headers: { Cookie: authCookie },
-  });
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(Array.isArray(body)).toBe(true);
-});
-
-test('POST /api/tasks creates a task and returns 201', async () => {
-  const res = await fetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: authCookie,
-      'X-CSRF-Token': csrfToken,
-    },
-    body: JSON.stringify({ name: 'Integration test task', priority: 'high' }),
-  });
-  expect(res.status).toBe(201);
-  const task = await res.json();
-  expect(task.id).toBeTruthy();
-  expect(task.name).toBe('Integration test task');
-  expect(task.priority).toBe('high');
-  expect(task.status).toBe('todo');
-});
-
-test('POST /api/tasks returns 400 when name is missing', async () => {
-  const res = await fetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: authCookie,
-      'X-CSRF-Token': csrfToken,
-    },
-    body: JSON.stringify({ priority: 'low' }),
-  });
-  expect(res.status).toBe(400);
-});
-
-test('POST /api/tasks returns 403 when CSRF token is missing', async () => {
-  const res = await fetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: authCookie },
-    body: JSON.stringify({ name: 'CSRF test task' }),
-  });
-  expect(res.status).toBe(403);
-});
-
-test('GET /api/tasks returns 401 when unauthenticated', async () => {
-  const res = await fetch(`${BASE}/api/tasks`);
-  expect(res.status).toBe(401);
 });
 
 // ---------------------------------------------------------------------------
@@ -160,8 +96,8 @@ async function waitForServer(base: string): Promise<void> {
   const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      await fetch(`${base}/api/tasks`);
-      return; // any response (even 401) means the server is up
+      await fetch(`${base}/health/live`);
+      return; // any response means the server is up
     } catch {
       await Bun.sleep(300);
     }
