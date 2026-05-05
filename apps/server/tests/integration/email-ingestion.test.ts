@@ -107,15 +107,18 @@ beforeAll(async () => {
 
   // Start the server pointing at the test container.
   // DATABASE_URL is used by app_rw (the server's normal pool).
-  // AUDIT_DATABASE_URL is used by the audit service.
+  // AUDIT_DATABASE_URL must point to superfield_audit (the audit database created by
+  // runInitRemote) using the audit_w role — the audit_events table lives there, not
+  // in the default postgres database the admin URL points to.
   // ENCRYPTION_DISABLED=true skips field encryption for test speed.
   const appRwUrl = makeRoleUrl(pg.url, DB_NAMES.app, 'app_rw', TEST_PASSWORDS.app);
+  const auditWUrl = makeRoleUrl(pg.url, 'superfield_audit', 'audit_w', TEST_PASSWORDS.audit);
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       DATABASE_URL: appRwUrl,
-      AUDIT_DATABASE_URL: pg.url,
+      AUDIT_DATABASE_URL: auditWUrl,
       PORT: String(PORT),
       TEST_MODE: 'true',
       ENCRYPTION_DISABLED: 'true',
