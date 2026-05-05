@@ -27,7 +27,8 @@ beforeAll(async () => {
   pg = await startPostgres();
 
   // Start server with a placeholder SUPERUSER_ID so we can create sessions
-  // before we know the real user id.
+  // before we know the real user id. CSRF_DISABLED=true so integration tests
+  // can make state-mutating requests without a double-submit cookie ceremony.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -36,6 +37,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       TEST_MODE: 'true',
+      CSRF_DISABLED: 'true',
       SUPERUSER_ID: '__placeholder__',
     },
     stdout: 'ignore',
@@ -64,6 +66,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       TEST_MODE: 'true',
+      CSRF_DISABLED: 'true',
       SUPERUSER_ID: userId,
     },
     stdout: 'ignore',
