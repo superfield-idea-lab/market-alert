@@ -10,4 +10,5 @@ export * from './secrets';
 export * from './pii-tokeniser';
 export * from './chunker';
 export * from './feature-flags';
+export * from './deployment-audit';
 export const coreHelper = () => true;

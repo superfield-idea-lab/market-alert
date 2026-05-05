@@ -30,6 +30,7 @@ export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
 export interface LogContext {
   trace_id?: string;
+  service?: string;
   [key: string]: unknown;
 }
 
@@ -38,6 +39,7 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   trace_id: string;
+  service: string;
   [key: string]: unknown;
 }
 
@@ -229,7 +231,10 @@ export function log(level: LogLevel, message: string, context: LogContext = {}):
 
   ensureLogsDir(_logsDir);
 
-  const { trace_id = '', ...rest } = context;
+  const { trace_id = '', service, ...rest } = context;
+
+  // Resolve service name: context override → SERVICE_NAME env → empty string.
+  const resolvedService = service ?? process.env.SERVICE_NAME ?? '';
 
   // Scrub PII from context fields before writing to any sink.
   const scrubbed = scrubPii(rest) as Record<string, unknown>;
@@ -239,6 +244,7 @@ export function log(level: LogLevel, message: string, context: LogContext = {}):
     level,
     message,
     trace_id,
+    service: resolvedService,
     ...scrubbed,
   };
 

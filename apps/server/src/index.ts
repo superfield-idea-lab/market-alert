@@ -22,7 +22,7 @@ import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
 import { handlePasskeyRequest } from './api/passkey';
 import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/task-queue';
 import { handleAuditRequest } from './api/audit';
-import { extractTraceId, traceLog, log } from 'core';
+import { extractTraceId, traceLog, log, formatTraceparent } from 'core';
 import { startCronScheduler } from './cron/boot';
 import { websocketHandler, type WsClientData } from './websocket';
 import { handleAdminRequest } from './api/admin';
@@ -63,6 +63,7 @@ import { handleBdmCampaignRequest } from './api/bdm-campaign';
 import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLegalHoldRequest } from './api/legal-hold';
+import { handleClientErrorsRequest } from './api/client-errors';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 
 // Starter behavior:
@@ -175,12 +176,15 @@ export default {
       console.log(JSON.stringify(entry));
       log('info', `${req.method} ${url.pathname} ${res.status}`, {
         trace_id: traceId,
+        service: process.env.SERVICE_NAME ?? 'server',
         method: req.method,
         path: url.pathname,
         status: res.status,
         duration_ms: duration,
       });
+      // Echo trace ID via both X-Trace-Id (legacy) and W3C traceparent.
       res.headers.set('X-Trace-Id', traceId);
+      res.headers.set('traceparent', formatTraceparent(traceId));
       return res;
     }
 
@@ -236,6 +240,12 @@ export default {
         },
       });
       return withTrace(res);
+    }
+
+    // Browser error forwarding — unauthenticated, POST /api/v1/client-errors (issue #9).
+    if (url.pathname === '/api/v1/client-errors') {
+      const clientErrorRes = await handleClientErrorsRequest(req);
+      if (clientErrorRes) return withTrace(clientErrorRes);
     }
 
     if (url.pathname.startsWith('/api/auth/passkey')) {

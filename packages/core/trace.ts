@@ -57,11 +57,57 @@ export async function tracedFetch(input: RequestInfo | URL, init?: RequestInit):
 
 /**
  * Extracts the trace ID from an incoming HTTP request.
+ *
+ * Resolution order:
+ *   1. `traceparent` header (W3C Trace Context) — the trace-id segment is extracted.
+ *   2. `X-Trace-Id` header — used as-is for backward compatibility.
+ *   3. Fresh UUID generated when neither header is present.
+ *
  * If the `X-Trace-Id` header is absent, a fresh UUID is generated so every
  * request is always traceable, even those originating outside the browser.
  */
 export function extractTraceId(req: Request): string {
+  const traceparent = req.headers.get('traceparent');
+  if (traceparent) {
+    const extracted = extractTraceIdFromTraceparent(traceparent);
+    if (extracted) return extracted;
+  }
   return req.headers.get('X-Trace-Id') ?? crypto.randomUUID();
+}
+
+/**
+ * Parses a W3C `traceparent` header value and returns the trace-id segment.
+ *
+ * Format: `{version}-{trace-id}-{parent-id}-{trace-flags}`
+ * Example: `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
+ *
+ * Returns `null` if the header is malformed.
+ */
+export function extractTraceIdFromTraceparent(traceparent: string): string | null {
+  const parts = traceparent.split('-');
+  // Must have at least 4 dash-separated segments.
+  if (parts.length < 4) return null;
+  const traceId = parts[1];
+  // Trace-id must be 32 lowercase hex characters and must not be all zeros.
+  if (!/^[0-9a-f]{32}$/.test(traceId) || traceId === '0'.repeat(32)) return null;
+  return traceId;
+}
+
+/**
+ * Formats a trace ID as a W3C `traceparent` header value.
+ *
+ * The trace ID is padded/truncated to 32 hex chars (required by the spec).
+ * A deterministic parent-id (zeros + "0001") is used when no span ID is supplied.
+ * Sampled flag is always set to `01`.
+ *
+ * @param traceId  - Hex or UUID-format trace ID.
+ * @param spanId   - Optional 16-char hex span ID. Defaults to `"0000000000000001"`.
+ */
+export function formatTraceparent(traceId: string, spanId = '0000000000000001'): string {
+  // Normalise: strip hyphens (UUID format) and lowercase.
+  const hex = traceId.replace(/-/g, '').toLowerCase().padEnd(32, '0').slice(0, 32);
+  const sid = spanId.replace(/-/g, '').toLowerCase().padEnd(16, '0').slice(0, 16);
+  return `00-${hex}-${sid}-01`;
 }
 
 /**

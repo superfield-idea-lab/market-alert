@@ -19,6 +19,8 @@ export const PII_FIELD_NAMES: ReadonlySet<string> = new Set([
   'secret',
   'key',
   'authorization',
+  // Market-alert trader identity — must never appear in plaintext in logs
+  'trader_id',
   // PRD §7 sensitive column names — must never appear in plaintext in logs
   'body',
   'subject',

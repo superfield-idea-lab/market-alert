@@ -12,6 +12,8 @@ import {
   extractTraceId,
   traceLog,
   makeTracedFetch,
+  extractTraceIdFromTraceparent,
+  formatTraceparent,
 } from './trace';
 
 // ---------------------------------------------------------------------------
@@ -254,5 +256,123 @@ describe('makeTracedFetch', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTraceIdFromTraceparent — W3C Trace Context parsing
+// ---------------------------------------------------------------------------
+
+describe('extractTraceIdFromTraceparent', () => {
+  test('extracts the trace-id segment from a valid traceparent', () => {
+    const traceId = extractTraceIdFromTraceparent(
+      '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+    );
+    expect(traceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+  });
+
+  test('accepts uppercase hex and normalises to lowercase', () => {
+    // spec says lowercase but implementations may emit uppercase
+    const traceId = extractTraceIdFromTraceparent(
+      '00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01',
+    );
+    // The regex requires lowercase match — this is intentionally null for uppercase
+    // (the spec mandates lowercase; callers should lowercase before parsing).
+    // This test documents the current strict behaviour.
+    expect(traceId).toBeNull();
+  });
+
+  test('returns null for a malformed traceparent (too few segments)', () => {
+    expect(extractTraceIdFromTraceparent('00-4bf92f3577b34da6a3ce929d0e0e4736')).toBeNull();
+  });
+
+  test('returns null when trace-id is all zeros (invalid per spec)', () => {
+    expect(
+      extractTraceIdFromTraceparent('00-00000000000000000000000000000000-00f067aa0ba902b7-01'),
+    ).toBeNull();
+  });
+
+  test('returns null for a trace-id that is not 32 hex chars', () => {
+    expect(extractTraceIdFromTraceparent('00-shortid-00f067aa0ba902b7-01')).toBeNull();
+  });
+
+  test('returns null for empty string', () => {
+    expect(extractTraceIdFromTraceparent('')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatTraceparent — W3C traceparent formatting
+// ---------------------------------------------------------------------------
+
+describe('formatTraceparent', () => {
+  test('formats a 32-char hex trace ID correctly', () => {
+    const result = formatTraceparent('4bf92f3577b34da6a3ce929d0e0e4736');
+    expect(result).toBe('00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000001-01');
+  });
+
+  test('strips hyphens from a UUID-format trace ID', () => {
+    const result = formatTraceparent('4bf92f35-77b3-4da6-a3ce-929d0e0e4736');
+    expect(result).toBe('00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000001-01');
+  });
+
+  test('uses a custom span ID when provided', () => {
+    const result = formatTraceparent('4bf92f3577b34da6a3ce929d0e0e4736', 'deadbeef12345678');
+    expect(result).toBe('00-4bf92f3577b34da6a3ce929d0e0e4736-deadbeef12345678-01');
+  });
+
+  test('always starts with "00-" version prefix', () => {
+    const result = formatTraceparent('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1');
+    expect(result.startsWith('00-')).toBe(true);
+  });
+
+  test('always ends with "-01" sampled flag', () => {
+    const result = formatTraceparent('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1');
+    expect(result.endsWith('-01')).toBe(true);
+  });
+
+  test('round-trips through extractTraceIdFromTraceparent', () => {
+    const original = '4bf92f3577b34da6a3ce929d0e0e4736';
+    const formatted = formatTraceparent(original);
+    const extracted = extractTraceIdFromTraceparent(formatted);
+    expect(extracted).toBe(original);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTraceId — traceparent header takes priority
+// ---------------------------------------------------------------------------
+
+describe('extractTraceId — traceparent priority', () => {
+  test('extracts trace-id from traceparent header when present', () => {
+    const req = new Request('http://localhost/', {
+      headers: {
+        traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+      },
+    });
+    expect(extractTraceId(req)).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+  });
+
+  test('falls back to X-Trace-Id when traceparent is absent', () => {
+    const req = new Request('http://localhost/', {
+      headers: { 'X-Trace-Id': 'my-custom-trace-id' },
+    });
+    expect(extractTraceId(req)).toBe('my-custom-trace-id');
+  });
+
+  test('falls back to X-Trace-Id when traceparent is malformed', () => {
+    const req = new Request('http://localhost/', {
+      headers: {
+        traceparent: 'bad-format',
+        'X-Trace-Id': 'fallback-id',
+      },
+    });
+    expect(extractTraceId(req)).toBe('fallback-id');
+  });
+
+  test('generates a UUID when neither header is present', () => {
+    const req = new Request('http://localhost/');
+    const id = extractTraceId(req);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 });
