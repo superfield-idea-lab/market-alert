@@ -26,6 +26,8 @@ let userId = '';
 beforeAll(async () => {
   pg = await startPostgres();
 
+  // Start server with a placeholder SUPERUSER_ID so we can create sessions
+  // before we know the real user id.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -34,8 +36,7 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       TEST_MODE: 'true',
-      // Make the test user a superuser so we can test the verify endpoint
-      SUPERUSER_ID: '__will_be_set_after_session__',
+      SUPERUSER_ID: '__placeholder__',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -43,11 +44,17 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session = await createTestSession(BASE);
+  // Create session and persist the username so we can re-authenticate after
+  // the server restart (each restart generates a fresh ephemeral JWT key pair).
+  const suUsername = `su_${Date.now()}`;
+  const session = await createTestSession(BASE, { username: suUsername });
   userId = session.userId;
-  authCookie = session.cookie;
 
-  // Restart server with the SUPERUSER_ID set to the created user's id
+  // Restart server with the SUPERUSER_ID set to the created user's id.
+  // The server generates a fresh ephemeral JWT key pair on each startup, so
+  // cookies from the first server instance are invalid on the second. Re-create
+  // the session against the new server process using the same username so the DB
+  // row is reused and the token is signed by the new key pair.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -64,6 +71,12 @@ beforeAll(async () => {
   });
 
   await waitForServer(BASE);
+
+  // Re-authenticate on the new server instance to get a token signed by the
+  // new key pair. createTestSession upserts by username so the same userId is
+  // returned with a fresh signed token.
+  const session2 = await createTestSession(BASE, { username: suUsername });
+  authCookie = session2.cookie;
 }, 120_000);
 
 afterAll(async () => {
