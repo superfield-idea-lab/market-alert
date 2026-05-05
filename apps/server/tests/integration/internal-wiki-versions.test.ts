@@ -193,7 +193,7 @@ test('POST /internal/wiki/versions rejects a consumed token on re-use', async ()
   });
   expect(second.status).toBe(401);
   const body = (await second.json()) as Record<string, unknown>;
-  expect(String(body.error).toLowerCase()).toContain('used');
+  expect(String(body.error).toLowerCase()).toContain('revoked');
 });
 
 test('POST /internal/wiki/versions returns 400 for missing content', async () => {
