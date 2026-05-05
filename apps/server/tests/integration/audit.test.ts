@@ -9,6 +9,7 @@
  */
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
+import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
 
@@ -22,9 +23,33 @@ let pg: PgContainer;
 let server: Subprocess;
 let authCookie = '';
 let userId = '';
+let adminSql: ReturnType<typeof postgres>;
 
 beforeAll(async () => {
   pg = await startPostgres();
+
+  // Create the audit_events table before starting the server.
+  // In production this DDL is applied by init-remote.ts running as an admin
+  // role at deploy time. In tests the container has no pre-applied schema, so
+  // we create the table directly using the admin URL.
+  adminSql = postgres(pg.url, { max: 5, idle_timeout: 10 });
+  await adminSql.unsafe(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      before JSONB,
+      after JSONB,
+      ip TEXT,
+      user_agent TEXT,
+      correlation_id TEXT,
+      ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL
+    )
+  `);
 
   // Start server with a placeholder SUPERUSER_ID so we can create sessions
   // before we know the real user id. CSRF_DISABLED=true so integration tests
@@ -84,6 +109,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.kill();
+  await adminSql?.end();
   await pg?.stop();
 });
 
