@@ -36,10 +36,13 @@ CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id);
 CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type);
 
 -- Seed PRD-required entity types only.
--- Template-only types (task, tag, channel, message) removed in issue #214.
+-- Template-only types (tag, channel, message) removed in issue #214.
+-- task type re-added because the task CRUD handler (/api/tasks) was
+-- restored in issue #7 and requires this FK entry.
 INSERT INTO entity_types (type, schema) VALUES
   ('user',        '{}'),
-  ('github_link', '{}')
+  ('github_link', '{}'),
+  ('task',        '{}')
 ON CONFLICT (type) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS revoked_tokens (
