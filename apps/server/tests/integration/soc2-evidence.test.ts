@@ -30,6 +30,26 @@ beforeAll(async () => {
   pg = await startPostgres();
   sql = postgres(pg.url, { max: 3 });
 
+  // Create audit_events table — buildBackupVerificationProof queries it via
+  // auditSql; runInitRemote is not called here so we create it inline.
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      before JSONB,
+      after JSONB,
+      ip TEXT,
+      user_agent TEXT,
+      correlation_id TEXT,
+      ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL
+    )
+  `);
+
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
