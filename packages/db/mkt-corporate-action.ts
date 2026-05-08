@@ -230,6 +230,23 @@ export async function insertCorporateAction(
 
   // DEV-SCOUT STUB: real insert is deferred to the implementation issue.
   // The stub throws so that accidental production usage is caught immediately.
+  //
+  // Follow-on implementation pattern:
+  //
+  //   const rows = await sqlClient<CorporateActionRow[]>`
+  //     INSERT INTO mkt_corporate_actions
+  //       (idempotency_key, form_type, accession_number, cik, issuer_name,
+  //        filing_date, filing_text)
+  //     VALUES
+  //       (${idempotency_key}, ${form_type}, ${accession_number}, ${cik},
+  //        ${issuer_name}, ${filing_date.toISOString()}, ${filing_text_encrypted})
+  //     ON CONFLICT (idempotency_key) DO NOTHING
+  //     RETURNING *
+  //   `;
+  //   return rows[0] ?? null;
+
+  // Suppress unused-variable lint for destructured fields logged in the error.
+  void sqlClient;
   throw new Error(
     '[mkt-corporate-action] insertCorporateAction is a dev-scout stub — ' +
       `implement in the Phase 2 follow-on issue. ` +
@@ -238,19 +255,6 @@ export async function insertCorporateAction(
       `issuer_name=${issuer_name} filing_date=${filing_date.toISOString()} ` +
       `filing_text_encrypted length=${filing_text_encrypted.length}`,
   );
-
-  // Unreachable — kept here so TypeScript can infer the return type from the
-  // RETURNING clause pattern used by the real implementation.
-  const rows = await sqlClient<CorporateActionRow[]>`
-    INSERT INTO mkt_corporate_actions
-      (idempotency_key, form_type, accession_number, cik, issuer_name, filing_date, filing_text)
-    VALUES
-      (${idempotency_key}, ${form_type}, ${accession_number}, ${cik}, ${issuer_name},
-       ${filing_date.toISOString()}, ${filing_text_encrypted})
-    ON CONFLICT (idempotency_key) DO NOTHING
-    RETURNING *
-  `;
-  return rows[0] ?? null;
 }
 
 /**
