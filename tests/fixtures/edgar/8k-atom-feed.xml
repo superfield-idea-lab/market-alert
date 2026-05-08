@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EDGAR 8-K ATOM feed fixture — Phase 2 dev-scout (issue #14)
+
+  This file is a minimal valid ATOM feed returned by the EDGAR full-text
+  search RSS endpoint:
+    https://efts.sec.gov/LATEST/search-index?q=%228-K%22&dateRange=custom&startdt=...&forms=8-K
+
+  Canonical docs:
+    - https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=40
+    - https://efts.sec.gov/LATEST/search-index?q=%228-K%22&forms=8-K (live endpoint; blocked in tests by MSW v2)
+
+  Seam discovered during scout:
+    - The edgar_ingest worker must call the EDGAR ATOM feed URL and parse the
+      <entry> elements. Each entry maps to one potential CorporateAction.
+    - The feed URL is controlled by the EDGAR_FEED_URL env var (to be added to
+      apps/worker/.env.template in a follow-on issue).
+    - This fixture represents exactly one 8-K entry for ACME Corp (ticker: ACME,
+      CIK: 0001234567). The follow-on implementation test must assert that exactly
+      one CorporateAction row is created from this feed.
+
+  Risks identified during scout:
+    - EDGAR rate limits: the live feed is throttled to 10 req/s per IP. CI must
+      always use this MSW fixture and never hit sec.gov.
+    - Feed pagination: the live feed returns 40 entries per page; the production
+      parser must handle multi-page feeds. Phase 2 scope is limited to one entry.
+    - XML namespace variation: the EDGAR feed uses the Atom 2005 namespace
+      (http://www.w3.org/2005/Atom). Any XML parser must handle this namespace.
+    - Accession number normalisation: the accession number in <id> uses dashes
+      (0001234567-26-000001); the CIK-based URL path uses no dashes. Both forms
+      must map to the same idempotency key.
+-->
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>EDGAR Full-Text Search RSS Feed</title>
+  <link rel="alternate" href="https://efts.sec.gov/LATEST/search-index?q=%228-K%22&amp;forms=8-K"/>
+  <id>https://efts.sec.gov/LATEST/search-index?q=%228-K%22&amp;forms=8-K</id>
+  <updated>2026-05-08T00:00:00Z</updated>
+  <author>
+    <name>U.S. Securities and Exchange Commission</name>
+  </author>
+
+  <entry>
+    <!-- Accession number: 0001234567-26-000001 -->
+    <!-- CIK: 0001234567 (ACME Corp) -->
+    <title>ACME CORP — 8-K — 2026-05-07</title>
+    <link href="https://www.sec.gov/Archives/edgar/data/1234567/000123456726000001/0001234567-26-000001-index.htm"/>
+    <id>urn:tag:sec.gov,2008:accession-number=0001234567-26-000001</id>
+    <updated>2026-05-07T20:15:00Z</updated>
+    <summary type="html">
+      &lt;b&gt;Filed:&lt;/b&gt; 2026-05-07 &lt;b&gt;AccNum:&lt;/b&gt; 0001234567-26-000001
+      &lt;b&gt;Size:&lt;/b&gt; 42KB
+    </summary>
+    <!--
+      edgar:accession-number and edgar:file-num are the two stable identifiers
+      the ingestion worker uses to build the idempotency key and to fetch the
+      raw filing document (the follow-on issue).
+
+      The raw 8-K SGML/HTML document is NOT included in this fixture; the
+      integration test for Phase 2 need only assert that the CorporateAction
+      row is created from feed metadata. The filing_text column stores the
+      raw <entry> XML as a surrogate for the full filing document in this
+      scout pass (full document fetch is a follow-on).
+    -->
+    <category term="8-K" label="8-K"/>
+    <category term="ACME Corp" label="Issuer Name"/>
+    <category term="0001234567" label="CIK"/>
+  </entry>
+</feed>
