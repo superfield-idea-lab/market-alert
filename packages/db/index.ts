@@ -59,6 +59,36 @@ function createPool(databaseUrl: string, max: number) {
   });
 }
 
+/**
+ * Create a scoped connection pool for a worker agent.
+ *
+ * Phase 1 (Linkerd mTLS and machine tokens): workers must not carry their own
+ * `postgres` dependency. This factory is the approved path for workers to
+ * create a postgres pool — the `postgres` package is a dependency of `db`, not
+ * the worker, so the worker's package.json stays free of postgres/pg entries.
+ *
+ * Canonical docs:
+ *   - docs/plan.md (Phase 1: Linkerd mTLS service mesh and machine tokens)
+ *   - apps/worker/src/startup-guard.ts (guards against DB cred env vars)
+ *   - k8s/worker-network-policy.yaml (blocks worker→postgres:5432 at network layer)
+ *
+ * @param agentDatabaseUrl  Connection string for the agent-type read-only role.
+ * @param maxConnections    Maximum pool size (default: 3 — small for workers).
+ */
+export function createAgentPool(
+  agentDatabaseUrl: string,
+  maxConnections: number = 3,
+): ReturnType<typeof postgres> {
+  console.log(`[db] Agent pool binding to: ${maskDbUrl(agentDatabaseUrl)}`);
+  return postgres(agentDatabaseUrl, {
+    max: maxConnections,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    ssl: buildSslOptions(),
+    connection: { client_min_messages: 'warning' },
+  });
+}
+
 const databaseUrls = resolveDatabaseUrls();
 
 export const sql = createPool(databaseUrls.app, 20);

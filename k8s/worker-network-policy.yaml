@@ -1,0 +1,95 @@
+# Worker NetworkPolicy — blocks direct database access from all worker pods.
+#
+# Phase 1: Linkerd mTLS and machine tokens for workers.
+#
+# Workers must not connect directly to postgres. All data access is routed
+# through the API gateway (superfield-app) which presents a valid Linkerd
+# SPIFFE identity. Workers authenticate to the gateway via WORKER_TOKEN only.
+#
+# This NetworkPolicy is a structural enforcement complement to:
+#   - The startup-guard.ts credential check (apps/worker/src/startup-guard.ts)
+#   - The Linkerd default-deny AuthorizationPolicy (k8s/linkerd/authorization-policies.yaml)
+#
+# Policy summary for every pod in the superfield-worker namespace:
+#   Egress ALLOW:  superfield-app (API gateway) on port 31415 (HTTP)
+#   Egress ALLOW:  Any pod on port 443 (HTTPS — external APIs, AWS Secrets Manager)
+#   Egress ALLOW:  DNS (UDP/TCP port 53)
+#   Egress DENY:   All traffic to port 5432 (postgres) — implicit from allowlist model
+#
+# Ingress: not defined here — worker pods do not expose inbound ports.
+# The Linkerd AuthorizationPolicy in authorization-policies.yaml covers that.
+#
+# Apply order:
+#   kubectl apply -f k8s/linkerd/namespaces.yaml
+#   kubectl apply -f k8s/worker-network-policy.yaml
+#
+# Canonical references:
+#   https://kubernetes.io/docs/concepts/services-networking/network-policies/
+#   https://linkerd.io/2.14/tasks/restricting-access/
+
+---
+# Block all egress from all worker pods unless explicitly allowed below.
+# The policyTypes list includes only Egress so inbound traffic is unaffected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: superfield-worker-egress-allowlist
+  namespace: superfield-worker
+  labels:
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: superfield
+  annotations:
+    description: >
+      Allowlist-based egress policy for all pods in superfield-worker.
+      Blocks direct access to postgres (port 5432). Workers communicate
+      exclusively with the API gateway and external HTTPS endpoints.
+spec:
+  # Apply to all pods in the superfield-worker namespace.
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # ── Allow outbound to the API gateway ──────────────────────────────────
+    # Workers call the superfield-app API to claim tasks and submit results.
+    # The gateway is in the superfield-server namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: superfield-server
+          podSelector:
+            matchLabels:
+              app: superfield-app
+      ports:
+        - protocol: TCP
+          port: 31415
+
+    # ── Allow HTTPS to external services ───────────────────────────────────
+    # Workers call AWS Secrets Manager (for WORKER_TOKEN rotation) and
+    # external AI provider APIs over HTTPS.
+    - ports:
+        - protocol: TCP
+          port: 443
+
+    # ── Allow DNS resolution ────────────────────────────────────────────────
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # ── Linkerd control-plane egress ────────────────────────────────────────
+    # The Linkerd proxy sidecar needs to reach the Linkerd control plane
+    # (destination and identity services) on port 8080 in the linkerd namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: linkerd
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8089
+
+    # Port 5432 (postgres) is NOT in this allowlist.
+    # Because policyTypes includes Egress, any egress not matching the rules
+    # above is silently dropped — workers cannot reach postgres:5432.
