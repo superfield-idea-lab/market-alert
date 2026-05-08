@@ -13,7 +13,8 @@
  * can call them in-process during the recovery completion flow.
  */
 
-import { sql } from './index';
+import { sql as defaultSql } from './index';
+import type postgres from 'postgres';
 
 /** PBKDF2 iteration count — matches OWASP recommended minimum for SHA-256. */
 const PBKDF2_ITERATIONS = 210_000;
@@ -110,12 +111,21 @@ export async function verifyPassphrase(passphrase: string, storedHash: string): 
  * Store a new recovery passphrase for a user, replacing any existing ones.
  * The plaintext passphrase is hashed before storage — callers must pass the
  * raw passphrase, not a pre-hashed value.
+ *
+ * @param userId     - The user's entity ID.
+ * @param passphrase - The plaintext recovery passphrase to hash and store.
+ * @param db         - Optional database connection (defaults to the module pool).
+ *                     Pass a test-specific pool to avoid coupling to the module singleton.
  */
-export async function setRecoveryPassphrase(userId: string, passphrase: string): Promise<void> {
+export async function setRecoveryPassphrase(
+  userId: string,
+  passphrase: string,
+  db: postgres.Sql = defaultSql,
+): Promise<void> {
   const hash = await hashPassphrase(passphrase);
   // Replace all previous passphrases for this user
-  await sql`DELETE FROM recovery_passphrases WHERE user_id = ${userId}`;
-  await sql`
+  await db`DELETE FROM recovery_passphrases WHERE user_id = ${userId}`;
+  await db`
     INSERT INTO recovery_passphrases (user_id, passphrase_hash)
     VALUES (${userId}, ${hash})
   `;
@@ -124,12 +134,17 @@ export async function setRecoveryPassphrase(userId: string, passphrase: string):
 /**
  * Verify a recovery passphrase for a user against the stored hash.
  * Returns true on a match, false when no passphrase is set or the value is wrong.
+ *
+ * @param userId     - The user's entity ID.
+ * @param passphrase - The plaintext recovery passphrase to verify.
+ * @param db         - Optional database connection (defaults to the module pool).
  */
 export async function checkRecoveryPassphrase(
   userId: string,
   passphrase: string,
+  db: postgres.Sql = defaultSql,
 ): Promise<boolean> {
-  const rows = await sql`
+  const rows = await db`
     SELECT passphrase_hash
     FROM recovery_passphrases
     WHERE user_id = ${userId}
@@ -145,22 +160,24 @@ export async function checkRecoveryPassphrase(
  * Revoke all passkey credentials for a user except the newly enrolled one.
  * Called after a successful recovery re-enrollment.
  *
- * @param userId          - The user whose old credentials are revoked.
+ * @param userId           - The user whose old credentials are revoked.
  * @param keepCredentialId - The newly enrolled credential to keep (optional).
  *                          When null all credentials are revoked.
+ * @param db               - Optional database connection (defaults to the module pool).
  */
 export async function revokeOldPasskeys(
   userId: string,
   keepCredentialId: string | null,
+  db: postgres.Sql = defaultSql,
 ): Promise<void> {
   if (keepCredentialId) {
-    await sql`
+    await db`
       DELETE FROM passkey_credentials
       WHERE user_id = ${userId}
         AND credential_id != ${keepCredentialId}
     `;
   } else {
-    await sql`DELETE FROM passkey_credentials WHERE user_id = ${userId}`;
+    await db`DELETE FROM passkey_credentials WHERE user_id = ${userId}`;
   }
 }
 
