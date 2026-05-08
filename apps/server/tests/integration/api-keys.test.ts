@@ -49,16 +49,18 @@ beforeAll(async () => {
   });
   await waitForServer(BASE);
 
-  // Create superuser session
-  const suSession = await createTestSession(BASE, { username: `su_${Date.now()}` });
-  superuserId = suSession.userId;
-  superuserCookie = suSession.cookie;
+  // Create users on the first server instance so they exist in the DB
+  const suName = `su_${Date.now()}`;
+  const regName = `reg_${Date.now()}`;
+  const suSession0 = await createTestSession(BASE, { username: suName });
+  superuserId = suSession0.userId;
 
-  // Create regular user session
-  const regSession = await createTestSession(BASE, { username: `reg_${Date.now()}` });
-  regularCookie = regSession.cookie;
+  const regSession0 = await createTestSession(BASE, { username: regName });
+  const _regUserId = regSession0.userId; // keep user in DB
 
-  // Restart server with the SUPERUSER_ID set to the created superuser's id
+  // Restart server with the SUPERUSER_ID set to the created superuser's id.
+  // The ephemeral JWT key is regenerated on restart, so we must re-issue
+  // session cookies against the new key after the server comes up.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -74,6 +76,15 @@ beforeAll(async () => {
     stderr: 'ignore',
   });
   await waitForServer(BASE);
+
+  // Re-issue session cookies against the new server's JWT key.
+  // createTestSession uses ON CONFLICT DO NOTHING for entity insertion,
+  // so the same username re-uses the existing entity row.
+  const suSession = await createTestSession(BASE, { username: suName });
+  superuserCookie = suSession.cookie;
+
+  const regSession = await createTestSession(BASE, { username: regName });
+  regularCookie = regSession.cookie;
 }, 120_000);
 
 afterAll(async () => {
