@@ -2,7 +2,7 @@
  * Integration tests for the append-only hash-chained audit log.
  *
  * Covers:
- *  - emitAuditEvent is called as a side-effect of a task PATCH (via task-write-boundary)
+ *  - emitAuditEvent is called as a side-effect of a user role PATCH (via admin API)
  *  - GET /api/audit/verify returns valid: true for an untampered log
  *  - GET /api/audit/verify returns 401 for unauthenticated callers
  *  - GET /api/audit/verify returns 403 for non-superusers
@@ -20,12 +20,14 @@ const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
 let server: Subprocess;
+// authCookie is always valid for the currently running server instance.
 let authCookie = '';
 let userId = '';
 
 beforeAll(async () => {
   pg = await startPostgres();
 
+  // Phase 1: start without SUPERUSER_ID to create a session and discover userId.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
@@ -34,8 +36,6 @@ beforeAll(async () => {
       AUDIT_DATABASE_URL: pg.url,
       PORT: String(PORT),
       TEST_MODE: 'true',
-      // Make the test user a superuser so we can test the verify endpoint
-      SUPERUSER_ID: '__will_be_set_after_session__',
     },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -43,11 +43,12 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session = await createTestSession(BASE);
-  userId = session.userId;
-  authCookie = session.cookie;
+  const firstSession = await createTestSession(BASE);
+  userId = firstSession.userId;
 
-  // Restart server with the SUPERUSER_ID set to the created user's id
+  // Phase 2: restart with SUPERUSER_ID set to the discovered userId.
+  // After restart the server generates a new ephemeral JWT key, so we must
+  // create a fresh session on the restarted server to get a valid cookie.
   server.kill();
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -64,6 +65,12 @@ beforeAll(async () => {
   });
 
   await waitForServer(BASE);
+
+  // Re-create the session on the new server process so the JWT is signed by
+  // the new ephemeral key and the cookie will be accepted by all tests below.
+  const session = await createTestSession(BASE, { username: firstSession.username });
+  userId = session.userId;
+  authCookie = session.cookie;
 }, 120_000);
 
 afterAll(async () => {
@@ -89,20 +96,13 @@ test('GET /api/audit/verify returns 403 for non-superuser', async () => {
 });
 
 test('GET /api/audit/verify returns valid: true for superuser on untampered log', async () => {
-  // Create a task to generate an audit event via PATCH
-  const createRes = await fetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: authCookie },
-    body: JSON.stringify({ name: 'Audit chain task', priority: 'medium' }),
-  });
-  expect(createRes.status).toBe(201);
-  const task = await createRes.json();
-
-  // PATCH triggers emitAuditEvent
-  const patchRes = await fetch(`${BASE}/api/tasks/${task.id}`, {
+  // Trigger an audit event via PATCH /api/admin/users/:id (role change).
+  // The admin PATCH handler emits a user.role_change audit event when the
+  // role value differs from the current value.
+  const patchRes = await fetch(`${BASE}/api/admin/users/${userId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Cookie: authCookie },
-    body: JSON.stringify({ status: 'done' }),
+    body: JSON.stringify({ role: 'analyst' }),
   });
   expect(patchRes.status).toBe(200);
 
@@ -116,8 +116,8 @@ test('GET /api/audit/verify returns valid: true for superuser on untampered log'
 });
 
 test('GET /api/audit/verify returns valid: true for empty log', async () => {
-  // A fresh server / container may have no audit events yet (before the first PATCH above)
-  // but since we've already patched above, this just checks the same endpoint returns true.
+  // Verifies the same endpoint again — at this point at least one audit event
+  // has been written; the chain must still be valid.
   const res = await fetch(`${BASE}/api/audit/verify`, {
     headers: { Cookie: authCookie },
   });
@@ -133,11 +133,12 @@ async function waitForServer(base: string): Promise<void> {
   const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      await fetch(`${base}/api/tasks`);
-      return;
+      const res = await fetch(`${base}/health/live`);
+      if (res.ok) return;
     } catch {
-      await Bun.sleep(300);
+      // server not yet up
     }
+    await Bun.sleep(300);
   }
   throw new Error(`Server at ${base} did not become ready within ${SERVER_READY_TIMEOUT_MS}ms`);
 }
