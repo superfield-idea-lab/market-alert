@@ -143,8 +143,10 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // Get a final session valid for this server process.
-  const session3 = await createTestSession(BASE, { username: `bdm_audit3_${Date.now()}` });
+  // Re-create a session for session2's username so the JWT is signed by the
+  // new ephemeral key. Using the same username returns the same userId, which
+  // matches the SUPERUSER_ID set above and grants audit-verify access.
+  const session3 = await createTestSession(BASE, { username: session2.username });
   userId = session3.userId;
   authCookie = session3.cookie;
 }, 120_000);
