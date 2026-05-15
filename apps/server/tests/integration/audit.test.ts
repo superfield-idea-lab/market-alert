@@ -9,6 +9,7 @@
  */
 import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
+import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
 
@@ -19,6 +20,7 @@ const REPO_ROOT = new URL('../../../../', import.meta.url).pathname;
 const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
+let adminSql: ReturnType<typeof postgres>;
 let server: Subprocess;
 // authCookie is always valid for the currently running server instance.
 let authCookie = '';
@@ -26,6 +28,29 @@ let userId = '';
 
 beforeAll(async () => {
   pg = await startPostgres();
+
+  // Create audit_events table using an admin connection (same schema as
+  // production init-remote.ts). migrateAudit() only does a SELECT 1 so the
+  // server cannot create the table at startup when running as a low-privilege
+  // role in production. In tests the container user has full DDL rights.
+  adminSql = postgres(pg.url, { max: 5, idle_timeout: 10 });
+  await adminSql.unsafe(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      before JSONB,
+      after JSONB,
+      ip TEXT,
+      user_agent TEXT,
+      correlation_id TEXT,
+      ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL
+    )
+  `);
 
   // Phase 1: start without SUPERUSER_ID to create a session and discover userId.
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
@@ -75,6 +100,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.kill();
+  await adminSql?.end();
   await pg?.stop();
 });
 
