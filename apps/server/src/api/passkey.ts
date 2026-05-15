@@ -626,8 +626,11 @@ export async function handlePasskeyRequest(
       loginRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
       return loginRes;
     } catch (err) {
+      // Treat any unhandled verification exception as an auth failure.
+      // Returning 401 here preserves the generic-error invariant (AUTH-C-032)
+      // and prevents internal error details from leaking to the caller.
       console.error('PASSKEY LOGIN COMPLETE ERROR:', err);
-      return json({ error: 'Authentication failed' }, 500, corsHeaders);
+      return json({ error: 'Authentication failed' }, 401, corsHeaders);
     }
   }
 
