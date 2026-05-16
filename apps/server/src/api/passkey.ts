@@ -82,14 +82,15 @@ export function getRpConfig(req: Request): { rpId: string; origin: string } {
     }
   }
 
-  // RP_ID env var pins the relying-party domain independently of the origin.
-  // Set to e.g. "superfield.co" so any *.superfield.co subdomain shares one
-  // credential namespace.  When absent, the hostname from the request is used.
-  const rpId = process.env.RP_ID ?? derivedRpId;
-
-  // ORIGIN env var overrides the expected origin for cert verification.
-  // When absent (the normal demo case), derive it from the request.
-  const origin = process.env.ORIGIN ?? derivedOrigin;
+  // Both RP_ID and ORIGIN must be set together to take effect. If only one is
+  // provided the override is incomplete and we fall back to request-derived
+  // values. This prevents mismatches where one env var is set but the other
+  // is not (e.g. only RP_ID without ORIGIN), which would break WebAuthn
+  // origin validation.
+  const envRpId = process.env.RP_ID;
+  const envOrigin = process.env.ORIGIN;
+  const rpId = envRpId && envOrigin ? envRpId : derivedRpId;
+  const origin = envRpId && envOrigin ? envOrigin : derivedOrigin;
 
   return { rpId, origin };
 }
@@ -626,8 +627,11 @@ export async function handlePasskeyRequest(
       loginRes.headers.append('Set-Cookie', csrfCookieHeader(csrfToken));
       return loginRes;
     } catch (err) {
+      // Treat any unhandled verification exception as an auth failure.
+      // Returning 401 here preserves the generic-error invariant (AUTH-C-032)
+      // and prevents internal error details from leaking to the caller.
       console.error('PASSKEY LOGIN COMPLETE ERROR:', err);
-      return json({ error: 'Authentication failed' }, 500, corsHeaders);
+      return json({ error: 'Authentication failed' }, 401, corsHeaders);
     }
   }
 
