@@ -13,8 +13,10 @@ import {
   migrate,
   migrateAudit,
   migrateDictionary,
+  migrateMkt,
   sql,
 } from 'db';
+import { migrateTradeReplay } from 'db/mkt-trade-replay';
 import { registerPhase1EntityTypesWithDb } from 'db/phase1-entity-types';
 import { cleanupExpiredRevocations, startRevocationCleanup } from 'db/revocation';
 import { scrubPii } from 'core';
@@ -64,6 +66,7 @@ import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLegalHoldRequest } from './api/legal-hold';
 import { handleLabelClearanceRequest } from './api/label-clearance';
+import { handleReplayRequest } from './api/replay';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -80,6 +83,16 @@ try {
   await migrateDictionary();
 } catch (err) {
   console.warn('[db] Dictionary schema migration skipped — dictionary database unavailable:', err);
+}
+try {
+  await migrateMkt();
+} catch (err) {
+  console.warn('[db] Market-alert schema migration skipped:', err);
+}
+try {
+  await migrateTradeReplay();
+} catch (err) {
+  console.warn('[db] Phase 7 trade replay schema migration skipped:', err);
 }
 
 // Register all Phase 1 property graph entity types in the in-memory registry
@@ -473,6 +486,15 @@ export default {
     ) {
       const labelRes = await handleLabelClearanceRequest(req, url, appState);
       if (labelRes) return withTrace(labelRes);
+    }
+
+    // Phase 7: trade replay API, SSE journal stream, and structured export (issue #28).
+    // GET  /api/replay/trades/:id        — ordered journal for a seeded trade
+    // GET  /api/replay/stream            — SSE live journal event stream (Admin only)
+    // POST /api/replay/export            — compliance bundle export (Admin only)
+    if (url.pathname.startsWith('/api/replay')) {
+      const replayRes = await handleReplayRequest(req, url, appState);
+      if (replayRes) return withTrace(replayRes);
     }
 
     // Phase 8 legal hold endpoints (issue #82).

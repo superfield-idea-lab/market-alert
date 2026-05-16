@@ -16,6 +16,7 @@ import { registerFeatureFlagSchedulerJob } from './jobs/feature-flag-scheduler';
 import { registerAutolearnGardeningJob } from './jobs/autolearn-gardening';
 import { registerRetentionSchedulerJob } from './jobs/retention-scheduler';
 import { registerSoc2EvidenceCaptureJob } from './jobs/soc2-evidence-capture';
+import { registerMktFixtureRefreshJob } from './jobs/mkt-fixture-refresh';
 
 let scheduler: CronScheduler | null = null;
 
@@ -41,6 +42,7 @@ export function startCronScheduler(): CronScheduler {
   registerAutolearnGardeningJob(scheduler);
   registerRetentionSchedulerJob(scheduler);
   registerSoc2EvidenceCaptureJob(scheduler);
+  registerMktFixtureRefreshJob(scheduler);
 
   scheduler.start();
   return scheduler;
