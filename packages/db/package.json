@@ -40,7 +40,8 @@
     "./retention-engine": "./retention-engine.ts",
     "./retention-scheduler": "./retention-scheduler.ts",
     "./worm-mode": "./worm-mode.ts",
-    "./kms-backfill": "./kms-backfill.ts"
+    "./kms-backfill": "./kms-backfill.ts",
+    "./mkt-alert-channel": "./mkt-alert-channel.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
