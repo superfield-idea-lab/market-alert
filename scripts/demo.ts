@@ -16,7 +16,7 @@
  * existing cluster by name.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -416,6 +416,34 @@ async function run(command: string[], opts: RunOptions): Promise<void> {
 // ---------------------------------------------------------------------------
 // cloudflared helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Verify that docker, k3d, and kubectl are available and the Docker daemon is
+ * running. Called once at startup before any cluster or image work begins.
+ */
+export function checkPrerequisites(): void {
+  const tools: Array<{ cmd: string[]; hint: string }> = [
+    {
+      cmd: ['docker', 'info'],
+      hint: 'Docker is not running or not installed. Start Docker Desktop (or the daemon) and retry.',
+    },
+    {
+      cmd: ['k3d', 'version'],
+      hint: 'k3d is not installed or not on PATH.\n  Install: https://k3d.io/#installation',
+    },
+    {
+      cmd: ['kubectl', 'version', '--client'],
+      hint: 'kubectl is not installed or not on PATH.\n  Install: https://kubernetes.io/docs/tasks/tools/',
+    },
+  ];
+
+  for (const { cmd, hint } of tools) {
+    const result = Bun.spawnSync(cmd, { stdout: 'pipe', stderr: 'pipe' });
+    if (result.exitCode !== 0) {
+      throw new Error(hint);
+    }
+  }
+}
 
 /**
  * Verify cloudflared is available on the PATH and fail fast with install
@@ -869,6 +897,7 @@ async function main(): Promise<void> {
   }
 
   // Fail fast before spending time on cluster/image work.
+  checkPrerequisites();
   // Skip the cloudflared check when --no-tunnel is set (CI smoke runs against
   // localhost only and never starts a tunnel).
   if (!noTunnel) {
@@ -881,6 +910,7 @@ async function main(): Promise<void> {
   let portForward: ReturnType<typeof startPortForward> | null = null;
   let cloudflaredChild: ReturnType<typeof Bun.spawn> | null = null;
   let cleanupDone = false;
+  let teardownFailed = false;
 
   async function teardown(reason?: string) {
     if (cleanupDone) return;
@@ -905,6 +935,7 @@ async function main(): Promise<void> {
       });
       logDemo('cluster teardown', `Cluster '${config.clusterName}' deleted.`);
     } catch (err) {
+      teardownFailed = true;
       console.error(
         `[demo:cluster teardown] Failed to delete cluster: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -980,6 +1011,11 @@ async function main(): Promise<void> {
         phase: 'cluster bootstrap',
       },
     );
+    if (!existsSync(config.kubeconfigPath)) {
+      throw new Error(
+        `cluster bootstrap failed: kubeconfig was not written to ${config.kubeconfigPath}`,
+      );
+    }
 
     // Pull postgres:16-alpine directly into the k3d node's containerd rather than
     // going through docker save → ctr import. The tarball path fails with
@@ -1007,12 +1043,19 @@ async function main(): Promise<void> {
     );
 
     logDemo('database bootstrap', 'Applying dev Postgres manifests.');
-    await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml')], {
+    const devSecretsPath = join(REPO_ROOT, 'k8s', 'dev', 'dev-secrets.yaml');
+    const postgresManifestPath = join(REPO_ROOT, 'k8s', 'dev', 'postgres.yaml');
+    for (const p of [devSecretsPath, postgresManifestPath]) {
+      if (!existsSync(p)) {
+        throw new Error(`database bootstrap failed: manifest not found: ${p}`);
+      }
+    }
+    await run(['kubectl', 'apply', '-f', devSecretsPath], {
       cwd: REPO_ROOT,
       kubeconfigPath: config.kubeconfigPath,
       phase: 'database bootstrap',
     });
-    await run(['kubectl', 'apply', '-f', join(REPO_ROOT, 'k8s', 'dev', 'postgres.yaml')], {
+    await run(['kubectl', 'apply', '-f', postgresManifestPath], {
       cwd: REPO_ROOT,
       kubeconfigPath: config.kubeconfigPath,
       phase: 'database bootstrap',
@@ -1065,6 +1108,10 @@ async function main(): Promise<void> {
     await runInteractiveLoop(config);
   } finally {
     await teardown();
+  }
+
+  if (teardownFailed) {
+    process.exit(1);
   }
 }
 

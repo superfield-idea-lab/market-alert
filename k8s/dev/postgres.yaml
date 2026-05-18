@@ -72,7 +72,7 @@ spec:
                 - $(POSTGRES_USER)
                 - -d
                 - $(POSTGRES_DB)
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 3
