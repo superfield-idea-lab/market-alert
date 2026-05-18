@@ -91,11 +91,22 @@ describe('mkt_feature_flags table structure (AC1)', () => {
 // ---------------------------------------------------------------------------
 
 describe('v1 seed flags (AC2, TP1)', () => {
-  test('all 5 v1 flags exist with enabled=false', async () => {
+  test('all 5 v1 flags exist with correct default enabled state', async () => {
+    // Phase 6 scout (issue #25): trade_lifecycle was flipped to enabled=true
+    // in mkt-schema.sql when this scout merged. All other flags remain false.
+    const expectedStates: Record<string, boolean> = {
+      edgar_ingest: false,
+      alert_notify_email: false,
+      alert_notify_sms: false,
+      alert_notify_webhook: false,
+      trade_lifecycle: true, // activated by Phase 6 scout (issue #25)
+    };
     for (const key of MKT_FLAG_KEYS) {
       const flag = await getMktFlag(key, db);
       expect(flag, `flag ${key} should exist`).not.toBeNull();
-      expect(flag!.enabled, `flag ${key} should be disabled`).toBe(false);
+      expect(flag!.enabled, `flag ${key} enabled should be ${expectedStates[key]}`).toBe(
+        expectedStates[key],
+      );
     }
   });
 
