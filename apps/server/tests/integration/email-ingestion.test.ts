@@ -123,7 +123,7 @@ beforeAll(async () => {
       ENCRYPTION_DISABLED: 'true',
     },
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'inherit',
   });
 
   await waitForServer(BASE);
