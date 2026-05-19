@@ -49,13 +49,15 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  // Create superuser session
-  const suSession = await createTestSession(BASE, { username: `su_${Date.now()}` });
+  // Save usernames so we can re-authenticate after the server restarts — each
+  // restart generates a new ephemeral JWT key pair that invalidates prior cookies.
+  const suUsername = `su_${Date.now()}`;
+  const suSession = await createTestSession(BASE, { username: suUsername });
   superuserId = suSession.userId;
   superuserCookie = suSession.cookie;
 
-  // Create user A session
-  const aSession = await createTestSession(BASE, { username: `usera_${Date.now()}` });
+  const aUsername = `usera_${Date.now()}`;
+  const aSession = await createTestSession(BASE, { username: aUsername });
   userACookie = aSession.cookie;
 
   // Create user B (only need the id for the delete target)
@@ -79,6 +81,13 @@ beforeAll(async () => {
   });
 
   await waitForServer(BASE);
+
+  // Re-authenticate on the new server instance. createTestSession upserts by
+  // username so the same userIds are returned with fresh signed tokens.
+  const su2 = await createTestSession(BASE, { username: suUsername });
+  superuserCookie = su2.cookie;
+  const a2 = await createTestSession(BASE, { username: aUsername });
+  userACookie = a2.cookie;
 }, 120_000);
 
 afterAll(async () => {
