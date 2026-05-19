@@ -186,6 +186,10 @@ describe('POST /internal/ingestion/email — happy path (AC-1 / TP-1)', () => {
       }),
     });
 
+    if (res.status !== 201) {
+      const errBody = await res.text();
+      console.error(`[diag] POST /internal/ingestion/email returned ${res.status}: ${errBody}`);
+    }
     expect(res.status).toBe(201);
     const data = (await res.json()) as { id: string };
     expect(typeof data.id).toBe('string');
