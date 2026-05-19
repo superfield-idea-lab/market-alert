@@ -23,7 +23,7 @@ import { scrubPii } from 'core';
 import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
 import { handlePasskeyRequest } from './api/passkey';
 import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/task-queue';
-import { handleTasksRequest } from './api/tasks';
+import { handleTasksRequest, registerTaskEntityType } from './api/tasks';
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
 import { startCronScheduler } from './cron/boot';
@@ -100,6 +100,11 @@ try {
 // and persist each to entity_types via an idempotent INSERT … ON CONFLICT DO NOTHING.
 // Must run after migrate() so the entity_types table exists.
 await registerPhase1EntityTypesWithDb(sql);
+
+// Register the task entity type so handleTasksRequest inserts succeed.
+await registerTaskEntityType().catch((err) =>
+  console.error('[tasks] Entity type registration failed:', err),
+);
 
 // Register the CorpusChunk entity type for Phase 2 chunking.
 await registerCorpusChunkEntityType().catch((err) =>

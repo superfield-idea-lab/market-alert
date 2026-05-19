@@ -7,6 +7,15 @@ import { verifyCsrfAndAudit } from '../auth/csrf';
 import { validate } from './validation';
 import { broadcast } from '../websocket';
 import { makeJson } from '../lib/response';
+import { sql } from 'db';
+
+export async function registerTaskEntityType(): Promise<void> {
+  await sql`
+    INSERT INTO entity_types (type, schema)
+    VALUES ('task', ${sql.json({})})
+    ON CONFLICT (type) DO NOTHING
+  `;
+}
 
 // Starter task note:
 // Task CRUD currently mutates entity rows directly. That is acceptable for the

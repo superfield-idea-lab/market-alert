@@ -25,6 +25,7 @@ let server: Subprocess;
 let authCookie = '';
 let csrfToken = '';
 let userId = '';
+let username = '';
 
 beforeAll(async () => {
   pg = await startPostgres();
@@ -44,7 +45,10 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session = await createTestSession(BASE);
+  // Save username so we can re-authenticate after server restarts — each
+  // restart generates a new ephemeral JWT key pair that invalidates old cookies.
+  username = `csrf_${Date.now()}`;
+  const session = await createTestSession(BASE, { username });
   authCookie = session.cookie;
   csrfToken = session.csrfToken;
   userId = session.userId;
@@ -113,7 +117,14 @@ test('POST /api/tasks with mismatched CSRF token emits a security.csrf_mismatch 
   });
   await waitForServer(BASE);
 
-  // Create a fresh session (same userId, new CSRF token)
+  // Re-authenticate with the same username so authCookie is signed by the
+  // new key pair. createTestSession upserts by username so the same userId
+  // is returned with a fresh token.
+  const refreshed = await createTestSession(BASE, { username });
+  authCookie = refreshed.cookie;
+  csrfToken = refreshed.csrfToken;
+
+  // Create a separate fresh session for the audit event trigger.
   const session2 = await createTestSession(BASE, { username: `csrf_audit_${Date.now()}` });
 
   // Trigger a CSRF mismatch with a wrong token
