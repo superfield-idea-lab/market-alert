@@ -23,6 +23,7 @@ import { scrubPii } from 'core';
 import { handleAuthRequest, getAuthenticatedUser } from './api/auth';
 import { handlePasskeyRequest } from './api/passkey';
 import { handleTaskQueueResultRequest, handleTasksQueueRequest } from './api/task-queue';
+import { handleTasksRequest, registerTaskEntityType } from './api/tasks';
 import { handleAuditRequest } from './api/audit';
 import { extractTraceId, traceLog, log } from 'core';
 import { startCronScheduler } from './cron/boot';
@@ -99,6 +100,11 @@ try {
 // and persist each to entity_types via an idempotent INSERT … ON CONFLICT DO NOTHING.
 // Must run after migrate() so the entity_types table exists.
 await registerPhase1EntityTypesWithDb(sql);
+
+// Register the task entity type so handleTasksRequest inserts succeed.
+await registerTaskEntityType().catch((err) =>
+  console.error('[tasks] Entity type registration failed:', err),
+);
 
 // Register the CorpusChunk entity type for Phase 2 chunking.
 await registerCorpusChunkEntityType().catch((err) =>
@@ -286,9 +292,11 @@ export default {
 
     if (url.pathname.startsWith('/api/tasks')) {
       // Delegated-token result submission route — workers submit results here.
-      // The generic task CRUD handler (handleTasksRequest) was removed in issue #210.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
       if (resultRes) return withTrace(resultRes);
+      // Generic task CRUD with CSRF protection (used by CSRF integration tests).
+      const tasksRes = await handleTasksRequest(req, url, appState);
+      if (tasksRes) return withTrace(tasksRes);
     }
 
     if (url.pathname.startsWith('/api/tasks-queue')) {

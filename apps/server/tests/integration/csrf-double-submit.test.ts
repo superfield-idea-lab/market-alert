@@ -13,6 +13,7 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
+import postgres from 'postgres';
 
 const PORT = 31427;
 const BASE = `http://localhost:${PORT}`;
@@ -22,12 +23,36 @@ const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
 let server: Subprocess;
+let adminSql: ReturnType<typeof postgres>;
 let authCookie = '';
 let csrfToken = '';
 let userId = '';
+let username = '';
 
 beforeAll(async () => {
   pg = await startPostgres();
+
+  // Create audit_events table using an admin connection. migrateAudit() only
+  // does a SELECT 1 probe so the server cannot create the table at startup.
+  // GET /api/audit/verify queries this table and returns 500 if it is absent.
+  adminSql = postgres(pg.url, { max: 5, idle_timeout: 10 });
+  await adminSql.unsafe(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      before JSONB,
+      after JSONB,
+      ip TEXT,
+      user_agent TEXT,
+      correlation_id TEXT,
+      ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL
+    )
+  `);
 
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -44,7 +69,10 @@ beforeAll(async () => {
 
   await waitForServer(BASE);
 
-  const session = await createTestSession(BASE);
+  // Save username so we can re-authenticate after server restarts — each
+  // restart generates a new ephemeral JWT key pair that invalidates old cookies.
+  username = `csrf_${Date.now()}`;
+  const session = await createTestSession(BASE, { username });
   authCookie = session.cookie;
   csrfToken = session.csrfToken;
   userId = session.userId;
@@ -52,6 +80,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.kill();
+  await adminSql?.end();
   await pg?.stop();
 });
 
@@ -113,7 +142,14 @@ test('POST /api/tasks with mismatched CSRF token emits a security.csrf_mismatch 
   });
   await waitForServer(BASE);
 
-  // Create a fresh session (same userId, new CSRF token)
+  // Re-authenticate with the same username so authCookie is signed by the
+  // new key pair. createTestSession upserts by username so the same userId
+  // is returned with a fresh token.
+  const refreshed = await createTestSession(BASE, { username });
+  authCookie = refreshed.cookie;
+  csrfToken = refreshed.csrfToken;
+
+  // Create a separate fresh session for the audit event trigger.
   const session2 = await createTestSession(BASE, { username: `csrf_audit_${Date.now()}` });
 
   // Trigger a CSRF mismatch with a wrong token

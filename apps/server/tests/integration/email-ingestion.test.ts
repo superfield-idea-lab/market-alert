@@ -50,7 +50,7 @@ const TEST_PASSWORDS = {
   email_ingest: 'email_ingest_test_pw',
 };
 
-const DB_NAMES = { app: 'superfield_app' };
+const DB_NAMES = { app: 'superfield_app', audit: 'superfield_audit' };
 
 function makeRoleUrl(adminUrl: string, db: string, role: string, password: string): string {
   const u = new URL(adminUrl);
@@ -107,21 +107,23 @@ beforeAll(async () => {
 
   // Start the server pointing at the test container.
   // DATABASE_URL is used by app_rw (the server's normal pool).
-  // AUDIT_DATABASE_URL is used by the audit service.
+  // AUDIT_DATABASE_URL must use audit_w credentials — init-remote revokes PUBLIC
+  // CONNECT on superfield_audit and only grants it to audit_w explicitly.
   // ENCRYPTION_DISABLED=true skips field encryption for test speed.
   const appRwUrl = makeRoleUrl(pg.url, DB_NAMES.app, 'app_rw', TEST_PASSWORDS.app);
+  const auditWUrl = makeRoleUrl(pg.url, DB_NAMES.audit, 'audit_w', TEST_PASSWORDS.audit);
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       DATABASE_URL: appRwUrl,
-      AUDIT_DATABASE_URL: pg.url,
+      AUDIT_DATABASE_URL: auditWUrl,
       PORT: String(PORT),
       TEST_MODE: 'true',
       ENCRYPTION_DISABLED: 'true',
     },
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'inherit',
   });
 
   await waitForServer(BASE);
@@ -184,6 +186,10 @@ describe('POST /internal/ingestion/email — happy path (AC-1 / TP-1)', () => {
       }),
     });
 
+    if (res.status !== 201) {
+      const errBody = await res.text();
+      console.error(`[diag] POST /internal/ingestion/email returned ${res.status}: ${errBody}`);
+    }
     expect(res.status).toBe(201);
     const data = (await res.json()) as { id: string };
     expect(typeof data.id).toBe('string');
