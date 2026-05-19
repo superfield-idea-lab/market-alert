@@ -19,7 +19,6 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { stubBeforeInstallPrompt } from '../helpers/pwa';
 
 // ---------------------------------------------------------------------------
 // Manifest JSON validation
@@ -133,53 +132,6 @@ test('app shell HTML has Apple PWA meta tags', async ({ page }) => {
 // Install prompt — beforeinstallprompt scenario
 // ---------------------------------------------------------------------------
 
-test('beforeinstallprompt can be suppressed via preventDefault', async ({ page }, testInfo) => {
-  // The MobileInstallPage registers a beforeinstallprompt listener that calls
-  // e.preventDefault() to suppress the browser's native mini-infobar.  That
-  // page is only rendered for mobile UA profiles; skip on desktop-chrome.
-  if (testInfo.project.name === 'desktop-chrome') {
-    test.skip();
-    return;
-  }
-
-  await page.goto('/');
-
-  const handle = await stubBeforeInstallPrompt(page);
-
-  // Verify the app called e.preventDefault() to suppress the mini-infobar.
-  expect(await handle.wasDefaultPrevented()).toBe(true);
-});
-
-test('install banner renders on Android Chrome when beforeinstallprompt fires', async ({
-  page,
-}, testInfo) => {
-  // Only assert the banner on the android-chrome project profile
-  if (testInfo.project.name !== 'android-chrome') {
-    test.skip();
-    return;
-  }
-
-  // Navigate first so the page is loaded before stubbing
-  await page.goto('/');
-
-  // Mobile install gate is shown for non-standalone Android visitors.
-  // The heading should be visible.
-  await expect(page.getByRole('heading', { name: 'Instantly Install Mobile App' })).toBeVisible();
-});
-
-test('iOS Safari install banner renders for non-standalone iOS visitors', async ({
-  page,
-}, testInfo) => {
-  if (testInfo.project.name !== 'ios-safari') {
-    test.skip();
-    return;
-  }
-
-  await page.goto('/');
-
-  // iOS Safari visitors land on MobileInstallPage
-  await expect(page.getByRole('heading', { name: 'Instantly Install Mobile App' })).toBeVisible();
-
-  const showStepsButton = page.getByRole('button', { name: 'Show install steps' });
-  await expect(showStepsButton).toBeVisible();
-});
+// MobileInstallPage and MobileGate have been removed from App.tsx.
+// The install-prompt beforeinstallprompt tests and mobile install banner
+// tests that previously tested those deleted components are removed.

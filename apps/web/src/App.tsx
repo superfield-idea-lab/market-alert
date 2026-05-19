@@ -1,63 +1,18 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Settings, User, Smartphone, Shield, BookOpen, BarChart2 } from 'lucide-react';
-import { PwaDemoPage } from './pages/pwa-demo';
+import { Bell, ClipboardList, Settings, Shield, User } from 'lucide-react';
 import { AdminDashboard } from './pages/admin-dashboard';
-import { MobileInstallPage } from './pages/mobile-install';
 import { SettingsPage } from './pages/settings';
-import { WikiViewPage } from './pages/wiki-view';
-import { CampaignAnalysisPage } from './pages/campaign-analysis';
-import { usePlatform } from './hooks/use-platform';
-import { isDismissalActive, DISMISSED_KEY } from './components/pwa/install-prompt';
+import TraderPage from './pages/trader';
+import TradeProposalForm from './components/TradeProposalForm';
 
-/** Returns true when the visitor is on a mobile platform (android or ios) */
-function isMobilePlatform(os: string): boolean {
-  return os === 'android' || os === 'ios';
-}
-
-/**
- * Mobile install gate wrapper.
- *
- * Renders MobileInstallPage for mobile non-standalone visitors who have not
- * already dismissed (within 90 days) or skipped for the session.
- * Falls through to the main app otherwise.
- */
-function MobileGate({ children }: { children: React.ReactNode }) {
-  const { os, isStandalone } = usePlatform();
-  const [sessionSkipped, setSessionSkipped] = useState(false);
-
-  // Check dismissal TTL from localStorage
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(DISMISSED_KEY) : null;
-  const dismissed = isDismissalActive(stored);
-
-  const shouldShowGate = isMobilePlatform(os) && !isStandalone && !dismissed && !sessionSkipped;
-
-  if (shouldShowGate) {
-    return (
-      <MobileInstallPage
-        onSkip={() => setSessionSkipped(true)}
-        onDone={() => {
-          // Force re-render — the dismissal or install state has changed.
-          // isDismissalActive will re-read localStorage on next render.
-          setSessionSkipped(true);
-        }}
-      />
-    );
-  }
-
-  return <>{children}</>;
-}
+type ActiveView = 'alerts' | 'trade-proposal' | 'settings' | 'admin';
 
 function App() {
   const { user, logout, loading } = useAuth();
 
-  // Core Layout State
-  const [activeView, setActiveView] = useState<'settings' | 'pwa' | 'admin' | 'wiki' | 'campaign'>(
-    'wiki',
-  );
-  // Default customer ID for wiki view — shows most-recently-viewed or a placeholder.
-  const [wikiCustomerId] = useState<string>('demo-customer');
+  const [activeView, setActiveView] = useState<ActiveView>('alerts');
 
   if (loading) {
     return (
@@ -76,7 +31,7 @@ function App() {
 
   return (
     <div className="flex h-screen w-full bg-zinc-50 font-sans overflow-hidden text-zinc-900">
-      {/* Left Sidebar - Extremely slim icon navigation */}
+      {/* Left Sidebar — slim icon navigation */}
       <nav className="w-16 shrink-0 border-r border-zinc-200 bg-white flex flex-col items-center py-6 justify-between z-10">
         <div className="flex flex-col items-center gap-6">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm">
@@ -84,40 +39,43 @@ function App() {
           </div>
 
           <div className="flex flex-col gap-4 mt-4 w-full px-2">
+            {/* Alerts — default landing view */}
+            <button
+              onClick={() => setActiveView('alerts')}
+              title="Alerts"
+              data-testid="nav-alerts"
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'alerts' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+            >
+              <Bell size={20} strokeWidth={2.5} />
+            </button>
+
+            {/* Trade Proposal */}
+            <button
+              onClick={() => setActiveView('trade-proposal')}
+              title="Trade Proposal"
+              data-testid="nav-trade-proposal"
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'trade-proposal' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+            >
+              <ClipboardList size={20} strokeWidth={2.5} />
+            </button>
+
+            {/* Settings */}
             <button
               onClick={() => setActiveView('settings')}
+              title="Settings"
+              data-testid="nav-settings"
               className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'settings' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
             >
               <Settings size={20} strokeWidth={2.5} />
             </button>
-            <button
-              onClick={() => setActiveView('pwa')}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'pwa' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-              title="Mobile Recording"
-            >
-              <Smartphone size={20} strokeWidth={2.5} />
-            </button>
-            <button
-              onClick={() => setActiveView('wiki')}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'wiki' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-              title="Wiki"
-              data-testid="nav-wiki"
-            >
-              <BookOpen size={20} strokeWidth={2.5} />
-            </button>
-            <button
-              onClick={() => setActiveView('campaign')}
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'campaign' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-              title="Campaign Analysis"
-              data-testid="nav-campaign"
-            >
-              <BarChart2 size={20} strokeWidth={2.5} />
-            </button>
+
+            {/* Admin — only for privileged users */}
             {canAccessAdmin && (
               <button
                 onClick={() => setActiveView('admin')}
-                className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
                 title="Admin Dashboard"
+                data-testid="nav-admin"
+                className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
               >
                 <Shield size={20} strokeWidth={2.5} />
               </button>
@@ -138,18 +96,16 @@ function App() {
       {/* Main Application Area */}
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 flex flex-col bg-white">
-          {/* App Content */}
           <div className="flex-1 overflow-hidden overflow-y-auto">
-            {activeView === 'pwa' && <PwaDemoPage />}
-            {activeView === 'wiki' && <WikiViewPage customerId={wikiCustomerId} />}
-            {activeView === 'campaign' && <CampaignAnalysisPage />}
+            {activeView === 'alerts' && <TraderPage />}
+            {activeView === 'trade-proposal' && <TradeProposalForm />}
+            {activeView === 'settings' && <SettingsPage />}
             {activeView === 'admin' && canAccessAdmin && <AdminDashboard />}
             {activeView === 'admin' && !canAccessAdmin && (
               <div className="p-8 text-zinc-400 text-sm">
                 Access denied. Admin privileges required.
               </div>
             )}
-            {activeView === 'settings' && <SettingsPage />}
           </div>
         </div>
       </main>
@@ -160,9 +116,7 @@ function App() {
 export default function Root() {
   return (
     <AuthProvider>
-      <MobileGate>
-        <App />
-      </MobileGate>
+      <App />
     </AuthProvider>
   );
 }

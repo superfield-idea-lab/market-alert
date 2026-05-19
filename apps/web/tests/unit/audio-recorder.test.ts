@@ -279,10 +279,3 @@ describe('use-audio-recorder module exports', () => {
     expect(mod.BACKGROUND_STATE_KEY.length).toBeGreaterThan(0);
   });
 });
-
-describe('AudioRecorder component exports', () => {
-  test('AudioRecorder is exported as a function', async () => {
-    const mod = await import('../../src/components/pwa/audio-recorder.js');
-    expect(typeof mod.AudioRecorder).toBe('function');
-  });
-});
