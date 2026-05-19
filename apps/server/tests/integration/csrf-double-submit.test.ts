@@ -13,6 +13,7 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
+import postgres from 'postgres';
 
 const PORT = 31427;
 const BASE = `http://localhost:${PORT}`;
@@ -22,6 +23,7 @@ const SERVER_ENTRY = 'apps/server/src/index.ts';
 
 let pg: PgContainer;
 let server: Subprocess;
+let adminSql: ReturnType<typeof postgres>;
 let authCookie = '';
 let csrfToken = '';
 let userId = '';
@@ -29,6 +31,28 @@ let username = '';
 
 beforeAll(async () => {
   pg = await startPostgres();
+
+  // Create audit_events table using an admin connection. migrateAudit() only
+  // does a SELECT 1 probe so the server cannot create the table at startup.
+  // GET /api/audit/verify queries this table and returns 500 if it is absent.
+  adminSql = postgres(pg.url, { max: 5, idle_timeout: 10 });
+  await adminSql.unsafe(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      before JSONB,
+      after JSONB,
+      ip TEXT,
+      user_agent TEXT,
+      correlation_id TEXT,
+      ts TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL
+    )
+  `);
 
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
@@ -56,6 +80,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   server?.kill();
+  await adminSql?.end();
   await pg?.stop();
 });
 
