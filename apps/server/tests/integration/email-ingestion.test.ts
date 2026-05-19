@@ -115,7 +115,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       DATABASE_URL: appRwUrl,
-      AUDIT_DATABASE_URL: pg.url,
+      AUDIT_DATABASE_URL: dbUrl(pg.url, 'superfield_audit'),
       PORT: String(PORT),
       TEST_MODE: 'true',
       ENCRYPTION_DISABLED: 'true',
