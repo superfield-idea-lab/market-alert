@@ -9,6 +9,9 @@
  *   // pg.stop() — removes the container
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { cleanupStaleContainers, addProcess, removeProcess } from './cleanup';
 
@@ -77,6 +80,15 @@ async function startPostgresWithImage(image: string, label: string): Promise<PgC
 
   const url = `postgres://${PG_USER}:${PG_PASSWORD}@localhost:${port}/${PG_DB}`;
 
+  // Ensure the audit_events table exists in the default database. Tests that
+  // do not call runInitRemote (e.g. crm-admin-entities.test.ts) point the
+  // server's AUDIT_DATABASE_URL at this same database, and the application's
+  // emitAuditEvent path requires the table to exist before the first write.
+  // Tests that DO call runInitRemote create a separate `superfield_audit`
+  // database with its own copy of this schema, so this preload is a no-op for
+  // them.
+  await applyAuditSchema(url);
+
   return {
     url,
     containerId,
@@ -85,6 +97,41 @@ async function startPostgresWithImage(image: string, label: string): Promise<PgC
       Bun.spawnSync(['docker', 'stop', containerId]);
     },
   };
+}
+
+/**
+ * Apply packages/db/audit-schema.sql against the given Postgres URL.
+ *
+ * Bootstraps the audit_events table (and its append-only immutability
+ * triggers) so that the application's emitAuditEvent path can write into the
+ * same default test database without hitting "relation \"audit_events\" does
+ * not exist" (issue #66).
+ */
+async function applyAuditSchema(pgUrl: string): Promise<void> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, 'audit-schema.sql'),
+    resolve(here, '../packages/db/audit-schema.sql'),
+    resolve(process.cwd(), 'packages/db/audit-schema.sql'),
+  ];
+  let schemaSql: string | undefined;
+  for (const candidate of candidates) {
+    try {
+      schemaSql = readFileSync(candidate, 'utf-8');
+      break;
+    } catch {
+      // try next candidate
+    }
+  }
+  if (!schemaSql) {
+    throw new Error(`Could not locate audit-schema.sql in any of: ${candidates.join(', ')}`);
+  }
+  const adminSql = postgres(pgUrl, { max: 1, connect_timeout: 10 });
+  try {
+    await adminSql.unsafe(schemaSql);
+  } finally {
+    await adminSql.end({ timeout: 5 });
+  }
 }
 
 async function getContainerPortWithRetry(containerId: string): Promise<number> {
