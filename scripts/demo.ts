@@ -63,7 +63,7 @@ interface RunOptions {
   phase: string;
 }
 
-const CLUSTER_PREFIX = 'superfield-demo';
+const CLUSTER_PREFIX = 'superfield-market-alert';
 const NAMESPACE = 'default';
 const IMAGE_REPO = 'superfield-demo-app';
 const DB_HOST = 'superfield-dev-postgres';
@@ -110,9 +110,26 @@ function randomPort(): number {
   return Math.floor(Math.random() * (65535 - 49152 + 1)) + 49152;
 }
 
-/** Generate a unique cluster name with a short random suffix. */
-function randomClusterName(): string {
-  return `${CLUSTER_PREFIX}-${Math.random().toString(36).slice(2, 8)}`;
+/** Return the short git commit hash, falling back to a random suffix if git is unavailable. */
+function gitShortHash(): string {
+  try {
+    const result = Bun.spawnSync(['git', 'rev-parse', '--short', 'HEAD'], {
+      cwd: REPO_ROOT,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (result.exitCode === 0) {
+      return new TextDecoder().decode(result.stdout).trim();
+    }
+  } catch {
+    // fall through to random fallback
+  }
+  return Math.random().toString(36).slice(2, 9);
+}
+
+/** Generate a cluster name scoped to the current git commit for container traceability. */
+function defaultClusterName(): string {
+  return `${CLUSTER_PREFIX}-${gitShortHash()}`;
 }
 
 function yamlValue(value: string): string {
@@ -141,7 +158,7 @@ export function demoConfig(
   } = {},
 ): DemoConfig {
   const clusterName =
-    input.clusterName ?? process.env.SUPERFIELD_DEMO_CLUSTER ?? randomClusterName();
+    input.clusterName ?? process.env.SUPERFIELD_DEMO_CLUSTER ?? defaultClusterName();
 
   // dbPort is randomised so concurrent demos don't collide on the k3d
   // loadbalancer host binding.  port (the kubectl port-forward endpoint) is
