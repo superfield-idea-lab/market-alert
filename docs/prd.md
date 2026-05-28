@@ -2,7 +2,7 @@
 
 ## 1. Problem Statement
 
-Event-driven arbitrage hedge fund traders rely on fragmented detection systems—proprietary monitors and external vendors—to identify corporate actions (M&A, dividends, spinoffs). This fragmentation creates latency, missed signals, and signal-to-noise challenges that delay trade execution and reduce arbitrage window capture.
+Event-driven arbitrage hedge fund traders rely on fragmented detection systems—proprietary monitors and external vendors (Bloomberg, DealReporter, EventVestors, Bike.ai, LSEG Tora, VisualPing)—to identify corporate actions (M&A, dividends, spinoffs). This fragmentation creates latency, missed signals, and signal-to-noise challenges that delay trade execution and reduce arbitrage window capture.
 
 ## 2. Goals and Success Metrics
 
