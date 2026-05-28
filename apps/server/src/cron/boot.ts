@@ -6,7 +6,6 @@
  */
 
 import { CronScheduler } from './scheduler';
-import { registerStaleClaimRecoveryJob } from './jobs/stale-claim-recovery';
 import { registerSecurityScannerJob } from './jobs/security-scanner';
 import { registerSocComplianceReviewJob } from './jobs/soc-compliance-review';
 import { registerRuntimeTracerJob } from './jobs/runtime-tracer';
@@ -32,7 +31,6 @@ export function startCronScheduler(): CronScheduler {
   scheduler = new CronScheduler();
 
   // Register jobs
-  registerStaleClaimRecoveryJob(scheduler);
   registerSecurityScannerJob(scheduler);
   registerSocComplianceReviewJob(scheduler);
   registerRuntimeTracerJob(scheduler);

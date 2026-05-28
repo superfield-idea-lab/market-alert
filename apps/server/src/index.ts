@@ -43,7 +43,6 @@ import {
   isTestMode,
 } from './api/test-session';
 import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
-import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
@@ -418,14 +417,6 @@ export default {
     if (url.pathname.startsWith('/internal/etl/cursor/')) {
       const cursorRes = await handleEtlCursorRequest(req, url, appState);
       if (cursorRes) return withTrace(cursorRes);
-    }
-
-    // API-mediated email ingestion (POST /internal/ingestion/email)
-    // Worker DB role has no INSERT on entities — writes must go through this endpoint.
-    // Blueprint: WORKER-P-001, API-W-001. Issue #28.
-    if (url.pathname.startsWith('/internal/ingestion')) {
-      const ingestionRes = await handleIngestionRequest(req, url, appState);
-      if (ingestionRes) return withTrace(ingestionRes);
     }
 
     if (url.pathname.startsWith('/api/corpus-chunks')) {
