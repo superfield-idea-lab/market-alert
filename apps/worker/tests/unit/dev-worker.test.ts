@@ -23,8 +23,11 @@ describe('docker-compose worker service', () => {
     expect(composeText).toContain('worker:');
   });
 
-  test('worker service uses Dockerfile.worker.dev', () => {
-    expect(composeText).toContain('Dockerfile.worker.dev');
+  test('worker service uses the dev-worker target from the unified Dockerfile', () => {
+    // The unified Dockerfile replaces the legacy Dockerfile.worker.dev with a
+    // multi-stage build whose dev-worker target wires up the hot-reload entrypoint.
+    expect(composeText).toMatch(/dockerfile:\s*Dockerfile\b/);
+    expect(composeText).toMatch(/target:\s*dev-worker\b/);
   });
 
   test('worker service sets AGENT_DATABASE_URL with agent_email_ingest role', () => {
@@ -73,29 +76,43 @@ describe('docker-compose worker service', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dockerfile.worker.dev
+// Dockerfile — `dev-worker` target
+//
+// The repository consolidated dev worker container configuration into the
+// unified Dockerfile with a `dev-worker` build target (replacing the legacy
+// Dockerfile.worker.dev). We isolate the dev-worker stage so assertions stay
+// scoped to the relevant section.
 // ---------------------------------------------------------------------------
 
-describe('Dockerfile.worker.dev', () => {
-  const dockerfileText = readFileSync(
-    join(import.meta.dirname, '../../../../Dockerfile.worker.dev'),
-    'utf-8',
-  );
+describe('Dockerfile dev-worker target', () => {
+  const dockerfileText = readFileSync(join(import.meta.dirname, '../../../../Dockerfile'), 'utf-8');
 
-  test('Dockerfile.worker.dev exists and uses oven/bun:1 base', () => {
-    expect(dockerfileText).toContain('FROM oven/bun:1');
+  // The dev-worker stage runs from "FROM oven/bun:${BUN_VERSION} AS dev-worker"
+  // through the next "FROM" stage marker (or end-of-file). Extract that slice
+  // so we don't accidentally match content from other stages.
+  const devWorkerStart = dockerfileText.indexOf('AS dev-worker');
+  const devWorkerSection = (() => {
+    if (devWorkerStart < 0) return '';
+    const after = dockerfileText.slice(devWorkerStart);
+    const nextStage = after.indexOf('\nFROM ', 1);
+    return nextStage < 0 ? after : after.slice(0, nextStage);
+  })();
+
+  test('Dockerfile defines a dev-worker stage on oven/bun base', () => {
+    expect(devWorkerStart).toBeGreaterThanOrEqual(0);
+    expect(dockerfileText).toContain('FROM oven/bun:');
   });
 
-  test('Dockerfile.worker.dev copies dev-worker-entrypoint.sh', () => {
-    expect(dockerfileText).toContain('dev-worker-entrypoint.sh');
+  test('dev-worker stage copies dev-worker-entrypoint.sh', () => {
+    expect(devWorkerSection).toContain('dev-worker-entrypoint.sh');
   });
 
-  test('Dockerfile.worker.dev copies dev-codex-stub', () => {
-    expect(dockerfileText).toContain('dev-codex-stub');
+  test('dev-worker stage copies dev-codex-stub', () => {
+    expect(devWorkerSection).toContain('dev-codex-stub');
   });
 
-  test('Dockerfile.worker.dev sets CODEX_PATH to dev stub', () => {
-    expect(dockerfileText).toContain('CODEX_PATH=/app/scripts/dev-codex-stub');
+  test('dev-worker stage sets CODEX_PATH to dev stub', () => {
+    expect(devWorkerSection).toContain('CODEX_PATH=/app/scripts/dev-codex-stub');
   });
 });
 
