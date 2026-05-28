@@ -128,3 +128,36 @@ CREATE INDEX IF NOT EXISTS idx_mkt_ca_idempotency
 
 CREATE INDEX IF NOT EXISTS idx_mkt_ca_status
   ON mkt_corporate_actions (status, created_at);
+
+-- ---------------------------------------------------------------------------
+-- etl_cursors — per-source watermarks for incremental EDGAR ingestion (issue #15)
+-- ---------------------------------------------------------------------------
+--
+-- Stores one row per (source, cursor_key) pair. For EDGAR polling, the source
+-- is 'edgar' and the cursor_key is the EDGAR form type (e.g. '8-K', '8-K/A').
+-- The watermark_value is an ISO-8601 UTC timestamp representing the latest
+-- filing date seen in the last successful poll cycle for that form type.
+--
+-- Design:
+--   - On first run for a form type, no row exists — the worker inserts one.
+--   - After a successful batch, the worker advances watermark_value to the
+--     maximum filing_date seen in that batch.
+--   - The watermark is NOT advanced if any POST to the ingestion API fails
+--     with a non-2xx response (partial-batch safety).
+--   - Amended filings (e.g. 8-K/A) use an overlap_seconds column to enable
+--     re-checking a window behind the watermark, preventing missed amendments.
+--
+-- Blueprint refs: DATA-D-004 (append-only audit), WORKER-P-001 (API sole writer).
+CREATE TABLE IF NOT EXISTS etl_cursors (
+  id               TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  source           TEXT        NOT NULL,
+  cursor_key       TEXT        NOT NULL,
+  watermark_value  TEXT        NOT NULL DEFAULT '',
+  overlap_seconds  INTEGER     NOT NULL DEFAULT 0,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (source, cursor_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_etl_cursors_source_key
+  ON etl_cursors (source, cursor_key);
