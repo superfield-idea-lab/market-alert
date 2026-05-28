@@ -46,6 +46,7 @@ import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
+import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
@@ -420,6 +421,14 @@ export default {
     if (url.pathname === '/internal/ingestion/corporate-action') {
       const corpActRes = await handleCorporateActionIngestionRequest(req, url, appState);
       if (corpActRes) return withTrace(corpActRes);
+    }
+
+    // Phase 2: EDGAR ETL cursor read/write (GET|PUT /internal/etl/cursor/:source/:key).
+    // Worker reads current watermark before each poll and advances it after a
+    // successful batch. Issue #15.
+    if (url.pathname.startsWith('/internal/etl/cursor/')) {
+      const cursorRes = await handleEtlCursorRequest(req, url, appState);
+      if (cursorRes) return withTrace(cursorRes);
     }
 
     // API-mediated email ingestion (POST /internal/ingestion/email)
