@@ -43,17 +43,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS audit_events_no_update ON audit_events;
-CREATE TRIGGER audit_events_no_update
+CREATE OR REPLACE TRIGGER audit_events_no_update
     BEFORE UPDATE ON audit_events
     FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
 
-DROP TRIGGER IF EXISTS audit_events_no_delete ON audit_events;
-CREATE TRIGGER audit_events_no_delete
+CREATE OR REPLACE TRIGGER audit_events_no_delete
     BEFORE DELETE ON audit_events
     FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
 
-DROP TRIGGER IF EXISTS audit_events_no_truncate ON audit_events;
-CREATE TRIGGER audit_events_no_truncate
+CREATE OR REPLACE TRIGGER audit_events_no_truncate
     BEFORE TRUNCATE ON audit_events
     EXECUTE FUNCTION audit_events_immutable();
