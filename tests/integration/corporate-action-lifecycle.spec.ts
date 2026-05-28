@@ -48,7 +48,7 @@ import { migrate, migrateMkt } from '../../packages/db/index';
 import {
   findCorporateActionsNeedingAdvance,
   advanceCorporateAction,
-  disputeCorporateAction,
+  disputeCorporateAction as _disputeCorporateAction,
   getCorporateActionJournal,
   getCorporateActionStateById,
   CorporateActionTransitionError,
