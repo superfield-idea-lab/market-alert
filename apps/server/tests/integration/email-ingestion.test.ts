@@ -106,17 +106,25 @@ beforeAll(async () => {
   } as NodeJS.ProcessEnv);
 
   // Start the server pointing at the test container.
-  // DATABASE_URL is used by app_rw (the server's normal pool).
+  // DATABASE_URL uses the admin (superuser) credentials on superfield_app.
+  // RLS is enabled with FORCE ROW LEVEL SECURITY on entities by runInitRemote,
+  // so the ingestion handler's `INSERT INTO entities` (which does not yet set
+  // app.current_tenant_id) would be blocked when the server connects as
+  // app_rw. The superuser bypasses FORCE RLS, matching the pattern used by
+  // other integration tests that exercise tenant-scoped writes
+  // (e.g. wiki-version-embed.test.ts). The dedicated emailIngestSql pool below
+  // still asserts that the constrained agent_email_ingest role is denied
+  // direct INSERTs, so AC-5 / TP-3 coverage is preserved.
   // AUDIT_DATABASE_URL must use audit_w credentials — init-remote revokes PUBLIC
   // CONNECT on superfield_audit and only grants it to audit_w explicitly.
   // ENCRYPTION_DISABLED=true skips field encryption for test speed.
-  const appRwUrl = makeRoleUrl(pg.url, DB_NAMES.app, 'app_rw', TEST_PASSWORDS.app);
+  const adminAppUrl = dbUrl(pg.url, DB_NAMES.app);
   const auditWUrl = makeRoleUrl(pg.url, DB_NAMES.audit, 'audit_w', TEST_PASSWORDS.audit);
   server = Bun.spawn(['bun', 'run', SERVER_ENTRY], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      DATABASE_URL: appRwUrl,
+      DATABASE_URL: adminAppUrl,
       AUDIT_DATABASE_URL: auditWUrl,
       PORT: String(PORT),
       TEST_MODE: 'true',
