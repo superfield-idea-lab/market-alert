@@ -1,55 +1,21 @@
 /**
  * Unit tests for GET /api/admin/task-queue — admin task queue monitoring endpoint.
  *
- * These tests validate the route handler logic (auth, query parsing, field
- * exclusion) by mocking the database layer and auth helpers. No live database
- * connection is required.
+ * These tests exercise the admin route handler logic (auth, query parsing,
+ * field exclusion) by patching the two upstream functions the route depends on
+ * (`getAuthenticatedUser` for the session, `listTasksForAdmin` for the DB
+ * query) via `vi.spyOn`. We use `vi.spyOn` rather than `vi.mock` because the
+ * `vi.mock` hoisting interacts badly with bun's path-aliased module resolution
+ * for `db/task-queue` — see the legacy version of this file for context.
+ *
+ * The spy pattern is the same one used in users-api.test.ts and keeps the
+ * total `vi.*` mock count from increasing versus the pre-change `origin/main`.
  */
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-
-// ---------------------------------------------------------------------------
-// Mocks — vi.hoisted ensures mock fns are available when vi.mock factories
-// execute (vi.mock calls are hoisted above imports by vitest).
-// ---------------------------------------------------------------------------
-
-const { mockListTasksForAdmin, mockGetAuthenticatedUser } = vi.hoisted(() => ({
-  mockListTasksForAdmin: vi.fn(),
-  mockGetAuthenticatedUser: vi.fn(),
-}));
-
-vi.mock('db/api-keys', () => ({
-  createApiKey: vi.fn(),
-  listApiKeys: vi.fn(),
-  deleteApiKey: vi.fn(),
-  authenticateApiKey: vi.fn(),
-}));
-
-vi.mock('db/task-queue', () => ({
-  listTasksForAdmin: mockListTasksForAdmin,
-}));
-
-vi.mock('../../src/policies/audit-service', () => ({
-  emitAuditEvent: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('../../src/api/auth', () => ({
-  getAuthenticatedUser: mockGetAuthenticatedUser,
-  getCorsHeaders: () => ({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Credentials': 'true',
-  }),
-}));
-
-vi.mock('../../src/lib/response', async () => {
-  const actual =
-    await vi.importActual<typeof import('../../src/lib/response')>('../../src/lib/response');
-  return {
-    ...actual,
-    isSuperuser: (id: string) => id === 'superuser-id',
-  };
-});
-
+import * as authModule from '../../src/api/auth';
+import * as taskQueueModule from 'db/task-queue';
+import * as accessModule from '../../src/lib/access';
 import { handleAdminRequest } from '../../src/api/admin';
 
 // ---------------------------------------------------------------------------
@@ -70,7 +36,7 @@ async function jsonBody(res: Response): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Sample data
+// Sample data — shape mirrors TaskQueueAdminRow from packages/db/task-queue.ts
 // ---------------------------------------------------------------------------
 
 const sampleTask = {
@@ -78,7 +44,10 @@ const sampleTask = {
   idempotency_key: 'idem-1',
   agent_type: 'coding',
   job_type: 'run-test',
-  status: 'pending',
+  // The status field is typed as the literal union TaskQueueStatus exported
+  // from db/task-queue; use the literal 'pending' (not a widened string) so
+  // TypeScript narrows correctly when feeding the row into the spy.
+  status: 'pending' as const,
   correlation_id: null,
   created_by: 'user-abc',
   claimed_by: null,
@@ -98,15 +67,32 @@ const sampleTask = {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Set the authenticated user for the next handler call. Returns the spy so
+ * tests can also assert against it when needed.
+ */
+function asUser(user: { id: string; username: string } | null) {
+  return vi.spyOn(authModule, 'getAuthenticatedUser').mockResolvedValue(user);
+}
+
+const SUPERADMIN = { id: 'superuser-id', username: 'admin' } as const;
+
 describe('GET /api/admin/task-queue', () => {
   const originalEnv = process.env.SUPERUSER_ID;
 
   beforeEach(() => {
-    vi.clearAllMocks();
     process.env.SUPERUSER_ID = 'superuser-id';
+    // canManageCrmEntities reads from the DB; for the admin task-queue route it
+    // never gates the response, but admin.ts evaluates it on every request.
+    // Stub it to a deterministic `false` so we don't need a live DB.
+    vi.spyOn(accessModule, 'canManageCrmEntities').mockResolvedValue(false);
+    // Default the task-queue lookup to an empty list. Individual tests
+    // override the return value with `.mockResolvedValue(...)` as needed.
+    vi.spyOn(taskQueueModule, 'listTasksForAdmin').mockResolvedValue([]);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (originalEnv === undefined) {
       delete process.env.SUPERUSER_ID;
     } else {
@@ -117,7 +103,7 @@ describe('GET /api/admin/task-queue', () => {
   // ── Auth / authorisation ────────────────────────────────────────────────
 
   test('returns 401 for unauthenticated caller', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue(null);
+    asUser(null);
     const { req, url } = makeRequest('/api/admin/task-queue');
     const res = await handleAdminRequest(req, url, appState);
     expect(res).not.toBeNull();
@@ -127,7 +113,7 @@ describe('GET /api/admin/task-queue', () => {
   });
 
   test('returns 403 for non-superadmin caller', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'regular-user', username: 'bob' });
+    asUser({ id: 'regular-user', username: 'bob' });
     const { req, url } = makeRequest('/api/admin/task-queue');
     const res = await handleAdminRequest(req, url, appState);
     expect(res).not.toBeNull();
@@ -139,8 +125,8 @@ describe('GET /api/admin/task-queue', () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test('superadmin can retrieve task queue entries', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([sampleTask]);
+    asUser(SUPERADMIN);
+    vi.mocked(taskQueueModule.listTasksForAdmin).mockResolvedValue([sampleTask]);
 
     const { req, url } = makeRequest('/api/admin/task-queue');
     const res = await handleAdminRequest(req, url, appState);
@@ -159,15 +145,13 @@ describe('GET /api/admin/task-queue', () => {
   });
 
   test('response does not contain payload or delegated_token fields', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    // Simulate a row that would have these fields if included
-    mockListTasksForAdmin.mockResolvedValue([sampleTask]);
+    asUser(SUPERADMIN);
+    vi.mocked(taskQueueModule.listTasksForAdmin).mockResolvedValue([sampleTask]);
 
     const { req, url } = makeRequest('/api/admin/task-queue');
     const res = await handleAdminRequest(req, url, appState);
     const body = (await jsonBody(res!)) as { tasks: Record<string, unknown>[] };
 
-    // The db query itself excludes these columns; verify the mock contract
     expect(body.tasks[0]).not.toHaveProperty('payload');
     expect(body.tasks[0]).not.toHaveProperty('delegated_token');
   });
@@ -175,19 +159,18 @@ describe('GET /api/admin/task-queue', () => {
   // ── Query parameter: status ─────────────────────────────────────────────
 
   test('status filter is passed to listTasksForAdmin', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?status=running');
     await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'running' }),
     );
   });
 
   test('returns 400 for invalid status value', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?status=invalid');
     const res = await handleAdminRequest(req, url, appState);
@@ -199,13 +182,12 @@ describe('GET /api/admin/task-queue', () => {
   // ── Query parameter: agent_type ─────────────────────────────────────────
 
   test('agent_type filter is passed to listTasksForAdmin', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?agent_type=coding');
     await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
       expect.objectContaining({ agent_type: 'coding' }),
     );
   });
@@ -213,13 +195,12 @@ describe('GET /api/admin/task-queue', () => {
   // ── Pagination ──────────────────────────────────────────────────────────
 
   test('pagination works correctly with limit and offset', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?limit=10&offset=20');
     const res = await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 10, offset: 20 }),
     );
     const body = (await jsonBody(res!)) as { limit: number; offset: number };
@@ -228,23 +209,23 @@ describe('GET /api/admin/task-queue', () => {
   });
 
   test('limit is capped at 200', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?limit=999');
     await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 200 }),
+    );
   });
 
   test('defaults to limit=50 and offset=0 when omitted', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue');
     await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 50, offset: 0 }),
     );
   });
@@ -252,13 +233,12 @@ describe('GET /api/admin/task-queue', () => {
   // ── Combined filters ───────────────────────────────────────────────────
 
   test('supports combined status and agent_type filters', async () => {
-    mockGetAuthenticatedUser.mockResolvedValue({ id: 'superuser-id', username: 'admin' });
-    mockListTasksForAdmin.mockResolvedValue([]);
+    asUser(SUPERADMIN);
 
     const { req, url } = makeRequest('/api/admin/task-queue?status=pending&agent_type=analysis');
     await handleAdminRequest(req, url, appState);
 
-    expect(mockListTasksForAdmin).toHaveBeenCalledWith(
+    expect(taskQueueModule.listTasksForAdmin).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'pending', agent_type: 'analysis' }),
     );
   });

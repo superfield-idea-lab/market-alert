@@ -38,7 +38,12 @@ vi.mock('croner', () => {
 });
 
 // Mock db/task-queue
+//
+// `boot.ts` imports `registerDlqMonitorJob` which reads `DLQ_ALERT_THRESHOLD`
+// from `db/task-queue` (added by the DLQ monitor work). We surface it here so
+// the boot.ts registration test keeps working without changing production.
 vi.mock('db/task-queue', () => ({
+  DLQ_ALERT_THRESHOLD: 10,
   enqueueTask: vi.fn(async () => ({
     id: 'mock-task-id',
     idempotency_key: 'mock-key',
