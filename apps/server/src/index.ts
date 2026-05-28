@@ -47,6 +47,7 @@ import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleEtlCursorRequest } from './api/etl-cursor';
+import { handleCorporateActionLifecycleRequest } from './api/corporate-action-lifecycle';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
@@ -429,6 +430,14 @@ export default {
     if (url.pathname.startsWith('/internal/etl/cursor/')) {
       const cursorRes = await handleEtlCursorRequest(req, url, appState);
       if (cursorRes) return withTrace(cursorRes);
+    }
+
+    // Corporate Action state machine lifecycle endpoints (issue #16):
+    //   PATCH /internal/corporate-actions/:id/advance
+    //   POST  /internal/corporate-actions/:id/dispute
+    if (url.pathname.startsWith('/internal/corporate-actions/')) {
+      const lifecycleRes = await handleCorporateActionLifecycleRequest(req, url, appState);
+      if (lifecycleRes) return withTrace(lifecycleRes);
     }
 
     // API-mediated email ingestion (POST /internal/ingestion/email)
