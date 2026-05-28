@@ -43,14 +43,12 @@ import {
   isTestMode,
 } from './api/test-session';
 import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
-import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
-import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import { handleInternalRelationsRequest } from './api/internal-relations';
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
@@ -67,7 +65,6 @@ import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 import { handleBdmCampaignRequest } from './api/bdm-campaign';
 import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
-import { handleLegalHoldRequest } from './api/legal-hold';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 import { handleReplayRequest } from './api/replay';
 
@@ -392,11 +389,6 @@ export default {
       if (annotationsRes) return withTrace(annotationsRes);
     }
 
-    if (url.pathname.startsWith('/api/reidentification')) {
-      const reidentRes = await handleReidentificationRequest(req, url, appState);
-      if (reidentRes) return withTrace(reidentRes);
-    }
-
     // Cluster-internal transcription worker path (issue #57).
     // POST /api/transcriptions — submit a transcript (delegated-token or session-cookie auth)
     // GET  /api/transcriptions — list transcripts
@@ -467,13 +459,6 @@ export default {
       if (workerTokenRes) return withTrace(workerTokenRes);
     }
 
-    // Internal worker wiki write endpoint — Bearer wiki-write token auth (issue #39).
-    // POST /internal/wiki/versions — autolearn worker writes draft WikiPageVersion.
-    if (url.pathname.startsWith('/internal/wiki/')) {
-      const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
-      if (internalWikiRes) return withTrace(internalWikiRes);
-    }
-
     // Internal worker relation write endpoint — Bearer wiki-write token auth (issue #72).
     // POST /internal/relations — autolearn worker writes discussed_in relations.
     if (url.pathname === '/internal/relations') {
@@ -521,19 +506,6 @@ export default {
     if (url.pathname.startsWith('/api/replay')) {
       const replayRes = await handleReplayRequest(req, url, appState);
       if (replayRes) return withTrace(replayRes);
-    }
-
-    // Phase 8 legal hold endpoints (issue #82).
-    // POST /api/legal-holds — place a hold (compliance_officer only)
-    // GET  /api/legal-holds — list holds
-    // GET  /api/legal-holds/:holdId — fetch a single hold
-    // POST /api/legal-holds/:holdId/removal-request — initiate four-eyes removal
-    // POST /api/legal-holds/removal-requests/:requestId/approve — co-approve removal
-    // POST /api/legal-holds/removal-requests/:requestId/reject — reject removal
-    // GET  /api/legal-holds/pending-removals — approval queue
-    if (url.pathname.startsWith('/api/legal-holds')) {
-      const legalHoldRes = await handleLegalHoldRequest(req, url, appState);
-      if (legalHoldRes) return withTrace(legalHoldRes);
     }
 
     // Serve static assets. import.meta.dir is the compiled bundle dir (/app/dist)
