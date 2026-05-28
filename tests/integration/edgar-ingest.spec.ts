@@ -51,20 +51,16 @@
 import { beforeAll, afterAll, describe, test, expect } from 'vitest';
 import postgres from 'postgres';
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { runInitRemote } from '../../packages/db/init-remote';
 import { migrate, migrateMkt } from '../../packages/db/index';
 import { createEdgarFeedHandler } from '../fixtures/edgar/msw-handler';
 import { assertNoDatabaseUrl } from '../../apps/worker/src/startup';
-import {
-  CORPORATE_ACTION_DDL,
-  insertCorporateAction,
-} from '../../packages/db/mkt-corporate-action';
+import { CORPORATE_ACTION_DDL } from '../../packages/db/mkt-corporate-action';
 import { EDGAR_INGEST_JOB_TYPE } from '../../apps/worker/src/edgar-ingest-job';
 import { handleCorporateActionIngestionRequest } from '../../apps/server/src/api/corporate-action-ingestion';
-import { TaskType, TASK_TYPE_AGENT_MAP, enqueueTask } from '../../packages/db/task-queue';
-import { encryptField, decryptField } from '../../packages/core/encryption';
+import { TaskType, TASK_TYPE_AGENT_MAP } from '../../packages/db/task-queue';
+import { decryptField } from '../../packages/core/encryption';
 import type { AppState } from '../../apps/server/src/index';
 
 // ---------------------------------------------------------------------------
