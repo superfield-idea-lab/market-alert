@@ -128,7 +128,10 @@ export async function advanceCorporateAction(
   db: postgres.Sql = defaultSql,
 ): Promise<CorporateActionState> {
   // Fetch current state inside a transaction to prevent races.
-  const result = await db.begin(async (tx) => {
+  // Cast tx to postgres.Sql to access template-literal call signatures; the
+  // TransactionSql type's Omit-derived shape loses call signatures in TS 5.9+.
+  const result = await db.begin(async (txRaw) => {
+    const tx = txRaw as unknown as postgres.Sql;
     const rows = await tx<CorporateActionStateRow[]>`
       SELECT id, state, effective_date, settlement_date, updated_at
       FROM mkt_corporate_actions
@@ -186,7 +189,8 @@ export async function disputeCorporateAction(
   actor: string,
   db: postgres.Sql = defaultSql,
 ): Promise<void> {
-  await db.begin(async (tx) => {
+  await db.begin(async (txRaw) => {
+    const tx = txRaw as unknown as postgres.Sql;
     const rows = await tx<CorporateActionStateRow[]>`
       SELECT id, state, updated_at
       FROM mkt_corporate_actions

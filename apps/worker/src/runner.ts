@@ -322,7 +322,11 @@ async function tryClaimAndExecute(
       if (!task.delegated_token) {
         throw new Error(`Task ${task.id} has no delegated token for CORP_ACTION_ADVANCE`);
       }
-      result = await executeCorpActionAdvanceTask(task.payload, apiBaseUrl, task.delegated_token);
+      result = (await executeCorpActionAdvanceTask(
+        task.payload,
+        apiBaseUrl,
+        task.delegated_token,
+      )) as unknown as Record<string, unknown>;
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }
