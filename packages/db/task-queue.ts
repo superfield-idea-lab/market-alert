@@ -1,4 +1,5 @@
 import { sql } from './index';
+import type postgres from 'postgres';
 
 /**
  * TaskType enum — canonical job types for the worker pipeline.
@@ -196,6 +197,12 @@ export interface EnqueueOptions {
   created_by: string;
   priority?: number;
   max_attempts?: number;
+  /**
+   * Optional sql pool override. When provided, this pool is used instead of
+   * the module-level singleton. Intended for tests that need to direct writes
+   * to an ephemeral Postgres container.
+   */
+  sql?: postgres.Sql;
 }
 
 /**
@@ -215,7 +222,13 @@ export async function enqueueTask(options: EnqueueOptions): Promise<TaskQueueRow
     created_by,
     priority = 5,
     max_attempts = 3,
+    sql: sqlOverride,
   } = options;
+
+  // Use injected sql pool when provided (e.g. in tests pointing to an
+  // ephemeral Postgres container), otherwise fall back to the module-level
+  // singleton bound to DATABASE_URL at import time.
+  const db = sqlOverride ?? sql;
 
   // Apply no-PII validator to all trading platform task types (TQ-C-004, TQ-P-002).
   // Payloads for trading tasks must carry only UUIDs and routing metadata —
@@ -224,12 +237,12 @@ export async function enqueueTask(options: EnqueueOptions): Promise<TaskQueueRow
     assertNoPiiInPayload(payload);
   }
 
-  const [row] = await sql<TaskQueueRow[]>`
+  const [row] = await db<TaskQueueRow[]>`
     INSERT INTO task_queue
       (idempotency_key, agent_type, job_type, payload, correlation_id,
        created_by, priority, max_attempts)
     VALUES
-      (${idempotency_key}, ${agent_type}, ${job_type}, ${sql.json(payload as never)},
+      (${idempotency_key}, ${agent_type}, ${job_type}, ${db.json(payload as never)},
        ${correlation_id}, ${created_by}, ${priority}, ${max_attempts})
     ON CONFLICT (idempotency_key) DO UPDATE
       SET updated_at = task_queue.updated_at

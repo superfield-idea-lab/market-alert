@@ -69,6 +69,9 @@ export const ENTITY_SENSITIVITY_CLASS: Partial<Record<EntityType, SensitivityCla
   recovery_shard: 'CREDENTIAL',
   // Operational — user-facing profile fields
   user: 'OPERATIONAL',
+  // Phase 2 — EDGAR corporate action filing text (issue #14)
+  // filing_text is AES-256-GCM encrypted before storage; never worker-visible plaintext.
+  corporate_action: 'HIGH',
 };
 
 /** Sensitive fields registry: maps entity type to the list of properties to encrypt. */
@@ -94,6 +97,8 @@ export const SENSITIVE_FIELDS: Partial<Record<EntityType, string[]>> = {
   recovery_shard: ['shard_data'],
   // Existing OPERATIONAL fields
   user: ['display_name', 'email'],
+  // Phase 2 — corporate action filing text (issue #14)
+  corporate_action: ['filing_text'],
 };
 
 const ENC_PREFIX = 'enc:v1:';

@@ -90,3 +90,41 @@ CREATE INDEX IF NOT EXISTS idx_mkt_trades_trader_id
 CREATE INDEX IF NOT EXISTS idx_mkt_trades_alert_id
   ON mkt_trades (alert_id)
   WHERE alert_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- mkt_corporate_actions — Phase 2 EDGAR filing entity (issue #14)
+-- ---------------------------------------------------------------------------
+--
+-- Stores one row per unique EDGAR filing (idempotency key: edgar:<accession_number>).
+--
+-- Encryption:
+--   filing_text stores AES-256-GCM ciphertext produced by encryptField('corporate_action', ...).
+--   The API handler encrypts this field before INSERT.
+--   Acceptance criterion: "CorporateAction.filing_text column contains ciphertext, not plaintext".
+--   No plaintext EDGAR content is ever persisted in any worker-visible column.
+--
+-- Idempotency:
+--   ON CONFLICT (idempotency_key) DO NOTHING ensures that replaying the same EDGAR
+--   filing twice (e.g. after a worker retry) never creates a duplicate row.
+--
+-- Blueprint refs: DATA-D-004 (append-only audit), DATA-D-006 (four-pool Postgres),
+--                WORKER-P-001 (API-gateway sole writer).
+CREATE TABLE IF NOT EXISTS mkt_corporate_actions (
+  id                TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  idempotency_key   TEXT        NOT NULL UNIQUE,
+  form_type         TEXT        NOT NULL,
+  accession_number  TEXT        NOT NULL,
+  cik               TEXT        NOT NULL,
+  issuer_name       TEXT,
+  filing_date       TIMESTAMPTZ NOT NULL,
+  filing_text       TEXT        NOT NULL,
+  status            TEXT        NOT NULL DEFAULT 'raw',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mkt_ca_idempotency
+  ON mkt_corporate_actions (idempotency_key);
+
+CREATE INDEX IF NOT EXISTS idx_mkt_ca_status
+  ON mkt_corporate_actions (status, created_at);
