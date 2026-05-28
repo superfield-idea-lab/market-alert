@@ -228,33 +228,20 @@ export async function insertCorporateAction(
     sql: sqlClient = defaultSql,
   } = options;
 
-  // DEV-SCOUT STUB: real insert is deferred to the implementation issue.
-  // The stub throws so that accidental production usage is caught immediately.
-  //
-  // Follow-on implementation pattern:
-  //
-  //   const rows = await sqlClient<CorporateActionRow[]>`
-  //     INSERT INTO mkt_corporate_actions
-  //       (idempotency_key, form_type, accession_number, cik, issuer_name,
-  //        filing_date, filing_text)
-  //     VALUES
-  //       (${idempotency_key}, ${form_type}, ${accession_number}, ${cik},
-  //        ${issuer_name}, ${filing_date.toISOString()}, ${filing_text_encrypted})
-  //     ON CONFLICT (idempotency_key) DO NOTHING
-  //     RETURNING *
-  //   `;
-  //   return rows[0] ?? null;
-
-  // Suppress unused-variable lint for destructured fields logged in the error.
-  void sqlClient;
-  throw new Error(
-    '[mkt-corporate-action] insertCorporateAction is a dev-scout stub — ' +
-      `implement in the Phase 2 follow-on issue. ` +
-      `idempotency_key=${idempotency_key} form_type=${form_type} ` +
-      `accession_number=${accession_number} cik=${cik} ` +
-      `issuer_name=${issuer_name} filing_date=${filing_date.toISOString()} ` +
-      `filing_text_encrypted length=${filing_text_encrypted.length}`,
-  );
+  // ON CONFLICT (idempotency_key) DO NOTHING ensures idempotency — replaying
+  // the same EDGAR filing twice never creates a duplicate row. Returns null
+  // when the row already exists (conflict case).
+  const rows = await sqlClient<CorporateActionRow[]>`
+    INSERT INTO mkt_corporate_actions
+      (idempotency_key, form_type, accession_number, cik, issuer_name,
+       filing_date, filing_text)
+    VALUES
+      (${idempotency_key}, ${form_type}, ${accession_number}, ${cik},
+       ${issuer_name}, ${filing_date.toISOString()}, ${filing_text_encrypted})
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING *
+  `;
+  return rows[0] ?? null;
 }
 
 /**
@@ -267,8 +254,10 @@ export async function getCorporateActionByIdempotencyKey(
   idempotency_key: string,
   sqlClient: postgres.Sql = defaultSql,
 ): Promise<CorporateActionRow | null> {
-  // DEV-SCOUT STUB
-  void idempotency_key;
-  void sqlClient;
-  return null;
+  const rows = await sqlClient<CorporateActionRow[]>`
+    SELECT * FROM mkt_corporate_actions
+    WHERE idempotency_key = ${idempotency_key}
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
 }

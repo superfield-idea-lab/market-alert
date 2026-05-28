@@ -25,7 +25,9 @@ export type EntityType =
   | 'customer'
   | 'customer_interest'
   | 'identity_token'
-  | 'recovery_shard';
+  | 'recovery_shard'
+  // Phase 2 — EDGAR corporate action filings (filing_text encrypted HIGH)
+  | 'corporate_action';
 
 export interface Entity {
   id: string;
