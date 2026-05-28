@@ -45,6 +45,7 @@ import {
 import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
 import { handleReidentificationRequest } from './api/reidentification';
 import { handleIngestionRequest } from './api/ingestion';
+import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
@@ -411,6 +412,14 @@ export default {
     if (url.pathname === '/internal/ingestion/transcript') {
       const transcriptRes = await handleTranscriptIngestionRequest(req, url, appState);
       if (transcriptRes) return withTrace(transcriptRes);
+    }
+
+    // Phase 2: EDGAR corporate action ingestion (POST /internal/ingestion/corporate-action).
+    // Worker posts parsed EDGAR 8-K filing; handler encrypts filing_text and enqueues
+    // ALERT_ENRICH. Checked before the generic /internal/ingestion handler. Issue #14.
+    if (url.pathname === '/internal/ingestion/corporate-action') {
+      const corpActRes = await handleCorporateActionIngestionRequest(req, url, appState);
+      if (corpActRes) return withTrace(corpActRes);
     }
 
     // API-mediated email ingestion (POST /internal/ingestion/email)

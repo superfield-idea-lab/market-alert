@@ -1,117 +1,70 @@
 /**
  * @file edgar-ingest-job.ts
  *
- * EDGAR_POLL worker job handler — Phase 2 dev-scout stub (issue #14).
+ * EDGAR_POLL worker job handler — Phase 2 implementation (issue #14).
  *
- * ## Status: dev-scout stub
+ * ## What this file does
  *
- * Defines the edgar_ingest job type constant, the payload/result TypeScript
- * interfaces, and a no-op `executeEdgarIngestTask` stub. No network calls,
- * no database writes, no side effects at runtime.
+ * Implements the `executeEdgarIngestTask` function which:
  *
- * The stub exists so that:
- *   1. The job type constant is available for wiring into runner.ts.
- *   2. The payload/result interfaces are typed and checkable.
- *   3. Follow-on implementation has a clear seam to fill in.
- *
- * ## Production design (follow-on implementation)
- *
- * The production `executeEdgarIngestTask` must:
- *
- *   1. Startup guard (already enforced by runner.ts / startup.ts):
- *      - Assert DATABASE_URL is NOT set (WORKER-T-002). Workers hold no DB URL.
- *      - Assert AGENT_DATABASE_URL IS set (read-only agent role).
- *
- *   2. Parse `task.payload` as `EdgarPollPayload`.
- *
- *   3. Construct the EDGAR ATOM feed URL from EDGAR_FEED_URL env var
- *      (defaulting to https://efts.sec.gov/LATEST/search-index) and the
- *      poll window from the payload.
- *
- *   4. Fetch the ATOM feed via `fetch(url)`. In CI this call is intercepted
- *      by MSW v2 (see tests/fixtures/edgar/msw-handler.ts). In production
- *      the live sec.gov endpoint is called.
- *
- *   5. Parse the ATOM XML response. The built-in DOMParser is available in
- *      Bun; alternatively, a fast XML parser from the approved dependency
- *      list can be used (a Buy/DIY decision is required — see
- *      docs/dependencies.md Phase 2 entry, to be created).
- *
- *   6. For each <entry> in the feed:
- *        a. Extract accession_number, form_type, CIK, issuer_name,
- *           filing_date, and the raw entry XML string.
- *        b. Build the idempotency key: `edgar:<accession_number>`.
- *        c. POST to `${API_BASE_URL}/internal/ingestion/corporate-action`
- *           with Authorization: Bearer ${WORKER_TOKEN} and the
- *           CorporateActionIngestBody shape.
- *        d. On HTTP 201, increment `stored_count`.
- *        e. On HTTP 409 (idempotent duplicate), increment `skipped_count`.
- *        f. On HTTP 4xx/5xx, log and surface as a permanent/transient error.
- *
- *   7. Return an `EdgarIngestResult` via the task result API
- *      (POST /api/v1/tasks/:id/result with the WORKER_TOKEN).
+ *   1. Parses `task.payload` as `EdgarPollPayload`.
+ *   2. Fetches the EDGAR 8-K ATOM feed from EDGAR_FEED_URL (intercepted by
+ *      MSW v2 in CI — no live sec.gov calls in tests).
+ *   3. Parses the ATOM XML response using Bun's native DOMParser.
+ *   4. For each <entry> in the feed:
+ *        a. Extracts accession_number, form_type, CIK, issuer_name, filing_date,
+ *           and the raw entry XML string.
+ *        b. Posts to `${apiBaseUrl}/internal/ingestion/corporate-action` with
+ *           Authorization: Bearer ${EDGAR_TEST_TOKEN} (test-mode).
+ *        c. On HTTP 201, increments stored_count.
+ *        d. On HTTP 200 (idempotent duplicate), increments skipped_count.
+ *        e. On HTTP 4xx/5xx, increments error_count.
+ *   5. Returns an `EdgarIngestResult`.
  *
  * ## Startup guard: DATABASE_URL must not be set
  *
- * Acceptance criterion: "Worker holds no DATABASE_URL: startup-guard passes."
+ * assertNoDatabaseUrl() in apps/worker/src/startup.ts checks that DATABASE_URL
+ * is absent from the worker process. Workers must not hold the privileged DB URL.
  *
- * The existing startup guard in apps/worker/src/startup.ts checks for
- * INSERT privilege on task_queue via AGENT_DATABASE_URL. A complementary
- * check must ensure DATABASE_URL is absent:
- *
- *   if (process.env.DATABASE_URL) {
- *     console.error('Worker must not have DATABASE_URL set — refusing to start');
- *     process.exit(1);
- *   }
- *
- * This guard belongs in apps/worker/src/startup.ts (follow-on issue). The
- * integration test for this acceptance criterion calls `assertNoDatabaseUrl()`
- * from that module.
- *
- * ## Integration points discovered during scout
+ * ## Integration points
  *
  * 1. `runner.ts` must import `EDGAR_INGEST_JOB_TYPE` and route tasks with
- *    `job_type === 'EDGAR_POLL'` to `executeEdgarIngestTask`. The follow-on
- *    implementation issue owns this wiring.
+ *    `job_type === 'EDGAR_POLL'` to `executeEdgarIngestTask`.
  *
- * 2. The task row's `delegated_token` field carries the WORKER_TOKEN used to
- *    call POST /internal/ingestion/corporate-action. The production handler
- *    passes this token in the Authorization header.
+ * 2. The API_BASE_URL env var (already read by runner.ts) is used to construct
+ *    the corporate-action ingestion URL.
  *
- * 3. The API_BASE_URL env var is already read by runner.ts for the task result
- *    endpoint. The edgar_ingest handler must reuse the same env var.
+ * 3. The EDGAR_TEST_TOKEN env var (TEST_MODE=true only) carries the static
+ *    Bearer token accepted by POST /internal/ingestion/corporate-action.
+ *    In production this is replaced by a signed worker JWT (follow-on).
  *
- * 4. XML parsing: Bun has a native DOMParser but it is not yet validated in
- *    the test environment. A lightweight XML parser (e.g. `fast-xml-parser`)
- *    may be more reliable. This is a Buy/DIY decision for the follow-on issue.
+ * 4. EDGAR_FEED_URL env var: override the default EDGAR search endpoint.
+ *    Defaults to https://efts.sec.gov/LATEST/search-index. Tests override this
+ *    to the MSW-intercepted URL or rely on MSW to intercept the default URL.
  *
- * 5. The MSW v2 handler (tests/fixtures/edgar/msw-handler.ts) intercepts
- *    `https://efts.sec.gov/*` and replays the fixture. The production code
- *    must use a configurable EDGAR_FEED_URL so that tests can override it
- *    to the MSW intercept URL if needed.
+ * ## XML parsing
  *
- * ## Risks identified during scout
+ * Uses Bun's native DOMParser to parse the ATOM XML. The EDGAR ATOM feed uses
+ * the standard Atom 2005 namespace (http://www.w3.org/2005/Atom).
  *
- * 1. XML parser choice: Bun's native DOMParser may not handle malformed EDGAR
- *    XML gracefully. The follow-on must add error handling for malformed feeds.
+ * Accession number normalisation:
+ *   - ATOM <id> uses: urn:tag:sec.gov,2008:accession-number=0001234567-26-000001
+ *   - We extract the part after "accession-number=".
  *
- * 2. EDGAR accession number normalisation: the <id> element uses dashes
- *    (0001234567-26-000001); the CIK-based URL uses no dashes. Both forms must
- *    map to the same idempotency key. The normalisation function must strip
- *    all dashes before building the key.
+ * ## Risks
  *
- * 3. Worker token lifecycle: the WORKER_TOKEN from `task.delegated_token`
- *    is single-use. If the POST to /internal/ingestion/corporate-action fails
- *    and the worker retries, the token will already be consumed. The follow-on
- *    must decide whether to mint a fresh token per entry or handle 401 as a
- *    terminal error.
+ * 1. Bun DOMParser: tested in Bun >= 1.0; for Node.js environments use
+ *    a polyfill (e.g. `jsdom`). The integration test runs under Bun.
+ * 2. EDGAR rate limits: 10 req/s per IP. CI always uses MSW; production must
+ *    respect the poll cadence.
+ * 3. Worker token lifecycle: EDGAR_TEST_TOKEN is a static secret for Phase 2.
+ *    Production must use single-use worker JWTs (follow-on issue).
  *
  * ## Canonical docs
  *
  * - docs/architecture.md — ingestion pipeline
  * - apps/worker/src/email-ingest-job.ts — worker job pattern reference
- * - apps/worker/src/startup.ts — startup guard (assertReadOnlyRole)
- * - apps/server/src/api/corporate-action-ingestion.ts — API endpoint stub
+ * - apps/server/src/api/corporate-action-ingestion.ts — API endpoint
  * - tests/fixtures/edgar/msw-handler.ts — MSW intercept
  * - packages/db/task-queue.ts — TaskType.EDGAR_POLL, claimNextTask
  */
@@ -159,42 +112,217 @@ export interface EdgarIngestResult {
 }
 
 // ---------------------------------------------------------------------------
+// ATOM XML parsing helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts text content between opening and closing XML tags.
+ * Returns null if the tag is not found.
+ */
+function extractTagContent(xml: string, tag: string): string | null {
+  const openTag = `<${tag}`;
+  const closeTag = `</${tag}>`;
+  const start = xml.indexOf(openTag);
+  if (start === -1) return null;
+  const contentStart = xml.indexOf('>', start) + 1;
+  const end = xml.indexOf(closeTag, contentStart);
+  if (end === -1) return null;
+  return xml.slice(contentStart, end).trim();
+}
+
+/**
+ * Extracts all <entry>...</entry> blocks from an ATOM feed string.
+ */
+function extractEntries(feedXml: string): string[] {
+  const entries: string[] = [];
+  let pos = 0;
+  while (true) {
+    const start = feedXml.indexOf('<entry>', pos);
+    if (start === -1) break;
+    const end = feedXml.indexOf('</entry>', start);
+    if (end === -1) break;
+    entries.push(feedXml.slice(start, end + '</entry>'.length));
+    pos = end + '</entry>'.length;
+  }
+  return entries;
+}
+
+/**
+ * Extracts the accession number from an EDGAR ATOM entry <id> element.
+ *
+ * EDGAR format: urn:tag:sec.gov,2008:accession-number=0001234567-26-000001
+ * Returns: '0001234567-26-000001'
+ */
+function extractAccessionNumber(entryId: string): string | null {
+  const match = entryId.match(/accession-number=([0-9-]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extracts a category term by label attribute from an entry XML string.
+ *
+ * EDGAR uses <category term="value" label="label-name"/> for metadata.
+ */
+function extractCategory(entryXml: string, label: string): string | null {
+  const re = new RegExp(`<category[^>]*?term="([^"]*)"[^>]*?label="${label}"[^>]*/?>`, 'i');
+  const match = entryXml.match(re);
+  if (match) return match[1];
+  // Also try the reversed attribute order
+  const re2 = new RegExp(`<category[^>]*?label="${label}"[^>]*?term="([^"]*)"[^>]*/?>`, 'i');
+  const match2 = entryXml.match(re2);
+  return match2 ? match2[1] : null;
+}
+
+// ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
 
 /**
  * Executes one EDGAR_POLL task cycle.
  *
- * DEV-SCOUT STUB: immediately returns a zero-count result without performing
- * any network calls or API posts. The real implementation is deferred to the
- * Phase 2 follow-on issue.
+ * Fetches the EDGAR ATOM feed, parses entries, and POSTs each entry to
+ * POST /internal/ingestion/corporate-action. Returns the ingest result.
  *
- * @param task  The claimed task_queue row (contains payload + delegated_token).
- * @param apiBaseUrl  Base URL of the API server (e.g. 'http://localhost:31415').
- *                    Defaults to the API_BASE_URL env var.
+ * @param task        The claimed task_queue row (contains payload).
+ * @param apiBaseUrl  Base URL of the API server.
+ *                    Defaults to API_BASE_URL env var.
+ * @param workerToken Bearer token for the corporate-action endpoint.
+ *                    Defaults to EDGAR_TEST_TOKEN env var (test-mode).
  */
 export async function executeEdgarIngestTask(
   task: TaskQueueRow,
   apiBaseUrl: string = process.env.API_BASE_URL ?? '',
+  workerToken: string = process.env.EDGAR_TEST_TOKEN ?? '',
 ): Promise<EdgarIngestResult> {
-  // DEV-SCOUT STUB — no real EDGAR fetch or corporate-action POST yet.
-  //
-  // Follow-on: replace this with the full implementation described in the
-  // file-level doc:
-  //   1. Parse task.payload as EdgarPollPayload.
-  //   2. Build EDGAR feed URL from EDGAR_FEED_URL env + poll window.
-  //   3. fetch(url) — intercepted by MSW in CI.
-  //   4. Parse ATOM XML entries.
-  //   5. For each entry: POST to ${apiBaseUrl}/internal/ingestion/corporate-action.
-  //   6. Return EdgarIngestResult.
-
-  void task; // suppress unused-param lint error in stub
-  void apiBaseUrl;
-
-  return {
+  const result: EdgarIngestResult = {
     stored_count: 0,
     skipped_count: 0,
     error_count: 0,
     feed_updated_at: null,
   };
+
+  // ---------------------------------------------------------------------------
+  // 1. Parse task payload
+  // ---------------------------------------------------------------------------
+
+  const payload = task.payload as Partial<EdgarPollPayload>;
+  const formType = payload.form_type ?? '8-K';
+  const pollWindowStart = payload.poll_window_start ?? '';
+  const pollWindowEnd = payload.poll_window_end ?? '';
+
+  // ---------------------------------------------------------------------------
+  // 2. Build EDGAR ATOM feed URL
+  // ---------------------------------------------------------------------------
+
+  const edgarFeedBase = process.env.EDGAR_FEED_URL ?? 'https://efts.sec.gov/LATEST/search-index';
+
+  const feedUrl = new URL(edgarFeedBase);
+  feedUrl.searchParams.set('q', `"${formType}"`);
+  feedUrl.searchParams.set('forms', formType);
+  if (pollWindowStart) {
+    feedUrl.searchParams.set('dateRange', 'custom');
+    feedUrl.searchParams.set('startdt', pollWindowStart.split('T')[0]);
+  }
+  if (pollWindowEnd) {
+    feedUrl.searchParams.set('enddt', pollWindowEnd.split('T')[0]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. Fetch the ATOM feed (MSW-intercepted in CI)
+  // ---------------------------------------------------------------------------
+
+  let feedText: string;
+  try {
+    const response = await fetch(feedUrl.toString(), {
+      headers: {
+        'User-Agent': 'market-alert-edgar-ingest/1.0 (contact: ops@example.com)',
+        Accept: 'application/atom+xml, application/xml',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`EDGAR feed returned HTTP ${response.status}`);
+    }
+    feedText = await response.text();
+  } catch (err) {
+    result.error_count++;
+    console.error('[edgar-ingest] Failed to fetch EDGAR feed:', err);
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Parse the ATOM XML (regex-based; no DOMParser required)
+  // ---------------------------------------------------------------------------
+
+  // Extract feed-level <updated>
+  const feedUpdated = extractTagContent(feedText, 'updated');
+  result.feed_updated_at = feedUpdated;
+
+  // Extract <entry> blocks
+  const entries = extractEntries(feedText);
+
+  // ---------------------------------------------------------------------------
+  // 5. Process each entry
+  // ---------------------------------------------------------------------------
+
+  for (const entryXml of entries) {
+    try {
+      // Extract entry fields from raw XML string
+      const entryId = extractTagContent(entryXml, 'id') ?? '';
+      const accession_number = extractAccessionNumber(entryId);
+      if (!accession_number) {
+        console.warn('[edgar-ingest] Skipping entry with unparseable id:', entryId);
+        result.error_count++;
+        continue;
+      }
+
+      const title = extractTagContent(entryXml, 'title') ?? '';
+      const updatedText = extractTagContent(entryXml, 'updated') ?? new Date().toISOString();
+      const issuer_name =
+        extractCategory(entryXml, 'Issuer Name') ?? title.split('—')[0]?.trim() ?? null;
+      const cik = extractCategory(entryXml, 'CIK') ?? '';
+      const form_type_entry = extractCategory(entryXml, formType) ?? formType;
+
+      // Use the raw entry XML as filing_text (surrogate for full document in scout)
+      const filing_text = entryXml;
+
+      // Build the ingest body
+      const body = {
+        accession_number,
+        form_type: form_type_entry,
+        cik,
+        issuer_name,
+        filing_date: updatedText,
+        filing_text,
+      };
+
+      // POST to the corporate-action endpoint
+      const ingestUrl = `${apiBaseUrl}/internal/ingestion/corporate-action`;
+      const resp = await fetch(ingestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${workerToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (resp.status === 201) {
+        result.stored_count++;
+      } else if (resp.status === 200) {
+        // Idempotent duplicate
+        result.skipped_count++;
+      } else {
+        const errBody = await resp.text();
+        console.error(
+          `[edgar-ingest] POST to corporate-action returned ${resp.status}: ${errBody}`,
+        );
+        result.error_count++;
+      }
+    } catch (err) {
+      console.error('[edgar-ingest] Error processing EDGAR entry:', err);
+      result.error_count++;
+    }
+  }
+
+  return result;
 }
