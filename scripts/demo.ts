@@ -68,6 +68,8 @@ const NAMESPACE = 'default';
 const IMAGE_REPO = 'superfield-demo-app';
 const DB_HOST = 'superfield-dev-postgres';
 const REGISTRY_NAME_SUFFIX = 'registry';
+// Stable web port used by cloudflared to route market-alert.superfield.co.
+const DEFAULT_WEB_PORT = 4300;
 const MODULE_DIR =
   typeof import.meta.dir === 'string'
     ? import.meta.dir
@@ -152,7 +154,9 @@ export function demoConfig(
       : randomPort());
   const port =
     input.port ??
-    (process.env.SUPERFIELD_DEMO_PORT ? Number(process.env.SUPERFIELD_DEMO_PORT) : randomPort());
+    (process.env.SUPERFIELD_DEMO_PORT
+      ? Number(process.env.SUPERFIELD_DEMO_PORT)
+      : DEFAULT_WEB_PORT);
 
   // Registry port is randomised so concurrent demos don't collide.
   const registryPort = process.env.SUPERFIELD_DEMO_REGISTRY_PORT
