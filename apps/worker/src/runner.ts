@@ -94,6 +94,10 @@ import {
   buildTranscriptionCliPayload,
   validateTranscriptionResult,
 } from './transcription-job';
+import {
+  CORP_ACTION_ADVANCE_JOB_TYPE,
+  executeCorpActionAdvanceTask,
+} from './corp-action-advance-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -311,6 +315,14 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateTranscriptionResult(rawResult);
+    } else if (task.job_type === CORP_ACTION_ADVANCE_JOB_TYPE) {
+      // Corporate Action state machine advancement — issue #16.
+      // Calls PATCH /internal/corporate-actions/:id/advance via the API server.
+      // The delegated_token is the bearer credential for the lifecycle endpoint.
+      if (!task.delegated_token) {
+        throw new Error(`Task ${task.id} has no delegated token for CORP_ACTION_ADVANCE`);
+      }
+      result = await executeCorpActionAdvanceTask(task.payload, apiBaseUrl, task.delegated_token);
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }

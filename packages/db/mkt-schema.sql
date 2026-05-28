@@ -119,9 +119,19 @@ CREATE TABLE IF NOT EXISTS mkt_corporate_actions (
   filing_date       TIMESTAMPTZ NOT NULL,
   filing_text       TEXT        NOT NULL,
   status            TEXT        NOT NULL DEFAULT 'raw',
+  state             TEXT        NOT NULL DEFAULT 'Announced'
+                                CHECK (state IN ('Announced','Effective','Closed','Disputed')),
+  effective_date    DATE,
+  settlement_date   DATE,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE mkt_corporate_actions
+  ADD COLUMN IF NOT EXISTS state           TEXT NOT NULL DEFAULT 'Announced'
+    CHECK (state IN ('Announced','Effective','Closed','Disputed')),
+  ADD COLUMN IF NOT EXISTS effective_date  DATE,
+  ADD COLUMN IF NOT EXISTS settlement_date DATE;
 
 CREATE INDEX IF NOT EXISTS idx_mkt_ca_idempotency
   ON mkt_corporate_actions (idempotency_key);
@@ -161,3 +171,27 @@ CREATE TABLE IF NOT EXISTS etl_cursors (
 
 CREATE INDEX IF NOT EXISTS idx_etl_cursors_source_key
   ON etl_cursors (source, cursor_key);
+
+CREATE INDEX IF NOT EXISTS idx_mkt_ca_state
+  ON mkt_corporate_actions (state, effective_date, settlement_date);
+
+-- ---------------------------------------------------------------------------
+-- mkt_corporate_action_journal — append-only audit log for state transitions
+-- ---------------------------------------------------------------------------
+--
+-- Every state transition on a mkt_corporate_actions row produces exactly one
+-- journal entry. The journal is append-only; rows are never updated or deleted.
+--
+-- Blueprint refs: DATA-D-004 (append-only audit store).
+CREATE TABLE IF NOT EXISTS mkt_corporate_action_journal (
+  id                    TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  corporate_action_id   TEXT        NOT NULL REFERENCES mkt_corporate_actions(id),
+  actor                 TEXT        NOT NULL,
+  from_state            TEXT        NOT NULL,
+  to_state              TEXT        NOT NULL,
+  reason                TEXT,
+  occurred_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mkt_ca_journal_ca_id
+  ON mkt_corporate_action_journal (corporate_action_id, occurred_at);
