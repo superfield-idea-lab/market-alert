@@ -106,15 +106,29 @@ describe('TaskType enum (issue #95)', () => {
     expect(TaskType.BDM_SUMMARY).toBe('BDM_SUMMARY');
   });
 
-  test('all 6 TaskType values are present', () => {
+  test('the original 6 TaskType values from issue #95 are still present', () => {
+    // The original Issue #95 enum had 6 values. Issue #5 added 7 trading
+    // platform task types (EDGAR_POLL, ALERT_*, CORP_ACTION_ADVANCE,
+    // TRADE_SETTLE). We assert the original 6 remain, then the new trading
+    // types are covered by a separate test below.
     const values = Object.values(TaskType);
-    expect(values).toHaveLength(6);
     expect(values).toContain('EMAIL_INGEST');
     expect(values).toContain('AUTOLEARN');
     expect(values).toContain('TRANSCRIPTION');
     expect(values).toContain('ANNOTATION');
     expect(values).toContain('DEEPCLEAN');
     expect(values).toContain('BDM_SUMMARY');
+  });
+
+  test('trading platform TaskType values from issue #5 are present', () => {
+    const values = Object.values(TaskType);
+    expect(values).toContain('EDGAR_POLL');
+    expect(values).toContain('ALERT_ENRICH');
+    expect(values).toContain('ALERT_DEDUP');
+    expect(values).toContain('ALERT_NOTIFY');
+    expect(values).toContain('ALERT_SUPPLEMENT');
+    expect(values).toContain('CORP_ACTION_ADVANCE');
+    expect(values).toContain('TRADE_SETTLE');
   });
 });
 
@@ -145,9 +159,16 @@ describe('TASK_TYPE_AGENT_MAP (issue #95)', () => {
     expect(TASK_TYPE_AGENT_MAP[TaskType.BDM_SUMMARY]).toBe('bdm_summary');
   });
 
-  test('all 6 TaskType values are mapped', () => {
-    const keys = Object.keys(TASK_TYPE_AGENT_MAP);
-    expect(keys).toHaveLength(6);
+  test('every TaskType value has a corresponding agent_type mapping', () => {
+    // The map must cover every TaskType — otherwise enqueueing a task whose
+    // type is missing from the map would resolve to `undefined` as the
+    // agent_type column and silently fail to dispatch.
+    const taskTypes = Object.values(TaskType);
+    const mapped = Object.keys(TASK_TYPE_AGENT_MAP);
+    expect(mapped).toHaveLength(taskTypes.length);
+    for (const t of taskTypes) {
+      expect(TASK_TYPE_AGENT_MAP[t]).toBeTypeOf('string');
+    }
   });
 
   test('each agent_type string is lowercase with underscores', () => {

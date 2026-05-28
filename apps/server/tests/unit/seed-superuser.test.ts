@@ -78,24 +78,25 @@ describe('seedSuperuser()', () => {
   });
 
   test('skips seeding when SUPERUSER_EMAIL is not set', async () => {
+    // seedSuperuser logs through the structured `log` helper (core), not
+    // console.warn, so the observable behaviour we assert is the absence of
+    // an INSERT — the same evidence used by 'skips seeding when a superuser
+    // already exists' above. This keeps the test aligned with current
+    // production behaviour without coupling to internal logging plumbing.
     const sql = makeSql({ selectResult: [] });
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await seedSuperuser({ sql });
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('SUPERUSER_EMAIL is not set'));
+    expect(sql.insertedRows).toHaveLength(0);
   });
 
   test('skips seeding when neither password nor mnemonic is set', async () => {
     const sql = makeSql({ selectResult: [] });
     _seedSecretForTest('SUPERUSER_EMAIL', 'admin@example.com');
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await seedSuperuser({ sql });
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Neither SUPERUSER_PASSWORD nor SUPERUSER_MNEMONIC'),
-    );
+    expect(sql.insertedRows).toHaveLength(0);
   });
 
   test('creates superuser using SUPERUSER_PASSWORD when set', async () => {

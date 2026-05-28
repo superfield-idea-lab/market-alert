@@ -10,14 +10,52 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import {
+
+// ---------------------------------------------------------------------------
+// sessionStorage shim
+//
+// The audio-recorder hook reads and writes `sessionStorage` directly. Vitest
+// runs these unit tests under the node environment (no jsdom) to keep the
+// suite fast, so the global is unavailable by default. We install a real
+// in-memory Map-backed implementation of the Storage interface on globalThis
+// before importing the hook. This is a real implementation, not a vi mock —
+// the repo testing standard forbids vi.fn/vi.mock/vi.spyOn/vi.stubGlobal.
+// ---------------------------------------------------------------------------
+
+class InMemoryStorage implements Storage {
+  private readonly store = new Map<string, string>();
+  get length(): number {
+    return this.store.size;
+  }
+  clear(): void {
+    this.store.clear();
+  }
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+}
+
+if (typeof (globalThis as { sessionStorage?: Storage }).sessionStorage === 'undefined') {
+  (globalThis as { sessionStorage: Storage }).sessionStorage = new InMemoryStorage();
+}
+
+const {
   saveBackgroundSnapshot,
   loadAndClearBackgroundSnapshot,
   clearBackgroundSnapshot,
   negotiateAudioMimeType,
   BACKGROUND_STATE_KEY,
-  type BackgroundSnapshot,
-} from '../../src/hooks/use-audio-recorder.js';
+} = await import('../../src/hooks/use-audio-recorder.js');
+type BackgroundSnapshot = import('../../src/hooks/use-audio-recorder.js').BackgroundSnapshot;
 
 // ---------------------------------------------------------------------------
 // Elapsed formatter — mirrored from audio-recorder.tsx
