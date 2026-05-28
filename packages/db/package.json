@@ -42,7 +42,9 @@
     "./worm-mode": "./worm-mode.ts",
     "./kms-backfill": "./kms-backfill.ts",
     "./mkt-alert-channel": "./mkt-alert-channel.ts",
-    "./mkt-trade-replay": "./mkt-trade-replay.ts"
+    "./mkt-trade-replay": "./mkt-trade-replay.ts",
+    "./mkt-corporate-action": "./mkt-corporate-action.ts",
+    "./mkt-corporate-action-lifecycle": "./mkt-corporate-action-lifecycle.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
