@@ -47,7 +47,6 @@ import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
-import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
 import { handleInternalRelationsRequest } from './api/internal-relations';
 import { handleDeepcleanRequest } from './api/deepclean';
@@ -62,8 +61,6 @@ import { handleTranscriptionRequest } from './api/transcription';
 import { handleAnnotationsRequest } from './api/annotations';
 import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
-import { handleBdmCampaignRequest } from './api/bdm-campaign';
-import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 import { handleReplayRequest } from './api/replay';
@@ -436,21 +433,6 @@ export default {
       if (corpusRes) return withTrace(corpusRes);
     }
 
-    // Phase 7: BDM campaign query endpoint (issue #103).
-    // GET /api/bdm/campaign — reads from kb_analytics only (DATA-C-031).
-    if (url.pathname.startsWith('/api/bdm/')) {
-      const bdmRes = await handleBdmCampaignRequest(req, url, appState);
-      if (bdmRes) return withTrace(bdmRes);
-    }
-
-    // Campaign analysis — BDM picker + anonymised chunk query (issue #74).
-    // GET /api/campaign/entities?type=asset_manager|fund
-    // GET /api/campaign/chunks?entity_id=<id>
-    if (url.pathname.startsWith('/api/campaign')) {
-      const campaignRes = await handleCampaignAnalysisRequest(req, url, appState);
-      if (campaignRes) return withTrace(campaignRes);
-    }
-
     // Internal worker token mint + pod-terminate invalidation (issue #36).
     // POST /internal/worker/tokens — mint a scoped single-use token.
     // DELETE /internal/worker/tokens/:podId — invalidate on pod terminate.
@@ -464,13 +446,6 @@ export default {
     if (url.pathname === '/internal/relations') {
       const internalRelRes = await handleInternalRelationsRequest(req, url, appState);
       if (internalRelRes) return withTrace(internalRelRes);
-    }
-
-    // Campaign summary endpoint — Phase 7 BDM campaign analysis (issue #75).
-    // POST /api/campaign/summarise — summarise anonymised chunks via Claude API.
-    if (url.pathname.startsWith('/api/campaign/')) {
-      const summaryRes = await handleCampaignSummaryRequest(req, url, appState);
-      if (summaryRes) return withTrace(summaryRes);
     }
 
     // Phase 8 compliance officer endpoints (issue #79).
