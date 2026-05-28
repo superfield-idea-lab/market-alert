@@ -401,6 +401,11 @@ describe('EDGAR ingestion end-to-end', () => {
 
     // Seed and claim a task via SKIP LOCKED (AC-1b — proves the claim mechanism)
     const ikey = `edgar-poll-skip-locked-${Date.now()}`;
+    const taskPayload = JSON.stringify({
+      form_type: '8-K',
+      poll_window_start: '2026-05-07',
+      poll_window_end: '2026-05-08',
+    });
     await sql`
       INSERT INTO task_queue
         (idempotency_key, agent_type, job_type, payload, created_by, priority)
@@ -408,7 +413,7 @@ describe('EDGAR ingestion end-to-end', () => {
         ${ikey},
         ${TASK_TYPE_AGENT_MAP[TaskType.EDGAR_POLL]},
         ${TaskType.EDGAR_POLL},
-        ${{ form_type: '8-K', poll_window_start: '2026-05-07', poll_window_end: '2026-05-08' }}::jsonb,
+        ${taskPayload}::jsonb,
         'test-runner',
         5
       )
