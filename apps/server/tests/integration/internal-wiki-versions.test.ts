@@ -193,11 +193,7 @@ test('POST /internal/wiki/versions rejects a consumed token on re-use', async ()
   });
   expect(second.status).toBe(401);
   const body = (await second.json()) as Record<string, unknown>;
-  const errorText = String(body.error).toLowerCase();
-  // The JWT verifier rejects the consumed JTI with 'Token revoked' before the
-  // wiki-specific 'Token already used' check runs; either phrasing is a valid
-  // single-use-enforcement signal.
-  expect(errorText).toMatch(/used|revoked/);
+  expect(String(body.error).toLowerCase()).toContain('used');
 });
 
 test('POST /internal/wiki/versions returns 400 for missing content', async () => {
