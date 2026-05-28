@@ -2,7 +2,7 @@
  * @file corporate-action-ingestion.ts
  *
  * POST /internal/ingestion/corporate-action — API-mediated corporate action
- * write endpoint — Phase 2 implementation (issue #14).
+ * write endpoint — Phase 2 implementation (issue #49).
  *
  * ## Security model
  *
@@ -17,12 +17,21 @@
  * ## Write path
  *
  *   1. Extract and validate Bearer token (test-mode: static secret; prod: JWT).
- *   2. Validate request body against CorporateActionIngestBody.
+ *   2. Validate request body against CorporateActionIngestBodySchema.
+ *      Returns 422 with structured field errors on validation failure.
  *   3. Encrypt filing_text via encryptField('corporate_action', plaintext).
  *   4. Insert row into mkt_corporate_actions via insertCorporateAction
  *      (ON CONFLICT DO NOTHING for idempotency).
- *   5. Enqueue one ALERT_ENRICH task with payload { corporate_action_id }.
+ *   5. Enqueue one ALERT_ENRICH task with idempotency key edgar:<accession_number>.
  *   6. Return 201 with the new row id (or 200 if idempotent duplicate).
+ *
+ * ## Acceptance criteria (issue #49)
+ *
+ *   - POST returns 422 when required fields are missing or malformed
+ *   - filing_text stored as AES-256-GCM ciphertext (enc:v1: prefix)
+ *   - Duplicate accession_number returns 200, exactly one row in DB
+ *   - ALERT_ENRICH task enqueued after 201; not re-enqueued on duplicate
+ *   - mkt-schema.sql contains the authoritative CREATE TABLE for mkt_corporate_actions
  *
  * ## Canonical docs
  *
@@ -46,8 +55,8 @@ import { enqueueTask, TaskType, TASK_TYPE_AGENT_MAP } from 'db/task-queue';
 /**
  * Body expected by POST /internal/ingestion/corporate-action.
  *
- * All fields are mandatory. filing_text is raw filing XML/text from the
- * edgar_ingest worker — encrypted at rest by this handler, not by the caller.
+ * All fields are mandatory except issuer_name. filing_text is raw filing
+ * XML/text from the edgar_ingest worker — encrypted at rest by this handler.
  */
 export interface CorporateActionIngestBody {
   /** Normalised EDGAR accession number (with dashes). */
@@ -65,6 +74,90 @@ export interface CorporateActionIngestBody {
    * Encrypted at rest by this handler — caller provides plaintext.
    */
   filing_text: string;
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Represents a single validation issue, compatible with Zod's ZodIssue shape.
+ */
+export interface ValidationIssue {
+  /** JSON path to the failing field. */
+  path: string[];
+  /** Human-readable description of the failure. */
+  message: string;
+  /** Error code. */
+  code: string;
+}
+
+/**
+ * Validates the request body against the CorporateActionIngestBody schema.
+ *
+ * All required string fields must be present and non-empty.
+ * Returns a discriminated union: { success: true, data } | { success: false, issues }.
+ *
+ * Returns 422 on validation failure (missing fields, wrong types, empty strings).
+ *
+ * Blueprint ref: WORKER-P-001 (API-gateway sole writer).
+ */
+export function validateCorporateActionBody(
+  body: unknown,
+):
+  | { success: true; data: CorporateActionIngestBody }
+  | { success: false; issues: ValidationIssue[] } {
+  const issues: ValidationIssue[] = [];
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    issues.push({ path: [], message: 'Expected an object', code: 'invalid_type' });
+    return { success: false, issues };
+  }
+
+  const obj = body as Record<string, unknown>;
+  const requiredStringFields: (keyof CorporateActionIngestBody)[] = [
+    'accession_number',
+    'form_type',
+    'cik',
+    'filing_date',
+    'filing_text',
+  ];
+
+  for (const field of requiredStringFields) {
+    const value = obj[field];
+    if (value === undefined || value === null || value === '') {
+      issues.push({
+        path: [field],
+        message: 'Required',
+        code: 'invalid_type',
+      });
+    } else if (typeof value !== 'string') {
+      issues.push({
+        path: [field],
+        message: 'Expected string',
+        code: 'invalid_type',
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    return { success: false, issues };
+  }
+
+  // issuer_name is optional — accept string, null, or undefined
+  const issuer_name = typeof obj.issuer_name === 'string' ? obj.issuer_name : null;
+
+  return {
+    success: true,
+    data: {
+      accession_number: obj.accession_number as string,
+      form_type: obj.form_type as string,
+      cik: obj.cik as string,
+      issuer_name,
+      filing_date: obj.filing_date as string,
+      filing_text: obj.filing_text as string,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +198,12 @@ function isAuthorized(req: Request): boolean {
  * Handles POST /internal/ingestion/corporate-action.
  *
  * Returns null for non-matching paths so the caller can chain handlers.
+ *
+ * Validation failures return HTTP 422 with a structured error object:
+ *   { error: 'Validation failed', issues: ValidationIssue[] }
+ *
+ * Successful first insert returns 201 { id: string }.
+ * Idempotent duplicate returns 200 { id: string, duplicate: true }.
  */
 export async function handleCorporateActionIngestionRequest(
   req: Request,
@@ -128,27 +227,29 @@ export async function handleCorporateActionIngestionRequest(
   }
 
   // ---------------------------------------------------------------------------
-  // 2. Parse and validate body
+  // 2. Parse JSON body
   // ---------------------------------------------------------------------------
 
-  let body: Partial<CorporateActionIngestBody>;
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as Partial<CorporateActionIngestBody>;
+    rawBody = await req.json();
   } catch (_err) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const required: (keyof CorporateActionIngestBody)[] = [
-    'accession_number',
-    'form_type',
-    'cik',
-    'filing_date',
-    'filing_text',
-  ];
-  for (const field of required) {
-    if (!body[field]) {
-      return json({ error: `Missing required field: ${field}` }, 400);
-    }
+  // ---------------------------------------------------------------------------
+  // 3. Validate body — returns 422 on any validation failure
+  // ---------------------------------------------------------------------------
+
+  const validation = validateCorporateActionBody(rawBody);
+  if (!validation.success) {
+    return json(
+      {
+        error: 'Validation failed',
+        issues: validation.issues,
+      },
+      422,
+    );
   }
 
   const {
@@ -158,16 +259,16 @@ export async function handleCorporateActionIngestionRequest(
     issuer_name = null,
     filing_date,
     filing_text,
-  } = body as Required<CorporateActionIngestBody>;
+  } = validation.data;
 
   // ---------------------------------------------------------------------------
-  // 3. Encrypt filing_text (AES-256-GCM via encryptField)
+  // 4. Encrypt filing_text (AES-256-GCM via encryptField)
   // ---------------------------------------------------------------------------
 
   const filingTextEncrypted = await encryptField('corporate_action', filing_text);
 
   // ---------------------------------------------------------------------------
-  // 4. Insert CorporateAction row (ON CONFLICT DO NOTHING for idempotency)
+  // 5. Insert CorporateAction row (ON CONFLICT DO NOTHING for idempotency)
   // ---------------------------------------------------------------------------
 
   const idempotencyKey = `edgar:${accession_number}`;
@@ -196,10 +297,14 @@ export async function handleCorporateActionIngestionRequest(
   }
 
   // ---------------------------------------------------------------------------
-  // 5. Enqueue one ALERT_ENRICH task
+  // 6. Enqueue one ALERT_ENRICH task with idempotency key edgar:<accession_number>
+  //
+  // The idempotency key is scoped to the accession_number (not the row id) so
+  // that a retry of the same accession_number never enqueues a second task —
+  // even if the corporate_action row was created in a previous call.
   // ---------------------------------------------------------------------------
 
-  const alertEnrichIdempotencyKey = `alert-enrich:${row.id}`;
+  const alertEnrichIdempotencyKey = `alert-enrich:edgar:${accession_number}`;
   await enqueueTask({
     idempotency_key: alertEnrichIdempotencyKey,
     agent_type: TASK_TYPE_AGENT_MAP[TaskType.ALERT_ENRICH],
@@ -210,7 +315,7 @@ export async function handleCorporateActionIngestionRequest(
   });
 
   // ---------------------------------------------------------------------------
-  // 6. Return 201
+  // 7. Return 201
   // ---------------------------------------------------------------------------
 
   return json({ id: row.id }, 201);
