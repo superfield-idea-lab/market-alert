@@ -182,9 +182,16 @@ Passkeys eliminate shared-secret credentials for the Trader and Admin roles (PRD
 (logout, force-expire on credential compromise).
 
 **RBAC:** Scope-based authorization enforced by `requireScope` middleware in `apps/server`.
-Scopes: `alerts:read`, `alerts:acknowledge`, `alerts:admin`, `sources:admin`,
-`trades:propose`, `trades:execute`, `replay:read`. PostgreSQL RLS provides data-layer
-enforcement in addition to middleware enforcement.
+
+| Role    | Scopes                                                                                 |
+| ------- | -------------------------------------------------------------------------------------- |
+| Trader  | `alerts:read`, `alerts:acknowledge`, `trades:propose`, `trades:execute`, `replay:read` |
+| Analyst | `alerts:read`, `alerts:review`, `alerts:suppress`                                      |
+| Admin   | `alerts:admin`, `sources:admin`, `replay:read`                                         |
+
+The Analyst role holds the AMBER review queue: it can approve or suppress alerts that the
+routing engine has placed in `Routed:AMBER` state before they advance to `Delivered`.
+PostgreSQL RLS provides data-layer enforcement in addition to middleware enforcement.
 
 **Worker credentials:** Workers carry no `DATABASE_URL` and hold no database connection.
 They authenticate with a scoped machine API token (AWS Secrets Manager, rotated weekly) and
@@ -233,6 +240,24 @@ rather than blocking the queue.
 **Post-v1 IMAP:** Bloomberg, DealReporter, and other vendors named in PRD §1 deliver via email
 feeds. When licensed, each vendor mailbox becomes an independent ETL partition using `imapflow`
 as the IMAP client, with its own UID cursor and UIDVALIDITY epoch per the imap-etl blueprint.
+
+---
+
+## Alert routing
+
+After deduplication, every alert is assigned a confidence tier before delivery (PRD §5):
+
+| Tier      | Condition                                             | Path                                              |
+| --------- | ----------------------------------------------------- | ------------------------------------------------- |
+| **GREEN** | High-confidence, all structured fields extracted      | Direct → `Delivered` via WebSocket push           |
+| **AMBER** | Ambiguous data, partial extraction, or low confidence | Routed to Analyst review queue before `Delivered` |
+
+Routing decisions are deterministic rule-based logic only — generative AI must not
+participate in tier assignment (PRD §9 AI Prohibition). The routing step is part of the
+<50ms internal processing budget; no external I/O is permitted on the routing path.
+
+Analyst approval or suppression of an AMBER alert writes a journal entry and transitions
+the alert to `Delivered` or `Suppressed` respectively.
 
 ---
 
@@ -309,8 +334,9 @@ tasks up to a configurable timeout, then exits. No external shutdown library req
 lines in `apps/worker/src/runner.ts`).
 
 **Sub-second SLA scope:** The 1-second SLA (PRD §9) applies to the `Deduplicated` →
-WebSocket push segment. Outbound channels (email, SMS, webhook) are dispatched asynchronously
-by the delivery worker and are not on the sub-second path. `ALERT_NOTIFY` failures are
+WebSocket push segment. Internal processing (Detect → Extract → Route) strictly targets
+<50ms (PRD §2). Outbound channels (email, SMS, webhook) are dispatched asynchronously by
+the delivery worker and are not on the sub-second path. `ALERT_NOTIFY` failures are
 non-blocking; the `Delivered` state is set on WebSocket push completion.
 
 ---
@@ -476,7 +502,9 @@ value. The in-process scheduler enqueues a prune task on the disable date.
    `Deduplicated` → WebSocket push segment only, not the full EDGAR-to-outbound-channel
    pipeline (10-minute EDGAR feed cadence makes the full-pipeline interpretation
    unachievable).
-7. **Market data price feed** — provider not yet chosen; blocks Phase 3 delta-neutral test
+7. **AMBER analyst review SLA** — how long before an unreviewed AMBER alert auto-expires
+   or escalates to direct delivery? Unresolved; blocks Phase 4 Analyst queue design.
+8. **Market data price feed** — provider not yet chosen; blocks Phase 3 delta-neutral test
    fixtures and terms extraction.
-8. **Trader fine-grained filtering** — filter by event type, sector, and deal size (PRD §10)
+9. **Trader fine-grained filtering** — filter by event type, sector, and deal size (PRD §10)
    is not scheduled in the plan phases.
