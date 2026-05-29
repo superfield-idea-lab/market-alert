@@ -2,102 +2,130 @@
 
 ## 1. Problem Statement
 
-Event-driven arbitrage hedge fund traders rely on fragmented detection systems—proprietary monitors and external vendors (Bloomberg, DealReporter, EventVestors, Bike.ai, LSEG Tora, VisualPing)—to identify corporate actions (M&A, dividends, spinoffs). This fragmentation creates latency, missed signals, and signal-to-noise challenges that delay trade execution and reduce arbitrage window capture.
+Finance researchers (buy-side analysts, portfolio managers, event-driven traders) lose alpha because the knowledge that informs their decisions — research notes, filings read, prior market context, evolving thesis — lives in fragmented places. When a market event hits, the time required to re-load enough thesis context to act is longer than the arbitrage window allows. Existing market-alert tools fire raw events without thesis context; existing research tools store knowledge but do not evaluate it against incoming events in real time.
+
+This product is an ambient AI memory layer for finance researchers, coupled with a market alert system. Ground truth (filings, notes, prior research, market context) is continuously absorbed and synthesized into a **living wiki** — a navigable, versioned, cited document organized per knowledge-bearing entity (Company/Ticker, Sector, Thesis, Event). The wiki is the persistent, authoritative knowledge substrate the researcher can read, search, and drill into.
+
+From the wiki, the system continuously distills a compact standing prompt (~100 words) representing the researcher's current thesis. When a market event arrives, that standing prompt is evaluated against the event instantly, producing an actionable, thesis-aware trade signal that cites back into the wiki.
+
+V1 narrows the market-event domain to corporate actions (M&A, tender offers, spinoffs, special dividends, rights offerings, bankruptcies, proxy fights).
 
 ## 2. Goals and Success Metrics
 
-- **Accuracy**: Eliminate false positives and false negatives in corporate action detection within the proscribed universe.
-- **Latency**: Sub-second detection and delivery from event source to trader notification; internal processing latency strictly targets <50ms.
-- **Volume**: Handle alert volume within the defined security universe without degradation.
+- **Navigable knowledge substrate**: The researcher can browse, search, and drill into a living wiki of their accumulated knowledge, organized per entity, with citations to ground-truth sources.
+- **Thesis-awareness**: Every delivered signal is reasoned against the researcher's current standing prompt, with citations back into the wiki.
+- **Instant evaluation**: From event detection to signal delivery, latency stays inside the corporate-action arbitrage window for the researcher's universe.
+- **Compact synthesis**: The active standing prompt stays small enough to be evaluated against an event in a single fast model call.
+- **Ambient continuity**: New ground truth is absorbed and reflected in the wiki and the standing prompt without requiring explicit researcher action.
+- **Recall**: A researcher can trace any delivered signal back to the exact wiki snapshot and standing-prompt revision that produced it.
 
 ## 3. User Roles
 
-- **Trader**: Views alerts, acknowledges them, accesses enriched event details, manages personal watchlists. Executes arbitrage trades based on alerts.
-- **Analyst**: Reviews AMBER-tier alerts where data is ambiguous or incomplete before trader delivery. Can escalate or suppress.
-- **Admin**: Manages data source configuration, monitors system health, overrides alerts when necessary, maintains audit trails.
+- **Researcher**: Primary user. Connects sources, reviews and acts on signals, inspects memory and standing prompt, manages watchlists.
+- **Reviewer**: Optional intermediary who reviews low-confidence signals before delivery to the researcher.
+- **Admin**: Manages source configuration, system health, retention policies, and audit access.
 
 ## 4. User Stories
 
-- As a Trader, I want to receive fresh alerts on P0 corporate actions affecting my watchlist so that I can identify arbitrage opportunities before market inefficiencies close.
-- As a Trader, I want to see deduplicated, enriched event details (terms, impact, spread estimates) so that I can make rapid trade decisions.
-- As a Trader, I want to configure watchlists by ticker or event type so that I only receive alerts relevant to my strategy.
-- As an Analyst, I want to review flagged AMBER alerts and approve or suppress them so that traders receive only high-confidence signals.
-- As an Admin, I want to configure and manage upstream data sources so that I can maintain detection quality and coverage.
-- As an Admin, I want to override or suppress false-positive alerts so that I can tune system behavior without code changes.
+- As a Researcher, I want my notes, filings, and prior context to be absorbed into an ambient memory so that I do not need to manually re-summarize what I know.
+- As a Researcher, I want my accumulated knowledge organized as a navigable wiki — one page per company, sector, thesis, and event — so that I can read, search, and drill into what the system knows about any entity.
+- As a Researcher, I want every wiki claim to cite the underlying ground truth (filing, note, prior research) so that I can verify the basis before acting.
+- As a Researcher, I want the system to maintain a compact standing prompt distilled from the wiki so that incoming events can be evaluated against my thesis instantly.
+- As a Researcher, I want to receive trade signals that have been pre-reasoned against my thesis, with citations into the relevant wiki pages, so that I can act without re-deriving context.
+- As a Researcher, I want to inspect and override the current standing prompt so that I can correct drift or pin a thesis during a key window.
+- As a Researcher, I want to manage watchlists of tickers and corporate-action event types so that only relevant events are evaluated against my thesis.
+- As a Reviewer, I want to triage low-confidence signals and approve, edit, or suppress them before they reach the researcher so that signal quality stays high.
+- As an Admin, I want to configure upstream sources, monitor pipeline health, and access an audit trail so that I can keep coverage and trust intact.
 
 ## 5. Core Workflows
 
 **Happy Path:**
 
-1. Corporate action event is detected from one or more upstream sources via pluggable adapters.
-2. Raw event is normalized into a structured observation.
-3. System detects event type and extracts structured fields (pricing, ratios, effective dates) specific to the P0 event class.
-4. System deduplicates against recent alerts using a composite key (ticker + event type + date).
-5. Alert is routed by confidence tier:
-   - **GREEN**: High-confidence, deterministic rules → direct trader delivery.
-   - **AMBER**: Ambiguous or incomplete data → analyst review queue before delivery.
-6. Trader receives alert via outbound channel (email, SMS, webhook).
-7. Trader reviews enriched details in UI and acknowledges alert.
-8. System records event for replay and lifecycle tracking.
+1. Researcher onboards and connects knowledge sources (research notes, filings read, watchlists, prior thesis documents).
+2. Ambient ingestion absorbs each new ground-truth item and routes it to the relevant wiki entities (Company/Ticker, Sector, Thesis, Event).
+3. The synthesis layer rebuilds the affected wiki pages, producing a new versioned page snapshot with citations back to the source ground truth. The researcher can navigate the wiki at any time — browse pages, follow links between entities, search, and drill into citations.
+4. From the current wiki, the synthesis layer continuously distills a compact (~100 word) standing prompt representing the researcher's current thesis. The standing prompt updates automatically, without requiring explicit researcher approval.
+5. A corporate-action event is detected and normalized from upstream sources.
+6. The event is evaluated against the researcher's active standing prompt in a single fast call, producing a thesis-aware signal: direction, confidence, rationale, and citations into the relevant wiki pages.
+7. High-confidence signals are delivered directly to the researcher. Low-confidence signals are routed to a Reviewer queue before delivery.
+8. The researcher reviews the signal with its wiki citations, then acknowledges, acts, or dismisses it.
+9. The system records the event, the wiki snapshot used, the standing-prompt revision used, and the signal outcome for replay and audit.
 
 **Edge Cases:**
 
-- Duplicate events from multiple release mechanisms (press release, SEC filing, vendor alert).
-- Noisy or incomplete announcements (footnotes, unstructured text in press releases with tables).
-- Messy SEC filings requiring text extraction and normalization.
-- Out-of-order arrival of correlated events.
-- NLP/text extraction service unavailable — system must degrade gracefully using fixture data.
+- Conflicting or stale memory items that pull the standing prompt in opposing directions.
+- Researcher pins or overrides the standing prompt during a sensitive window; ambient updates pause or queue.
+- Multiple competing theses owned by the same researcher (e.g. by sector or strategy).
+- Source outage in ambient ingestion; the system continues to evaluate events against the last-known standing prompt and flags the staleness.
+- Duplicate events arriving from multiple release mechanisms.
+- Event signal evaluation returns ambiguous output; routed to Reviewer.
+- Researcher edits or deletes a memory item; downstream standing prompt and prior signals must reflect the provenance change.
 
 ## 6. Entity Lifecycle
 
-**Alert**
+**Ground-Truth Item**
 
-- States: Pending → Detected → Enriched → Deduplicated → Routed (GREEN or AMBER) → Delivered → Acknowledged → Archived
-- Transitions: Auto-advance through Pending→Detected→Enriched→Deduplicated→Routed; GREEN routes directly to Delivered; AMBER routes to Analyst review before Delivered; Trader manually transitions to Acknowledged; system auto-archives after retention period.
+- States: Ingested → Synthesized → Superseded → Archived.
+- Transitions: An ingested item moves to Synthesized once it has been incorporated into one or more wiki pages or marked irrelevant. Superseded when a newer item displaces its contribution. Archived after the retention window or on researcher request.
 
-**Corporate Action**
+**Wiki Page**
 
-- P0 Event Types: M&A (announced/rumored), tender offers, spinoffs, special dividends, rights offerings, bankruptcies, proxy fights.
-- States: Announced → Effective → Closed → Disputed
-- Transitions: Auto-advance Announced→Effective on effective date; advance to Closed post-settlement; transition to Disputed if legal challenge or regulatory action occurs.
+- One per knowledge-bearing entity. Entity types in V1: Company/Ticker, Sector, Thesis, Event.
+- States: Draft → Published → Superseded.
+- Transitions: Each rebuild produces a new versioned page snapshot citing the ground-truth items that support its claims. The new snapshot becomes Published and the prior snapshot moves to Superseded. Prior versions remain navigable for audit and replay.
 
-**Trade**
+**Standing Prompt**
 
-- States: Proposed → Executed → Settled → Reconciled
-- Transitions: Trader proposes (manual or auto); executes (manual or API); settles on settlement date; reconciles on post-trade audit.
+- States: Draft → Active → Superseded.
+- Transitions: The synthesis layer produces a new Draft from the current wiki; the Draft becomes Active automatically, replacing the prior Active prompt, which moves to Superseded. A researcher may pin an Active prompt to block automatic replacement; a researcher may also force a new Draft from the current wiki.
+
+**Market Event** (V1: corporate actions)
+
+- Event types: M&A (announced/rumored), tender offers, spinoffs, special dividends, rights offerings, bankruptcies, proxy fights.
+- States: Detected → Enriched → Evaluated → Closed → Disputed.
+- Transitions: Auto-advance on enrichment and evaluation; Closed after settlement window; Disputed on legal or regulatory challenge.
+
+**Signal**
+
+- States: Generated → (Reviewing) → Delivered → Acknowledged → Acted | Dismissed → Archived.
+- Transitions: High-confidence signals skip Reviewing. Low-confidence signals enter the Reviewer queue and may be approved, edited, or suppressed. The researcher manually transitions Delivered to Acknowledged, then Acted or Dismissed. Archived after retention.
 
 ## 7. Integration Needs
 
-- **Real-time event feeds**: Pluggable adapters for corporate action announcements from SEC filings and trusted wire services.
-- **Data enrichment**: Terms extraction, delta-neutral impact calculation, text parsing and normalization. NLP/text extraction is optional and must degrade gracefully.
-- **Outbound alerting**: Multi-channel delivery (email, SMS, webhook, trading platform API integration).
-- **Event streaming and replay**: Capability to replay historical fixture data for analysis, debugging, and demonstration.
+- **Real-time corporate-action event feed**: Pluggable adapters for filings and trusted wire sources.
+- **Researcher knowledge ingestion**: Capability to absorb the researcher's notes, prior filings read, and thesis documents as ground truth.
+- **Semantic ground-truth storage**: A store that supports retrieval and citation across the researcher's accumulated items.
+- **Wiki synthesis and navigation**: A capability that materializes ground truth into a versioned, cited, navigable wiki organized per knowledge-bearing entity. The wiki is both human-readable and the upstream substrate for the standing prompt.
+- **Standing-prompt distillation and evaluation**: A capability that continuously distills the wiki into a compact standing prompt, and evaluates incoming events against that prompt with citations.
+- **Outbound alerting**: Multi-channel signal delivery (email, SMS, webhook).
+- **Replay and audit**: Capability to replay any past event against the wiki snapshot and standing-prompt revision that were active at the time.
 
 ## 8. Out of Scope
 
-- Generative AI for alert generation, triggering, or routing decisions.
+- Automated trade execution and broker integrations.
+- Multi-tenant team collaboration on a shared memory (V1 is per-researcher private memory).
+- Mobile application.
+- Market-event domains beyond corporate actions (earnings, macro, news, etc.) are post-V1.
 - Cryptocurrency and commodity asset classes.
-- Historical backtesting of alert performance.
-- Automated trade execution.
-- Premium vendor data credentials for V1; replayable fixture data is sufficient.
+- Backtesting historical thesis-prompt performance at scale (basic replay is in scope; large-scale historical sweeps are not).
 
 ## 9. Constraints
 
-- **Regulatory**: SEC regulations apply; compliance with corporate action disclosure requirements.
-- **Audit Trail**: Minimal audit logging for MVP; enhanced compliance and audit capabilities in post-MVP phases.
-- **Performance**: Sub-second latency from event detection to trader notification; internal processing strictly <50ms.
-- **Deduplication**: System must deduplicate across multiple detection sources using a composite key of ticker, event type, and date.
-- **Replay**: System must support full event replay for debugging and demonstration.
-- **AI Prohibition**: Generative AI must not be used for alert triggering or routing decisions. NLP/LLMs are permitted only for optional text extraction and must degrade gracefully when unavailable.
-- **Data Integrity**: Monetary values must use decimal precision; all timestamps must be UTC.
-- **V1 Scope**: Single-process service with embedded data storage and a plain web UI. No premium vendor credentials required.
-- **User Interface**: Basic UI required for viewing, acknowledging, and filtering alerts.
+- **Privacy**: Each researcher's memory and standing prompts are private by default. No cross-researcher leakage.
+- **Auditability**: Every delivered signal must reference the exact wiki snapshot and standing-prompt revision used to produce it, and must cite the wiki pages and ground-truth items that supported its rationale. Generative synthesis and evaluation are permitted, but their outputs must remain traceable to their inputs.
+- **Wiki as substrate**: The wiki is the authoritative knowledge substrate. The standing prompt is derived from it; signals cite into it. The researcher can always navigate to the wiki page behind any claim.
+- **Compact standing prompt**: The active standing prompt is bounded so that evaluation against an event is a single fast call.
+- **Latency**: Event-to-signal evaluation must complete inside the arbitrage window for V1 corporate-action event types.
+- **Deduplication**: Events must be deduplicated across release mechanisms by a composite key of ticker, event type, and date.
+- **Data integrity**: Monetary values use decimal precision; all timestamps are UTC.
+- **Regulatory**: Corporate-action disclosure rules apply.
 
 ## 10. Open Questions
 
-- What is the target universe size (number of securities)? This drives data ingestion and storage scale.
-- What is the expected alert volume per day, per hour, per second? This informs infrastructure scaling.
-- Should traders have fine-grained filtering by event type, sector, or deal size?
-- What enrichment data is critical vs. nice-to-have for initial release (e.g., delta-neutral impact vs. estimated arbitrage spread)?
-- Should the system support webhook-based integration with external trading systems, or is UI-driven decision-making sufficient for MVP?
-- What is the SLA for AMBER analyst review — how long before an unreviewed AMBER alert auto-expires or escalates?
+- What is the target universe size and expected event volume per researcher?
+- What ingestion sources must be supported for researcher memory at launch (note apps, document uploads, email, browser capture)?
+- What governs how aggressively the standing prompt is rewritten — time-based, change-volume-based, or event-anticipation-based?
+- What is the confidence threshold that routes a signal to a Reviewer rather than direct delivery?
+- What retention period applies to memory items, standing-prompt revisions, and signals?
+- How are competing theses (multiple standing prompts per researcher) selected for evaluation against an incoming event?
+- What SLA governs Reviewer triage before an unreviewed low-confidence signal expires?
