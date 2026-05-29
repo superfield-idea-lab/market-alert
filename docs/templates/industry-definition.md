@@ -82,13 +82,13 @@ litigants. Each becomes a wiki page so claims can attach to it.
 
 The event types that matter in this niche. The system uses this list
 to know what to watch for and to route incoming events to the right
-wiki entities. Pair this with §9 of the Research Methodology, which
-governs which catalysts fire signals vs. only annotate the wiki.
+wiki entities. Whether each catalyst fires a trade signal or only
+annotates the wiki is decided in §9 of the Research Methodology, not
+here — that is the single source of truth for routing.
 
 - Catalyst type: _[…]_
   - Where it surfaces: _[…]_
   - Typical lead time: _[…]_
-  - Default routing: _[wiki only / candidate signal]_
 
 (Repeat per catalyst type.)
 

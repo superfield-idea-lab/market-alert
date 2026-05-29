@@ -52,13 +52,21 @@ not move on the day is, for my purpose, not in scope.
 
 The list of entities the system tracks for me. Tickers are
 authoritative; names and listing venues disambiguate. The table below
-is a starter seed — I extend it as I take on names. Agents may
-**propose** additions via methodology meta-commentary; they may not
-edit the table.
+is a seed of illustrative clinical-stage names; I revise it as I take
+on or drop coverage. Agents may **propose** additions via methodology
+meta-commentary; they may not edit the table.
 
-| Ticker | Name  | Listing | Sub-Segment | Notes |
-| ------ | ----- | ------- | ----------- | ----- |
-| _[…]_  | _[…]_ | _[…]_   | _[…]_       | _[…]_ |
+| Ticker | Name                 | Listing | Sub-Segment          | Notes                            |
+| ------ | -------------------- | ------- | -------------------- | -------------------------------- |
+| VKTX   | Viking Therapeutics  | NASDAQ  | Pre-pivotal clinical | MASH and obesity programs        |
+| RVMD   | Revolution Medicines | NASDAQ  | Pre-pivotal clinical | KRAS-inhibitor oncology platform |
+| IMVT   | Immunovant           | NASDAQ  | Pre-pivotal clinical | Anti-FcRn immunology             |
+| KYMR   | Kymera Therapeutics  | NASDAQ  | Pre-pivotal clinical | Targeted protein degradation     |
+| ANNX   | Annexon              | NASDAQ  | Pre-pivotal clinical | Complement-targeted neurology    |
+
+These are seed examples I picked to exercise the system across
+sub-segments and indications; the operational watchlist is whatever
+this table says at the time the agents read it.
 
 ## 6. Key Non-Issuer Actors
 
@@ -79,49 +87,39 @@ becomes a wiki page so claims can attach to it.
 
 ## 7. Catalyst Taxonomy
 
-The event types that matter in this niche. Per the methodology, only a
-subset fires actionable trade signals; the rest annotate the wiki.
+The event types that matter in this niche. Which of these fire trade
+signals vs. only annotate the wiki is decided in §9 of my Research
+Methodology — not here.
 
 - **Catalyst:** Clinical readout (efficacy).
   - Where it surfaces: Press release first, 8-K Item 8.01/7.01 with
     Exhibit 99.1, sometimes conference abstract.
   - Typical lead time: Hours to days from registered topline window.
-  - Default routing: Candidate signal.
 - **Catalyst:** Regulatory action.
   - Where it surfaces: FDA press, company 8-K, Drugs@FDA.
   - Typical lead time: PDUFA-bounded.
-  - Default routing: Candidate signal.
 - **Catalyst:** Safety event.
   - Where it surfaces: Press release, 8-K Item 8.01, trial-registry
     status change to Suspended/Terminated.
   - Typical lead time: Often delayed; track registry diffs in parallel.
-  - Default routing: Candidate signal.
 - **Catalyst:** Financing / solvency event.
   - Where it surfaces: 8-K Item 1.01 / 3.02, 424B5 prospectus, Item
     3.01 delisting notice, going-concern language in 10-K/Q.
-  - Default routing: Candidate signal.
 - **Catalyst:** M&A or major partnership.
   - Where it surfaces: Press release first, 8-K Item 1.01 with
     definitive agreement as exhibit.
-  - Default routing: Candidate signal.
 - **Catalyst:** Program change / pipeline discontinuation.
   - Where it surfaces: 8-K Item 1.02, earnings call, pipeline-page
     diff.
-  - Default routing: Candidate signal.
 - **Catalyst:** Governance red flag.
   - Where it surfaces: 8-K Item 4.01 (auditor), 4.02 (restatement),
     5.02 (officer departure) — timing-filtered against catalyst
     calendar.
-  - Default routing: Candidate signal.
 - **Catalyst:** Trading halt (T1 / T12).
   - Where it surfaces: Exchange notice.
-  - Default routing: Candidate signal — a halt near a catalyst is
-    itself meaningful.
 - **Catalyst:** Insider transactions (Form 4) and 13D/G activity.
-  - Default routing: Wiki annotation only — context, not trigger.
 - **Catalyst:** Routine periodic filings (10-K/Q boilerplate, planned
   retirements, registered-shelf housekeeping).
-  - Default routing: Wiki annotation only — never fires a signal.
 
 ## 8. Glossary
 

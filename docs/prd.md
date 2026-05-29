@@ -9,13 +9,13 @@ This product is an **ambient AI research associate** for finance researchers, co
 - **Industry Definition** — the sub-industry, niche, and watchlist they care about.
 - **Research Methodology** — how they discover, gather, evaluate, weigh, and rank information.
 
-Given these inputs, the ambient AI continuously works on the researcher's behalf: it discovers and scrapes the venues the methodology designates as authoritative, ingests the findings as canonical sources, fact-checks, removes inconsistencies, debates contested claims, and synthesizes everything into a **living wiki** — a navigable, versioned, cited document organized per knowledge-bearing entity (Company/Ticker, Sub-Industry, Thesis, Event, Canonical Source).
+Given these inputs, the ambient AI continuously works on the researcher's behalf: it discovers and scrapes the venues the methodology designates as authoritative, ingests the findings as canonical sources, fact-checks, removes inconsistencies, debates contested claims, and synthesizes everything into a **living wiki** — a navigable, versioned, cited document organized per knowledge-bearing entity (Company/Ticker, Sub-Industry, Thesis, Event, Actor, Canonical Source).
 
 From the wiki, the system continuously distills a compact **standing prompt (~100 words)** — the trade evaluator — representing the researcher's current thesis. When a market event arrives, that evaluator is applied to the event instantly, producing an actionable, thesis-aware trade signal that cites back into the wiki.
 
 At all times two artifacts are kept current: the **wiki (encyclopedia)** the researcher can read, and the **trade evaluator (standing prompt)** the system applies to incoming events.
 
-The demo persona for V1 is **Tom, a life sciences investor.** Tom authors his own Industry Definition (a life-sciences sub-niche and ticker watchlist) and his own Research Methodology (the venues, source-trust rules, and ranking heuristics he uses). The system acts as Tom's research associate against those golden documents.
+The demo persona for V1 is **Tom, a small-cap biotech investor.** Tom authors his own Industry Definition (a small-cap clinical-stage biotech niche and ticker watchlist) and his own Research Methodology (the venues, source-trust rules, and ranking heuristics he uses). The system acts as Tom's research associate against those golden documents.
 
 V1 narrows the market-event domain to corporate actions (M&A, tender offers, spinoffs, special dividends, rights offerings, bankruptcies, proxy fights).
 
@@ -42,7 +42,7 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 - As a Researcher, I want to author an Industry Definition document (sub-industry, niche, watchlist) and have it remain mine — read-only to all agents — so that my scope is preserved exactly as I wrote it.
 - As a Researcher, I want to author a Research Methodology document (sources I trust, how I weigh and rank information) and have it remain mine — read-only to all agents — so that the system reasons the way I do.
 - As a Researcher, I want the system to act as a research associate: discover the venues my methodology calls authoritative, scrape findings on my behalf, ingest them as canonical sources, and continuously work through them.
-- As a Researcher, I want my accumulated knowledge organized as a navigable wiki — one page per company, sub-industry, thesis, event, and canonical source — so that I can read, search, and drill into what the system knows about any entity.
+- As a Researcher, I want my accumulated knowledge organized as a navigable wiki — one page per company, sub-industry, thesis, event, non-issuer actor, and canonical source — so that I can read, search, and drill into what the system knows about any entity.
 - As a Researcher, I want every wiki claim to cite the canonical source that supports it so that I can verify the basis before acting.
 - As a Researcher, I want the ambient AI to continuously improve the wiki — fact-check claims, surface and resolve inconsistencies, and debate contested findings — so that the wiki stays trustworthy without my constant attention.
 - As a Researcher, I want the system to maintain a compact standing prompt (trade evaluator) distilled from the current wiki so that incoming events can be evaluated against my thesis instantly.
@@ -60,7 +60,7 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 1. Researcher authors the Industry Definition (sub-industry, niche, watchlist) and the Research Methodology (sources, evaluation rules, ranking heuristics) as golden documents.
 2. The ambient agents read the golden documents and identify the venues the methodology designates as authoritative.
 3. Source-discovery and scraping agents pull findings from those venues on a continuous schedule and register them as canonical sources in the wiki.
-4. Ingestion and synthesis agents work through the canonical sources, routing claims to the relevant wiki entities (Company/Ticker, Sub-Industry, Thesis, Event, Canonical Source).
+4. Ingestion and synthesis agents work through the canonical sources, routing claims to the relevant wiki entities (Company/Ticker, Sub-Industry, Thesis, Event, Actor, Canonical Source).
 5. Maintenance agents continuously fact-check claims, surface inconsistencies, debate contested findings, and update or retract wiki claims accordingly. A canonical source may be ingested without changing the wiki if the maintenance pass concludes it adds no new trusted information.
 6. Each wiki rebuild produces a new versioned page snapshot citing the canonical sources that support its claims. The researcher can navigate the wiki at any time.
 7. From the current wiki, the synthesis layer continuously distills a compact (~100 word) standing prompt (the trade evaluator). The evaluator updates automatically, without requiring researcher approval.
@@ -113,14 +113,14 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 - States: Discovered → Active → Retracted → Archived.
 - Transitions: A source enters Active once scraping has confirmed access and trust per the methodology. Retracted when the publisher retracts content or the methodology demotes the venue. Archived after retention.
 
-**Source Finding** (a scraped item from a Canonical Source)
+**Source Finding** (a scraped or researcher-provided item attached to a Canonical Source)
 
 - States: Scraped → Ingested → Synthesized → Superseded → Archived.
 - Transitions: A scraped finding becomes Ingested once parsed. Synthesized once incorporated into one or more wiki pages (or explicitly judged non-additive by the maintenance pass). Superseded when a newer finding displaces its contribution. Archived after retention.
 
 **Wiki Page**
 
-- One per knowledge-bearing entity. Entity types in V1: Company/Ticker, Sub-Industry, Thesis, Event, Canonical Source.
+- One per knowledge-bearing entity. Entity types in V1: Company/Ticker, Sub-Industry, Thesis, Event, Actor (non-issuer counterparties such as regulators, payers, monitoring committees, dominant counterparties), Canonical Source.
 - States: Draft → Published → Superseded.
 - Transitions: Each rebuild produces a new versioned page snapshot citing the canonical sources and source findings that support its claims. The new snapshot becomes Published and the prior snapshot moves to Superseded. Prior versions remain navigable for audit and replay.
 
@@ -151,7 +151,7 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 - **Real-time corporate-action event feed**: Pluggable adapters for filings and trusted wire sources.
 - **Golden-document authoring surface**: A capability for the researcher to author and revise the Industry Definition and Research Methodology, with a strict guarantee that agents have read-only access to these documents.
 - **Source discovery and scraping**: A capability to discover the venues the methodology designates as authoritative and to scrape their content on a continuous schedule, respecting venue rate limits and access rules.
-- **Canonical-source registry and ingestion**: Capability to register scraped venues as canonical sources and ingest their findings.
+- **Canonical-source registry and ingestion**: Capability to register canonical sources — both scraped venues (per the methodology) and researcher-provided uploads (notes, prior research, thesis documents) — and ingest their findings.
 - **Wiki synthesis, fact-checking, and debate**: A capability that materializes findings into a versioned, cited, navigable wiki organized per knowledge-bearing entity, continuously fact-checks claims, reconciles inconsistencies, and surfaces debates when convergence fails.
 - **Standing-prompt distillation and evaluation**: A capability that continuously distills the wiki into a compact standing prompt (the trade evaluator), and applies that evaluator to incoming events with citations.
 - **Researcher feedback surface**: A capability for the researcher to give feedback via chat dialogue with an agent and via inline edits inside wiki pages. Feedback that implies a methodology change is recorded in the methodology meta-commentary, never written back to the golden Methodology document.
@@ -196,4 +196,3 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 - What retention period applies to canonical sources, findings, wiki revisions, standing-prompt revisions, and signals?
 - How are competing theses (multiple standing prompts per researcher) selected for evaluation against an incoming event?
 - What SLA governs Reviewer triage before an unreviewed low-confidence signal expires?
-- For Tom's demo, which specific life-sciences sub-niche and which authoritative venues anchor the seed Industry Definition and Research Methodology?

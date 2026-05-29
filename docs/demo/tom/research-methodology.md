@@ -155,10 +155,10 @@ For every finding the wiki captures, the system records:
 
 ## 6. Trusted Analysts and Experts
 
-- _[name]_ — trusted in _[indication area]_
-- _[…]_
-
-Names trusted only within the listed area; outside, treat as Tier D.
+_Seed list intentionally empty._ I add named voices here over time;
+until a name appears, all sell-side and trade-publication coverage is
+treated as ordinary Tier D. Names trusted only within the listed
+indication area; outside, treat as ordinary Tier D.
 
 ## 7. Red Flags — Things that automatically demote a source
 
