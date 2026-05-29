@@ -1,13 +1,5 @@
 # Architecture
 
-> **Note on scope.** The product pivoted (see `docs/prd.md`) from a corporate-action alert
-> system to an **ambient AI research associate** built on a self-updating wiki and a
-> standing-prompt trade evaluator. The infrastructure stack below (Bun, Hono, Postgres,
-> RLS, task queue, observability) carries over. The domain model is reshaped around the
-> Knowledge subsystem (see § Knowledge subsystem). Sections describing tier-based GREEN /
-> AMBER alert routing and the AI prohibition predate the pivot; they are superseded by the
-> Signal section and by the auditability constraints in PRD §9.
-
 ## Overview
 
 The product is an ambient AI research associate for finance researchers. Given two
@@ -34,17 +26,17 @@ crash-resume, unified retrieval).
 ```
 apps/
   server/        — Hono/Bun HTTP + WebSocket API server
-  worker/        — Bun worker processes (ingestion, enrichment, delivery)
-  web/           — React/Vite trader dashboard (SPA)
+  worker/        — Bun worker processes (source discovery, scraping, ingestion, synthesis, evaluation, delivery)
+  web/           — React/Vite researcher dashboard (SPA)
   admin/         — React/Vite admin panel (SPA)
 packages/
   core/          — Shared TS types, entity models, state machines, algorithms
   ui/            — Shared design system (shadcn/ui, Tailwind tokens)
   db/            — Postgres schema, migrations, task-queue primitives
   services/      — Internal API clients (server-to-server)
-  integrations/  — Third-party SDK wrappers (EDGAR, SMTP, SMS)
+  integrations/  — Third-party SDK wrappers (event feeds, scraping clients, SMTP, SMS)
 tests/
-  fixtures/      — Committed JSON fixtures (EDGAR RSS, SEC filings, vendor responses)
+  fixtures/      — Committed JSON fixtures (corporate-action feeds, canonical-source scrapes, golden documents)
 docs/
   architecture/  — Per-blueprint research notes (source material for this document)
 ```
@@ -60,7 +52,7 @@ logged in `docs/dependencies.md`. That file is a Phase 0 deliverable.
 - `apps/worker` — separate deployable per `WORKER-D-001`; different scaling profile and
   network-egress policy from `apps/server`. Justified expansion of `ARCH-A-001`.
 - `apps/admin` — separate deployable for the Admin role (PRD §3); shares `packages/ui`
-  with `apps/web` but has distinct auth scopes (`alerts:admin`, `sources:admin`).
+  with `apps/web` but has distinct auth scopes (`signals:admin`, `sources:admin`).
 - `packages/db` — PostgreSQL schema DDL, migrations, and task-queue primitives. Kept
   separate from `packages/core` because it has a deploy-time lifecycle (migration runner)
   distinct from pure business logic.
@@ -90,29 +82,31 @@ dev dependency; the built-in bundler handles production builds. `tsx` is not use
 Hono is a thin, type-first router with first-class Bun support and minimal transitive
 dependencies. Route handlers consume request/response types from `/packages/core` directly.
 
-All API surfaces are REST. The sole non-REST exception is the Phase 4 WebSocket upgrade path,
-which is the only sanctioned real-time transport and is justified by the PRD §9 sub-second
-latency SLA.
+All API surfaces are REST. The sole non-REST exception is the WebSocket upgrade path,
+which is the only sanctioned real-time transport and is justified by the PRD §9 latency
+constraint (event-to-signal evaluation must complete inside the arbitrage window).
 
 **WebSocket transport:** Bun's native `Bun.serve` WebSocket upgrade (no `ws` library). The
-LISTEN/NOTIFY → WebSocket push path must deliver within 1 second of an alert reaching
-`Deduplicated` state. Sticky sessions via ALB target group are required for multi-replica
-deployments until a pub/sub fan-out strategy is chosen (see Open questions §3).
+LISTEN/NOTIFY → WebSocket push path delivers new signals, wiki-debate notifications, and
+standing-prompt rebuild events to the researcher dashboard. Sticky sessions via ALB target
+group are required for multi-replica deployments until a pub/sub fan-out strategy is
+chosen (see Open questions).
 
 ---
 
 ## Frontend
 
-**Apps:** `apps/web` (Trader dashboard) and `apps/admin` (Admin panel) — separate deployable
-SPAs sharing `packages/ui`.
+**Apps:** `apps/web` (Researcher dashboard) and `apps/admin` (Admin panel) — separate
+deployable SPAs sharing `packages/ui`.
 
 **Build:** Vite + `@vitejs/plugin-react` (IMPL-ARCH-003, IMPL-ARCH-010). Compiles to a pure
 browser bundle. `apps/server` serves the static assets; no SSR layer.
 
 **Framework:** React 18.x.
 
-**State management:** React Context + `useReducer` (DIY). No Redux or Zustand. The alert feed
-is a WebSocket hook updating a single `AlertFeedContext`.
+**State management:** React Context + `useReducer` (DIY). No Redux or Zustand. The signal
+feed is a WebSocket hook updating a single `SignalFeedContext`; the wiki view subscribes
+to page-version updates through the same transport.
 
 **Server data fetching:** TanStack Query v5 — handles loading/empty/error/success states
 required by UX `state-matrix.json` contracts; stale-while-revalidate for non-real-time views.
@@ -124,12 +118,13 @@ on the HTTP upgrade request via HTTP-only cookie. No third-party relay (no Pushe
 `packages/ui/design-system/`, styled with Tailwind CSS 3.x tokens. Components live under
 project control; no runtime dependency on an external library version.
 
-**Forms:** DIY controlled React inputs (`useState`). No react-hook-form or Formik. Both the
-watchlist management form and trade proposal form are simple enough not to warrant a library.
+**Forms:** DIY controlled React inputs (`useState`). No react-hook-form or Formik. The
+golden-document authoring surface, the wiki inline-edit surface, and the agent chat
+dialogue are simple enough not to warrant a library.
 
-**Alert list / data table:** TanStack Table v8 (headless; rendering delegated to design system
-components). Supports sort, client-side filter by event type / spread threshold / date range,
-and column control.
+**Signal feed / data table:** TanStack Table v8 (headless; rendering delegated to design
+system components). Supports sort, client-side filter by event type, subject entity,
+confidence, and date range, plus column control.
 
 **Styling:** Tailwind CSS 3.x, vanilla. Both `apps/web` and `apps/admin` draw from the same
 token system defined in `packages/ui`.
@@ -148,8 +143,8 @@ Connection pools are acquired at process startup and released on SIGTERM.
 structural DDL, idempotent seed, and feature-gated data migrations. No external migration
 framework.
 
-**Time partitioning:** `alerts` and `corporate_actions` use monthly `RANGE` partitioning on
-`created_at` / `announced_at`. Partition pruning keeps query plans bounded as event volume
+**Time partitioning:** `signals` and `market_events` use monthly `RANGE` partitioning on
+`created_at` / `detected_at`. Partition pruning keeps query plans bounded as event volume
 grows.
 
 **Replay storage:** A hash-chained `journal_entries` table in the `mkt_audit` schema. Each entry
@@ -167,21 +162,22 @@ No secondary schema representation.
 
 | Pool            | Role              | Permissions                                                                   |
 | --------------- | ----------------- | ----------------------------------------------------------------------------- |
-| `mkt_app`       | `mkt_app_rw`      | Read/write on transactional tables (alerts, trades, task queue)               |
+| `mkt_app`       | `mkt_app_rw`      | Read/write on transactional tables (raw filings, task queue, auth)            |
 | `mkt_analytics` | `mkt_analytics_w` | INSERT-only on analytics tables (Phase 7 — pool provisioned, idle until then) |
 | `mkt_audit`     | `mkt_audit_w`     | INSERT-only on audit/journal tables (`journal_entries`, audit log)            |
 
 No role crosses schema boundaries.
 
-**Row-level security:** PostgreSQL RLS enforces trader-scoping on `alerts` and `trades`.
-`apps/server` runs queries as the `mkt_app_rw` role with RLS active. Workers never hold
-database credentials; they call internal endpoints instead.
+**Row-level security:** PostgreSQL RLS enforces researcher-scoping on all `mkt_kb`
+entities (golden documents, wiki pages, facts, signals) and on `mkt_app.task_queue`
+rows. `apps/server` runs queries as the `mkt_app_rw` / `mkt_kb_*` roles with RLS active.
+Workers never hold database credentials; they call internal endpoints instead.
 
 **Schema inventory:**
 
 | Schema          | Tables                                                                                                                                                                                                                                                                                                                                |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mkt_app`       | `alerts`, `corporate_actions`, `trades`, `raw_filings`, `etl_cursors`, `etl_quarantine`, `task_queue`, `passkey_credentials`, `jti_revocations`, `machine_tokens`, `recovery_shards`, `feature_flags`                                                                                                                                 |
+| `mkt_app`       | `raw_filings`, `etl_cursors`, `etl_quarantine`, `task_queue`, `passkey_credentials`, `jti_revocations`, `machine_tokens`, `recovery_shards`, `feature_flags`                                                                                                                                                                          |
 | `mkt_kb`        | `entities`, `relations`, `entity_versions`, `golden_documents`, `golden_document_sections`, `methodology_meta_commentary`, `canonical_sources`, `source_findings`, `corpus_chunks`, `confirmed_facts`, `wiki_pages`, `wiki_page_versions`, `wiki_debates`, `standing_prompts`, `standing_prompt_versions`, `market_events`, `signals` |
 | `mkt_analytics` | Analytics projection tables (Phase 7)                                                                                                                                                                                                                                                                                                 |
 | `mkt_audit`     | `journal_entries`, `audit_log`                                                                                                                                                                                                                                                                                                        |
@@ -206,9 +202,8 @@ V1 entity types: `company`, `sub_industry`, `thesis`, `event`, `actor`, `canonic
 `wiki_debate`, `standing_prompt`, `standing_prompt_version`, `signal`,
 `golden_document`, `golden_document_section`, `methodology_meta_commentary_entry`.
 
-This is a deliberate reversal of the earlier ADR rejecting the property-graph model.
-The pivoted product is knowledge-graph-shaped; fixed domain tables would force a
-schema migration on every new entity kind.
+The product is knowledge-graph-shaped: researchers track many entity kinds across
+many sub-industries, and adding a kind must not force a schema migration.
 
 ### Wiki pages: full-snapshot versioning
 
@@ -312,7 +307,8 @@ context; workers never see DATABASE_URL.
 ## Authentication and authorization
 
 **Identity:** Self-hosted passkey authentication via `@simplewebauthn/server`. No Auth SaaS.
-Passkeys eliminate shared-secret credentials for the Trader and Admin roles (PRD §3).
+Passkeys eliminate shared-secret credentials for the Researcher, Reviewer, and Admin
+roles (PRD §3).
 
 **Sessions:** ES256 JWTs issued on successful WebAuthn assertion. Stored in HTTP-only,
 `SameSite=Strict` cookies. A `jti_revocations` PostgreSQL table enables server-side revocation
@@ -320,15 +316,17 @@ Passkeys eliminate shared-secret credentials for the Trader and Admin roles (PRD
 
 **RBAC:** Scope-based authorization enforced by `requireScope` middleware in `apps/server`.
 
-| Role    | Scopes                                                                                 |
-| ------- | -------------------------------------------------------------------------------------- |
-| Trader  | `alerts:read`, `alerts:acknowledge`, `trades:propose`, `trades:execute`, `replay:read` |
-| Analyst | `alerts:read`, `alerts:review`, `alerts:suppress`                                      |
-| Admin   | `alerts:admin`, `sources:admin`, `replay:read`                                         |
+| Role       | Scopes                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Researcher | `golden_docs:write`, `wiki:read`, `wiki:feedback`, `signals:read`, `signals:acknowledge`, `standing_prompt:pin`, `replay:read` |
+| Reviewer   | `signals:read`, `signals:review`, `signals:suppress`                                                                           |
+| Admin      | `signals:admin`, `sources:admin`, `replay:read`                                                                                |
 
-The Analyst role holds the AMBER review queue: it can approve or suppress alerts that the
-routing engine has placed in `Routed:AMBER` state before they advance to `Delivered`.
-PostgreSQL RLS provides data-layer enforcement in addition to middleware enforcement.
+The Reviewer role holds the low-confidence signal queue: it can approve, edit, or
+suppress signals routed to it before they advance to `Delivered`. PostgreSQL RLS
+provides data-layer enforcement in addition to middleware enforcement, and the
+golden-document RLS policy (see § Knowledge subsystem) denies every write path except
+the Researcher session.
 
 **Worker credentials:** Workers carry no `DATABASE_URL` and hold no database connection.
 They authenticate with a scoped machine API token (AWS Secrets Manager, rotated weekly) and
@@ -346,55 +344,71 @@ financial, audit). Passkey biometrics or a hardware key serve as MFA on the key-
 
 ---
 
-## Ingestion (ETL)
+## Ingestion
 
-**v1 source:** EDGAR RSS/Atom feed polled by the ingestion worker. EDGAR RSS is the sole v1
-ingestion source.
+Two ingestion paths run in parallel.
 
-**RSS client:** `fast-xml-parser` + native `fetch`. Zero native dependencies.
+### Market-event feed
 
-**HTTP caching:** In-process `If-Modified-Since` / `ETag` cache. On 304 Not Modified the
-worker short-circuits without creating tasks. On 200 it compares accession numbers against the
-per-form-type watermark.
+A corporate-action event feed (filings + trusted wires) is polled by the event-ingestion
+worker.
 
-**Idempotency key:** `edgar_poll:<form_type>:<accession_number>`. The accession number is the
-stable EDGAR identity (structurally equivalent to an IMAP UID). `ON CONFLICT DO NOTHING` on
-`raw_filings` insert.
+- **Feed client:** `fast-xml-parser` + native `fetch`. Zero native dependencies.
+- **HTTP caching:** In-process `If-Modified-Since` / `ETag` cache. On 304 Not Modified
+  the worker short-circuits without creating tasks.
+- **Idempotency key:** `edgar_poll:<form_type>:<accession_number>` (or vendor-equivalent
+  stable identity). `ON CONFLICT DO NOTHING` on `raw_filings` insert.
+- **Watermark:** Per-feed cursor in `mkt_app.etl_cursors`; advanced only after a durable
+  write (`land-before-advance`). Out-of-order amendments are handled by an overlap window.
+- **Cross-venue dedup:** the same real-world event arriving via different venues
+  (wire + later filing) collapses to one `market_event` row via the composite-identity
+  key in PRD §9.
 
-**SEC filing parsing:** `cheerio` for HTML filing text extraction. Structured terms extraction
-in v1 uses deterministic regex. The Phase-v2 upgrade path uses Claude Sonnet
-(`claude-sonnet-4-6`) via the Anthropic SDK with prompt caching enabled for repeated filing
-structures.
+### Canonical-source ingestion
 
-**Watermark:** Per-form-type cursor stored in `mkt_app.etl_cursors`. The worker advances the
-cursor only after a durable write (`land-before-advance` pattern). Out-of-order amended filings
-(`8-K/A`) are handled by an overlap window that re-scans recent accession numbers.
+For each researcher, source-discovery and scraping workers pull findings from the venues
+the methodology designates as authoritative.
 
-**Error handling:** Task queue DLQ for failed enrichment tasks. `etl_quarantine` table for
-malformed filings that cannot be parsed. The worker continues on partial extraction failure
-rather than blocking the queue.
-
-**Post-v1 IMAP:** Bloomberg, DealReporter, and other vendors named in PRD §1 deliver via email
-feeds. When licensed, each vendor mailbox becomes an independent ETL partition using `imapflow`
-as the IMAP client, with its own UID cursor and UIDVALIDITY epoch per the imap-etl blueprint.
+- **Source discovery:** the discovery worker reads the active Research Methodology
+  golden document, extracts the venue catalog, and registers each venue as a
+  `canonical_source` row. Researcher-provided uploads (notes, prior research, thesis
+  documents) are registered as canonical sources of subtype `researcher_provided`.
+- **Scraping:** the scraper worker pulls each `canonical_source` on its declared
+  cadence, respecting venue rate limits, robots policy, and access mode. Each scraped
+  payload becomes a `source_finding` row; the worker stores a `content_hash` for dedup
+  and a forward link to the source.
+- **Chunking:** the ingestion worker parses each finding into `corpus_chunk` rows
+  (atomic text fragments). Chunks carry the back-link to the finding.
+- **Fact extraction:** the fact-extraction worker reads new chunks and emits
+  `confirmed_fact` rows attached to the relevant subject entity. Contradictions follow
+  the supersession chain (see § Knowledge subsystem).
+- **Quarantine and DLQ:** malformed payloads land in `etl_quarantine`; failed tasks land
+  in the task-queue DLQ. Neither blocks the queue.
 
 ---
 
-## Alert routing
+## Signal routing
 
-After deduplication, every alert is assigned a confidence tier before delivery (PRD §5):
+When a market event is detected (or an Expected event passes silently), the event
+evaluator applies the researcher's active standing prompt to the event and produces a
+`signal` row. Routing then depends on the signal's confidence (PRD §5, §9):
 
-| Tier      | Condition                                             | Path                                              |
-| --------- | ----------------------------------------------------- | ------------------------------------------------- |
-| **GREEN** | High-confidence, all structured fields extracted      | Direct → `Delivered` via WebSocket push           |
-| **AMBER** | Ambiguous data, partial extraction, or low confidence | Routed to Analyst review queue before `Delivered` |
+| Confidence path     | Condition                                       | Destination                                                                 |
+| ------------------- | ----------------------------------------------- | --------------------------------------------------------------------------- |
+| **Direct delivery** | Confidence at or above the configured threshold | `Generated` → `Delivered` via WebSocket push + outbound channels            |
+| **Reviewer queue**  | Confidence below the threshold                  | Routed to Reviewer queue; advances to `Delivered` only on Reviewer approval |
 
-Routing decisions are deterministic rule-based logic only — generative AI must not
-participate in tier assignment (PRD §9 AI Prohibition). The routing step is part of the
-<50ms internal processing budget; no external I/O is permitted on the routing path.
+Confidence is decomposed into source trust (the tier of the supporting wiki claims, per
+the researcher's methodology) and extraction certainty (how unambiguously the event
+maps to the standing prompt); both factors are stored on the `signal` row so the
+methodology can tune them independently.
 
-Analyst approval or suppression of an AMBER alert writes a journal entry and transitions
-the alert to `Delivered` or `Suppressed` respectively.
+The evaluation step itself is a single fast model call against the compact standing
+prompt. The signal carries citations into the wiki snapshot and standing-prompt revision
+used; both are immutable, supporting the auditability constraint in PRD §9.
+
+Reviewer approval or suppression writes a journal entry and transitions the signal to
+`Delivered` or `Suppressed` respectively.
 
 ---
 
@@ -447,17 +461,19 @@ retention sweep) on startup.
 **Queue depth metric:** `pg_query_exporter` exposes
 `task_queue_pending_total{job_type="..."}` as a Prometheus gauge.
 
-**Autoscaling:** KEDA `prometheus` trigger drives Kubernetes HPA for worker Deployments. Scale
-target is `ALERT_ENRICH` queue depth (not `EDGAR_POLL`, which is a singleton).
+**Autoscaling:** KEDA `prometheus` trigger drives Kubernetes HPA for worker Deployments.
+Scale targets are the high-priority queue depths (`EVENT_EVALUATE`, `WIKI_REBUILD`,
+`FINDING_INGEST`, `FACT_EXTRACT`, `SOURCE_SCRAPE`). Singleton workers (the event-feed
+poller, per-researcher source-discovery and standing-prompt distiller) are not HPA-scaled.
 
-**DLQ replay:** Manual via admin panel (Phase 7). DLQ items are queryable and re-queueable
-from `apps/admin`.
+**DLQ replay:** Manual via admin panel. DLQ items are queryable and re-queueable from
+`apps/admin`.
 
 ---
 
 ## Workers
 
-Five worker classes, each a separate Kubernetes Deployment in `apps/worker`:
+Ten worker classes, each a separate Kubernetes Deployment in `apps/worker`:
 
 | Worker                    | Task types                               | Concurrency                         |
 | ------------------------- | ---------------------------------------- | ----------------------------------- |
@@ -481,11 +497,13 @@ connection they maintain.
 tasks up to a configurable timeout, then exits. No external shutdown library required (~30
 lines in `apps/worker/src/runner.ts`).
 
-**Sub-second SLA scope:** The 1-second SLA (PRD §9) applies to the `Deduplicated` →
-WebSocket push segment. Internal processing (Detect → Extract → Route) strictly targets
-<50ms (PRD §2). Outbound channels (email, SMS, webhook) are dispatched asynchronously by
-the delivery worker and are not on the sub-second path. `ALERT_NOTIFY` failures are
-non-blocking; the `Delivered` state is set on WebSocket push completion.
+**Latency budget:** The PRD §9 latency constraint applies to the `Detected` →
+`Delivered` segment of the signal lifecycle and must complete inside the arbitrage
+window for the V1 corporate-action event types. Internal hops (event normalization,
+standing-prompt evaluation, WebSocket push to the dashboard) sit on the latency path.
+Outbound channels (email, SMS, webhook) are dispatched asynchronously by the signal
+delivery worker and are not on the latency path; `SIGNAL_NOTIFY` failures are
+non-blocking. The `Delivered` state is set on WebSocket push completion.
 
 ---
 
@@ -566,22 +584,27 @@ in test files. HTTP interception uses MSW v2 `setupServer` at the transport laye
 PostgreSQL 16 instance per test run. No in-memory or SQLite substitute.
 
 **Fixtures:** External API responses committed to `tests/fixtures/` as JSON files. Recorded
-by a Bun script against live EDGAR endpoints; re-recorded manually when SEC schema changes.
+by a Bun script against the live event feed and canonical-source venues; re-recorded
+manually when an upstream schema changes.
 
-**E2E:** Playwright as Vitest browser provider (headless Chromium). The Phase 4 "alert pushed
-within 1 s" assertion is a merge gate.
+**E2E:** Playwright as Vitest browser provider (headless Chromium). The end-to-end
+event-to-delivered-signal assertion is a merge gate.
 
 **Coverage:** Vitest v8, 99% line threshold.
 
 **Key test surfaces:**
 
-- EDGAR ATOM feed idempotency — duplicate accession number must not produce a duplicate alert
-- Alert state machine full happy path and each PRD §5 edge case
-- Deduplication across correlated events from multiple release mechanisms
-- RLS enforcement — trader A cannot read trader B's alerts
+- Event-feed idempotency — duplicate accession (or vendor-equivalent identity) must not produce a duplicate `market_event`
+- Cross-venue deduplication — wire-leading-filing-by-days collapses to one `market_event`
+- Signal lifecycle full happy path and each PRD §5 edge case
+- Golden-document invariant — every write path from a worker token against `golden_document` rows is rejected at the API, RLS, and trigger layers
+- Append-only fact trigger — `UPDATE`/`DELETE` against `confirmed_fact` rows is blocked; supersession chain produces a new row
+- Wiki rebuild crash-resume — a worker that fails between status stages resumes from the stalled stage
+- Standing-prompt distillation idempotency — re-running the distiller on the same wiki version yields no new `standing_prompt_version`
+- RLS enforcement — researcher A cannot read researcher B's wiki, facts, or signals
 - Task queue stale recovery — claim TTL expiry triggers re-queue
 - Replay ledger — genesis, checkpoint, materialized-state comparison, backup restore
-- WebSocket latency budget — ≤ 1 s from LISTEN/NOTIFY to browser receipt (Playwright E2E)
+- Signal latency — `Detected` → `Delivered` inside the configured arbitrage window (Playwright E2E)
 
 ---
 
@@ -606,11 +629,14 @@ from browser request through server through worker log lines.
 
 ## Retention and prune
 
-**Alert archival:** Alerts transition to `Archived` state (PRD §6) after the configured
-retention window. Archived alerts are cold-migrated to S3/MinIO in Phase 7.
+**Signal archival:** Signals transition to `Archived` state (PRD §6) after the
+configured retention window. Archived signals are cold-migrated to S3/MinIO. Wiki
+versions, standing-prompt versions, canonical sources, source findings, and confirmed
+facts follow their own retention policies (see PRD §10 open questions) and are
+cold-migrated on the same path.
 
-**Business journal:** 7-year retention (SEC compliance). Cold-tier migration to S3/MinIO
-Glacier-class storage after 90 days.
+**Business journal:** 7-year retention. Cold-tier migration to S3/MinIO Glacier-class
+storage after 90 days.
 
 **Dead code:** `knip` runs in CI to flag unused exports. `depcheck` flags unused packages.
 
@@ -621,42 +647,42 @@ value. The in-process scheduler enqueues a prune task on the disable date.
 
 ## Architecture decision log
 
-| Decision               | Choice                                                                                                                                     | Rejected alternative                      | Reason                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend bundler       | Vite + React 18 SPA                                                                                                                        | Next.js App Router (ux-ts suggestion)     | Product is real-time WebSocket-driven; SSR adds no latency benefit. Bun/Hono already owns the server boundary; a second Next.js server would split the auth and WebSocket boundary.                                                                                                                                                                                                                                                                                                                                                                        |
-| Runtime                | Bun ≥ 1.1                                                                                                                                  | Node 22 + tsx (process-ts initial pick)   | Mandated by arch-ts `IMPL-ARCH-002`; aligns with env blueprint k3d requirement. Bun native TS execution eliminates the tsx/tsc toolchain layer.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ORM                    | None (`postgres` tagged templates)                                                                                                         | Prisma / Drizzle                          | Blueprint data rule requires query-visible SQL. Postgres 16 RLS integration is cleaner without an ORM abstraction layer.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Task queue             | Postgres SKIP LOCKED + LISTEN/NOTIFY                                                                                                       | Redis/BullMQ                              | Already implemented in `packages/db/task-queue.ts`; satisfies all task-queue blueprint rules; reduces infrastructure dependency count by one stateful service.                                                                                                                                                                                                                                                                                                                                                                                             |
-| Auth provider          | Self-hosted `@simplewebauthn/server`                                                                                                       | Auth0 / Clerk                             | Trading platform; no SaaS custody of credentials. Passkeys satisfy the MFA requirement without OTP infrastructure.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Schema model           | Property graph (`mkt_kb.entities` + `mkt_kb.relations`) for the Knowledge subsystem; domain tables retained for transactional / audit data | Pure domain tables for knowledge entities | The pivoted product is knowledge-graph-shaped — researchers track many entity kinds (Company, Sub-Industry, Thesis, Event, Actor, Canonical Source, Confirmed Fact, Wiki Page, Wiki Debate, Standing Prompt, Signal, plus a methodology meta-commentary entity). Fixed domain tables would force a migration on every new entity kind. The earlier ADR rejecting the property graph applied to the pre-pivot domain and is superseded. Transactional / audit tables (task queue, journal, auth) stay as domain tables — those schemas are not pluralistic. |
-| Versioning             | Full markdown snapshots (`wiki_page_version`, `standing_prompt_version`)                                                                   | Delta storage                             | Smart-crm pattern. Full snapshots make replay a row lookup, not a fold. Indefinite retention is the cost; storage is cheap relative to the audit guarantee that PRD §9 requires.                                                                                                                                                                                                                                                                                                                                                                           |
-| Fact mutability        | Append-only with supersession chain on `confirmed_fact`                                                                                    | Mutable rows                              | Smart-crm pattern. A Postgres trigger blocks `UPDATE`/`DELETE` on `confirmed_fact` rows. Contradictions are new rows pointing at the prior via `supersedes_fact_id`. Preserves the audit chain by construction; researcher corrections create new facts, not destructive edits.                                                                                                                                                                                                                                                                            |
-| Rebuild concurrency    | Status-enum crash-resume on version rows                                                                                                   | Distributed lock or optimistic CAS        | Smart-crm pattern. The `pending → content_written → embedded → indexed` enum is both the work pipeline and the resume marker. Readers see only `indexed`. Composes with the existing task-queue retry semantics; no separate lock service.                                                                                                                                                                                                                                                                                                                 |
-| Golden-doc enforcement | API gate + RLS policy + row trigger (defense in depth)                                                                                     | API gate alone                            | The golden-document invariant in PRD §9 is product-defining. Triple enforcement makes accidental agent writes impossible even under a misconfigured worker token.                                                                                                                                                                                                                                                                                                                                                                                          |
-| Server data fetching   | TanStack Query v5                                                                                                                          | Native `fetch` + hand-rolled cache        | stale-while-revalidate, background refetch, and the `state-matrix.json` loading/empty/error/success states require non-trivial cache management that would otherwise be rebuilt by hand. Passes Buy criteria: critical functionality not feasible at small size; TanStack Query is the most-maintained headless data-fetching library. Logged in `docs/dependencies.md`.                                                                                                                                                                                   |
+| Decision               | Choice                                                                                                                                     | Rejected alternative                      | Reason                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend bundler       | Vite + React 18 SPA                                                                                                                        | Next.js App Router                        | The researcher dashboard is real-time WebSocket-driven for signals, wiki updates, and debate notifications; SSR adds no latency benefit. Bun/Hono owns the server boundary; a second Next.js server would split the auth and WebSocket boundary.                                                                                                                                                                                            |
+| Runtime                | Bun ≥ 1.1                                                                                                                                  | Node 22 + tsx (process-ts initial pick)   | Mandated by arch-ts `IMPL-ARCH-002`; aligns with env blueprint k3d requirement. Bun native TS execution eliminates the tsx/tsc toolchain layer.                                                                                                                                                                                                                                                                                             |
+| ORM                    | None (`postgres` tagged templates)                                                                                                         | Prisma / Drizzle                          | Blueprint data rule requires query-visible SQL. Postgres 16 RLS integration is cleaner without an ORM abstraction layer.                                                                                                                                                                                                                                                                                                                    |
+| Task queue             | Postgres SKIP LOCKED + LISTEN/NOTIFY                                                                                                       | Redis/BullMQ                              | Already implemented in `packages/db/task-queue.ts`; satisfies all task-queue blueprint rules; reduces infrastructure dependency count by one stateful service.                                                                                                                                                                                                                                                                              |
+| Auth provider          | Self-hosted `@simplewebauthn/server`                                                                                                       | Auth0 / Clerk                             | Researcher data and golden documents are confidential; no SaaS custody of credentials. Passkeys satisfy the MFA requirement without OTP infrastructure.                                                                                                                                                                                                                                                                                     |
+| Schema model           | Property graph (`mkt_kb.entities` + `mkt_kb.relations`) for the Knowledge subsystem; domain tables retained for transactional / audit data | Pure domain tables for knowledge entities | The product is knowledge-graph-shaped — researchers track many entity kinds (Company, Sub-Industry, Thesis, Event, Actor, Canonical Source, Confirmed Fact, Wiki Page, Wiki Debate, Standing Prompt, Signal, plus methodology meta-commentary). Fixed domain tables would force a migration on every new entity kind. Transactional and audit tables (task queue, journal, auth) stay as domain tables — those schemas are not pluralistic. |
+| Versioning             | Full markdown snapshots (`wiki_page_version`, `standing_prompt_version`)                                                                   | Delta storage                             | Smart-crm pattern. Full snapshots make replay a row lookup, not a fold. Indefinite retention is the cost; storage is cheap relative to the audit guarantee that PRD §9 requires.                                                                                                                                                                                                                                                            |
+| Fact mutability        | Append-only with supersession chain on `confirmed_fact`                                                                                    | Mutable rows                              | Smart-crm pattern. A Postgres trigger blocks `UPDATE`/`DELETE` on `confirmed_fact` rows. Contradictions are new rows pointing at the prior via `supersedes_fact_id`. Preserves the audit chain by construction; researcher corrections create new facts, not destructive edits.                                                                                                                                                             |
+| Rebuild concurrency    | Status-enum crash-resume on version rows                                                                                                   | Distributed lock or optimistic CAS        | Smart-crm pattern. The `pending → content_written → embedded → indexed` enum is both the work pipeline and the resume marker. Readers see only `indexed`. Composes with the existing task-queue retry semantics; no separate lock service.                                                                                                                                                                                                  |
+| Golden-doc enforcement | API gate + RLS policy + row trigger (defense in depth)                                                                                     | API gate alone                            | The golden-document invariant in PRD §9 is product-defining. Triple enforcement makes accidental agent writes impossible even under a misconfigured worker token.                                                                                                                                                                                                                                                                           |
+| Server data fetching   | TanStack Query v5                                                                                                                          | Native `fetch` + hand-rolled cache        | stale-while-revalidate, background refetch, and the `state-matrix.json` loading/empty/error/success states require non-trivial cache management that would otherwise be rebuilt by hand. Passes Buy criteria: critical functionality not feasible at small size; TanStack Query is the most-maintained headless data-fetching library. Logged in `docs/dependencies.md`.                                                                    |
 
 ---
 
-## Open questions (unresolved at Phase 0)
+## Open questions
 
-1. **Universe size** — number of tracked securities drives partition sizing and dedup filter
-   capacity (PRD §10).
-2. **Alert volume SLA** — peak alerts/hour needed to size enrichment worker HPA thresholds
-   and claim batch size.
-3. **WebSocket fan-out strategy** — sticky sessions (ALB target group) vs. pub/sub relay
-   (e.g., Postgres LISTEN in each server pod) for multi-replica `apps/server`. Must be
-   resolved before Phase 4.
-4. **`ALERT_SUPPLEMENT` task type** — not yet in the task type inventory; needed for amended
-   EDGAR filings (`8-K/A`). Add to Phase 3 schema.
-5. **Digital twin scope** — does the WORKER blueprint sandbox requirement apply to Phase 3 MVP
-   enrichment workers or only to Phase 6 trade execution workers?
-6. **Sub-second SLA confirmation** — confirm with stakeholders that the SLA applies to
-   `Deduplicated` → WebSocket push segment only, not the full EDGAR-to-outbound-channel
-   pipeline (10-minute EDGAR feed cadence makes the full-pipeline interpretation
-   unachievable).
-7. **AMBER analyst review SLA** — how long before an unreviewed AMBER alert auto-expires
-   or escalates to direct delivery? Unresolved; blocks Phase 4 Analyst queue design.
-8. **Market data price feed** — provider not yet chosen; blocks Phase 3 delta-neutral test
-   fixtures and terms extraction.
-9. **Trader fine-grained filtering** — filter by event type, sector, and deal size (PRD §10)
-   is not scheduled in the plan phases.
+1. **Universe size per researcher** — number of tracked entities (companies + canonical
+   sources + theses) drives `mkt_kb.entities` partition sizing and embedding-index
+   memory budget. Anchored in PRD §10.
+2. **Event volume SLA** — peak market events per minute needed to size the event
+   evaluator HPA thresholds and the standing-prompt-distillation debounce window.
+3. **WebSocket fan-out strategy** — sticky sessions (ALB target group) vs. pub/sub
+   relay (e.g., Postgres LISTEN in each server pod) for multi-replica `apps/server`.
+4. **Wiki rebuild trigger granularity** — per-finding vs. per-batch vs. per-debounced-window. Drives `WIKI_REBUILD` queue depth and tail latency to wiki freshness.
+5. **Standing-prompt distillation cadence** — what governs how aggressively the
+   distiller fires (time-based, change-volume-based, event-anticipation-based). PRD §10.
+6. **Wiki-debate surfacing** — badge on page, queue, or digest. Drives the dashboard
+   debate inbox design.
+7. **Confidence threshold** — value of the source-trust × extraction-certainty product
+   below which a signal is routed to the Reviewer queue rather than delivered directly.
+8. **Reviewer SLA** — how long before an unreviewed low-confidence signal auto-expires
+   or escalates to direct delivery.
+9. **Retention windows** — for canonical sources, source findings, wiki versions,
+   standing-prompt versions, and signals. PRD §10.
+10. **Source-discovery scope** — does the methodology enumerate venues exhaustively, or
+    may the system propose new venues for the researcher's approval via methodology
+    meta-commentary. PRD §10.
