@@ -64,7 +64,7 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 5. Maintenance agents continuously fact-check claims, surface inconsistencies, debate contested findings, and update or retract wiki claims accordingly. A canonical source may be ingested without changing the wiki if the maintenance pass concludes it adds no new trusted information.
 6. Each wiki rebuild produces a new versioned page snapshot citing the canonical sources that support its claims. The researcher can navigate the wiki at any time.
 7. From the current wiki, the synthesis layer continuously distills a compact (~100 word) standing prompt (the trade evaluator). The evaluator updates automatically, without requiring researcher approval.
-8. A corporate-action event is detected and normalized from upstream sources.
+8. A corporate-action event is detected and normalized from upstream sources, **or** an anticipated event registered on the wiki passes its window with no detected disclosure (silent passage), which is itself recorded as an event.
 9. The trade evaluator is applied to the event in a single fast call, producing a thesis-aware signal: direction, confidence, rationale, and citations into the relevant wiki pages.
 10. High-confidence signals are delivered directly to the researcher. Low-confidence signals are routed to a Reviewer queue before delivery.
 11. The researcher reviews the signal with its wiki citations, then acknowledges, acts, or dismisses it.
@@ -138,8 +138,8 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 **Market Event** (V1: corporate actions)
 
 - Event types: M&A (announced/rumored), tender offers, spinoffs, special dividends, rights offerings, bankruptcies, proxy fights.
-- States: Detected → Enriched → Evaluated → Closed → Disputed.
-- Transitions: Auto-advance on enrichment and evaluation; Closed after settlement window; Disputed on legal or regulatory challenge.
+- States: Expected → Detected → Enriched → Evaluated → Closed → Disputed. A parallel terminal state, **Passed Silently**, captures Expected events whose anticipated window elapses with no detected disclosure — silent passage is itself an event that the trade evaluator may act on.
+- Transitions: An Expected event is created when the wiki or methodology designates an anticipated catalyst (window or date). On disclosure it transitions Expected → Detected → Enriched → Evaluated → Closed. If the anticipated window closes with no detected disclosure, the event transitions Expected → Passed Silently and is evaluated against the standing prompt the same way. Disputed on legal or regulatory challenge.
 
 **Signal**
 
@@ -177,7 +177,10 @@ V1 narrows the market-event domain to corporate actions (M&A, tender offers, spi
 - **Wiki as substrate**: The wiki is the authoritative knowledge substrate. The standing prompt is derived from it; signals cite into it. The researcher can always navigate to the wiki page behind any claim.
 - **Compact standing prompt**: The active standing prompt is bounded so that evaluation against an event is a single fast call.
 - **Latency**: Event-to-signal evaluation must complete inside the arbitrage window for V1 corporate-action event types.
-- **Deduplication**: Events must be deduplicated across release mechanisms by a composite key of ticker, event type, and date.
+- **Cross-venue deduplication**: A single real-world event arriving via different venues (for example a press-release wire and a subsequent regulatory filing days later) must collapse to one event. Deduplication uses a composite identity (subject entity, event type, anticipated date window) and tolerates lag between the leading and lagging venue.
+- **Entity-relative materiality**: Signal scoring is relative to the subject entity, not absolute. A given financing, deal, or readout is interpreted against the entity's current wiki context (size, runway, prior catalysts) rather than against a fixed magnitude threshold.
+- **Confidence decomposition**: A signal's confidence is the product of two factors — source trust (the tier of the supporting wiki claims, per the researcher's methodology) and extraction certainty (how unambiguously the event maps to the standing prompt). Both factors are recorded so the researcher's methodology can tune them independently.
+- **Idempotent replay**: Re-processing the same source inputs over the same time window must produce no duplicate canonical sources, source findings, wiki claims, or signals.
 - **Data integrity**: Monetary values use decimal precision; all timestamps are UTC.
 - **Regulatory**: Corporate-action disclosure rules apply.
 
