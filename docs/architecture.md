@@ -1,16 +1,31 @@
 # Architecture
 
+> **Note on scope.** The product pivoted (see `docs/prd.md`) from a corporate-action alert
+> system to an **ambient AI research associate** built on a self-updating wiki and a
+> standing-prompt trade evaluator. The infrastructure stack below (Bun, Hono, Postgres,
+> RLS, task queue, observability) carries over. The domain model is reshaped around the
+> Knowledge subsystem (see § Knowledge subsystem). Sections describing tier-based GREEN /
+> AMBER alert routing and the AI prohibition predate the pivot; they are superseded by the
+> Signal section and by the auditability constraints in PRD §9.
+
 ## Overview
 
-Market-alert is an event-driven arbitrage alert platform for hedge fund traders. It ingests
-EDGAR corporate action filings via RSS, enriches and deduplicates them against the watchlist
-universe, and delivers sub-second alerts to traders via WebSocket and outbound channels (email,
-SMS, webhook).
+The product is an ambient AI research associate for finance researchers. Given two
+author-owned **golden documents** (Industry Definition and Research Methodology), the
+system discovers and scrapes the venues the methodology designates as authoritative,
+ingests their findings as canonical sources, synthesizes them into a **living wiki**
+organized per knowledge-bearing entity (Company/Ticker, Sub-Industry, Thesis, Event,
+Actor, Canonical Source), and continuously distills a compact **standing prompt** (the
+trade evaluator). Incoming market events are evaluated against the standing prompt in a
+single fast call, producing thesis-aware trade signals that cite back into the wiki.
 
 The system is a TypeScript monorepo with four deployable applications backed by a shared
-PostgreSQL 16 database. All asynchronous work flows through a Postgres-native durable task
-queue. Workers carry no database credentials; they communicate exclusively through scoped
-internal API endpoints.
+PostgreSQL 16 database. All asynchronous work flows through a Postgres-native durable
+task queue. Workers carry no database credentials; they communicate exclusively through
+scoped internal API endpoints. The Knowledge subsystem implements the wiki and
+standing-prompt machinery, drawing on the smart-crm reference architecture (polymorphic
+entity spine, full-snapshot versioning, append-only fact supersession, status-enum
+crash-resume, unified retrieval).
 
 ---
 
@@ -164,11 +179,133 @@ database credentials; they call internal endpoints instead.
 
 **Schema inventory:**
 
-| Schema          | Tables                                                                                                                                                                                                |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mkt_app`       | `alerts`, `corporate_actions`, `trades`, `raw_filings`, `etl_cursors`, `etl_quarantine`, `task_queue`, `passkey_credentials`, `jti_revocations`, `machine_tokens`, `recovery_shards`, `feature_flags` |
-| `mkt_analytics` | Analytics projection tables (Phase 7)                                                                                                                                                                 |
-| `mkt_audit`     | `journal_entries`, `audit_log`                                                                                                                                                                        |
+| Schema          | Tables                                                                                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mkt_app`       | `alerts`, `corporate_actions`, `trades`, `raw_filings`, `etl_cursors`, `etl_quarantine`, `task_queue`, `passkey_credentials`, `jti_revocations`, `machine_tokens`, `recovery_shards`, `feature_flags`                                                                                                                                 |
+| `mkt_kb`        | `entities`, `relations`, `entity_versions`, `golden_documents`, `golden_document_sections`, `methodology_meta_commentary`, `canonical_sources`, `source_findings`, `corpus_chunks`, `confirmed_facts`, `wiki_pages`, `wiki_page_versions`, `wiki_debates`, `standing_prompts`, `standing_prompt_versions`, `market_events`, `signals` |
+| `mkt_analytics` | Analytics projection tables (Phase 7)                                                                                                                                                                                                                                                                                                 |
+| `mkt_audit`     | `journal_entries`, `audit_log`                                                                                                                                                                                                                                                                                                        |
+
+---
+
+## Knowledge subsystem
+
+The wiki, the fact graph, and the standing prompt live in the `mkt_kb` schema and are
+the heart of the product. The subsystem adapts five patterns from the smart-crm reference
+architecture; each is summarized here with the local adaptation.
+
+### Entity spine (polymorphic, no per-entity DDL)
+
+All knowledge-bearing rows live in `mkt_kb.entities` with `type`, JSON `properties`,
+`tenant_id`, and timestamps; a `mkt_kb.relations` table holds typed directed edges
+between entities. Adding a new entity kind (a new actor class, a new event type) is a
+config registration in `packages/core`, not a migration.
+
+V1 entity types: `company`, `sub_industry`, `thesis`, `event`, `actor`, `canonical_source`,
+`source_finding`, `corpus_chunk`, `confirmed_fact`, `wiki_page`, `wiki_page_version`,
+`wiki_debate`, `standing_prompt`, `standing_prompt_version`, `signal`,
+`golden_document`, `golden_document_section`, `methodology_meta_commentary_entry`.
+
+This is a deliberate reversal of the earlier ADR rejecting the property-graph model.
+The pivoted product is knowledge-graph-shaped; fixed domain tables would force a
+schema migration on every new entity kind.
+
+### Wiki pages: full-snapshot versioning
+
+`wiki_page` rows are unique on `(tenant_id, subject_type, subject_id)` and point at a
+`currently_published` version through a relation edge. Each rebuild creates a new
+`wiki_page_version` row containing the **full markdown body** (encrypted at rest with
+AES-256-GCM via the existing KMS-backed envelope); deltas are not stored. Prior
+versions are retained indefinitely so the system can replay any past evaluation against
+the exact wiki snapshot it used.
+
+Version-status pipeline (status enum):
+
+```
+pending → content_written → embedded → indexed
+```
+
+Readers follow `wiki_page.currently_published` only when status reaches `indexed`; a
+crashed rebuild leaves the version row in its stalled stage and a re-scheduled worker
+resumes from the next stage rather than restarting. This is the smart-crm
+crash-resume pattern; we adopt it verbatim because it composes cleanly with our
+existing `task_queue` retry semantics.
+
+### Confirmed facts: append-only with supersession chain
+
+`confirmed_fact` rows are immutable at the database layer. A Postgres trigger on
+`mkt_kb.entities` blocks `UPDATE` and `DELETE` for rows of `type = 'confirmed_fact'`.
+Contradiction is expressed by a new row whose `properties.supersedes_fact_id` points
+to the prior fact; reads filter to "latest non-superseded per
+`(subject_type, subject_id, attribute)`". The prior row is patched only with a
+non-content `superseded_by_id` pointer for the audit trail (allowed by a narrow
+trigger exception).
+
+When the researcher feedback loop (PRD §5) implies a fact correction, the API inserts
+a new fact with `supersedes_fact_id`. The old row stays. There is no destructive edit
+path; the audit chain is preserved by construction.
+
+### Citations: first-class relation edges
+
+Wiki claims and facts cite their evidence via typed `cites` edges in `mkt_kb.relations`:
+
+| From                | To                                 | Meaning                                                                 |
+| ------------------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| `wiki_page_version` | `corpus_chunk` \| `confirmed_fact` | This wiki snapshot is supported by …                                    |
+| `wiki_page_version` | `golden_document_section`          | This wiki snapshot derives from a golden-doc section (read-only target) |
+| `confirmed_fact`    | `corpus_chunk`                     | This fact was extracted from …                                          |
+| `signal`            | `wiki_page_version`                | This signal was reasoned against …                                      |
+| `signal`            | `standing_prompt_version`          | This signal was evaluated by …                                          |
+
+On retraction of a `corpus_chunk` (e.g. researcher deletes a note, publisher retracts a
+filing), the FK cascade removes the `cites` edges; dependent wiki pages and facts are
+not immediately rewritten. The next wiki-rebuild pass sees the missing evidence and
+re-derives the affected pages. This trades in-day wiki staleness for atomic batch
+rebuild — the same tradeoff smart-crm makes.
+
+### Golden-document enforcement (the invariant from PRD §9)
+
+`golden_document` and `golden_document_section` rows are author-only. Enforcement is
+layered:
+
+1. **API layer** — the only write endpoints that target these tables are
+   `POST /api/golden-documents/...` and require a researcher session token. Worker
+   tokens never resolve to a researcher session, so no worker route can reach those
+   endpoints.
+2. **Postgres RLS** — RLS policy on `mkt_kb.entities` denies `INSERT`/`UPDATE`/`DELETE`
+   on rows where `type IN ('golden_document', 'golden_document_section')` for any role
+   other than `mkt_kb_researcher` (used only on the researcher session path).
+3. **Trigger backstop** — a row-level trigger on `mkt_kb.entities` re-asserts the rule;
+   any write attempt against a golden-doc row from any other role raises and is
+   journalled.
+
+Methodology drift accumulates in `methodology_meta_commentary` instead — a separate
+agent-writable entity type. The folded-in transition (researcher chooses to update
+their golden doc) is a researcher action through the API, not an agent action.
+
+### Standing prompt as derived artifact
+
+`standing_prompt` rows are per-researcher; each rebuild emits a new
+`standing_prompt_version` whose markdown body is bounded so evaluation against a
+market event is a single fast call. Same status pipeline as `wiki_page_version`. The
+distillation worker is triggered on `wiki_page_version` publish events for any page
+within the researcher's scope; a debounce window collapses bursts.
+
+### Unified retrieval engine
+
+A single `packages/core/src/retrieval` module exposes
+`fetch(subjectType, subjectId, query?)` returning the active wiki version, the latest
+non-superseded confirmed facts, and the top-k embedded corpus chunks for the subject
+in one call. All consumer surfaces — wiki page view, signal rationale render, debate
+inbox, researcher Q&A, audit replay — call this path. The embedding index lives on
+`corpus_chunks.embedding` and is rebuilt during the wiki-version `embedded` stage.
+
+### Worker scope and write gating (carries over)
+
+Knowledge workers continue the existing pattern: read-only DB role on the operational
+pool, writes through `POST /internal/kb/...` endpoints with a short-lived task-scoped
+token bound to `(tenant_id, subject_type, subject_id)`. The API layer holds the RLS
+context; workers never see DATABASE_URL.
 
 ---
 
@@ -284,14 +421,20 @@ server emits `data: task_available\n\n` on `pg_notify` and `data: heartbeat\n\n`
 
 **Task types:**
 
-| Task type             | Delivery      | Priority | Idempotency key                     |
-| --------------------- | ------------- | -------- | ----------------------------------- |
-| `EDGAR_POLL`          | At-least-once | Normal   | `edgar_poll:<form>:<accession>`     |
-| `ALERT_ENRICH`        | At-least-once | High     | `enrich:<alert_id>`                 |
-| `ALERT_DEDUP`         | At-least-once | High     | `dedup:<alert_id>`                  |
-| `ALERT_NOTIFY`        | At-least-once | Normal   | `notify:<alert_id>:<channel>`       |
-| `CORP_ACTION_ADVANCE` | At-least-once | Low      | `ca_advance:<ca_id>:<target_state>` |
-| `TRADE_SETTLE`        | At-least-once | Low      | `settle:<trade_id>`                 |
+| Task type                 | Delivery      | Priority | Idempotency key                                      |
+| ------------------------- | ------------- | -------- | ---------------------------------------------------- |
+| `EDGAR_POLL`              | At-least-once | Normal   | `edgar_poll:<form>:<accession>`                      |
+| `SOURCE_DISCOVER`         | At-least-once | Low      | `src_discover:<researcher_id>:<methodology_version>` |
+| `SOURCE_SCRAPE`           | At-least-once | Normal   | `src_scrape:<canonical_source_id>:<cursor>`          |
+| `FINDING_INGEST`          | At-least-once | High     | `ingest:<source_finding_id>`                         |
+| `FACT_EXTRACT`            | At-least-once | High     | `fact_extract:<corpus_chunk_id>`                     |
+| `WIKI_REBUILD`            | At-least-once | High     | `wiki_rebuild:<subject_type>:<subject_id>:<trigger>` |
+| `WIKI_DEBATE_RESOLVE`     | At-least-once | Normal   | `debate:<wiki_debate_id>`                            |
+| `STANDING_PROMPT_DISTILL` | At-least-once | High     | `sp_distill:<researcher_id>:<wiki_version_window>`   |
+| `EVENT_EVALUATE`          | At-least-once | High     | `event_eval:<market_event_id>`                       |
+| `SILENT_PASSAGE_CHECK`    | At-least-once | Low      | `silent_check:<expected_event_id>:<window_close>`    |
+| `SIGNAL_NOTIFY`           | At-least-once | Normal   | `notify:<signal_id>:<channel>`                       |
+| `META_COMMENTARY_OPEN`    | At-least-once | Low      | `meta:<researcher_id>:<feedback_id>`                 |
 
 **Stale recovery:** Worker heartbeat via `updated_at`. Claims older than the per-type TTL are
 re-queued by the stale-recovery cron. Each task type has an independent `claim_expires_at`
@@ -316,13 +459,18 @@ from `apps/admin`.
 
 Five worker classes, each a separate Kubernetes Deployment in `apps/worker`:
 
-| Worker            | Task types                            | Concurrency                      |
-| ----------------- | ------------------------------------- | -------------------------------- |
-| Ingestion poller  | `EDGAR_POLL`                          | 1 pod (singleton)                |
-| Enrichment worker | `ALERT_ENRICH`                        | `max_tasks` batch, `Promise.all` |
-| Dedup worker      | `ALERT_DEDUP`                         | `max_tasks` batch, `Promise.all` |
-| Delivery worker   | `ALERT_NOTIFY`                        | `max_tasks` batch, `Promise.all` |
-| Lifecycle worker  | `CORP_ACTION_ADVANCE`, `TRADE_SETTLE` | 1 per type                       |
+| Worker                    | Task types                               | Concurrency                         |
+| ------------------------- | ---------------------------------------- | ----------------------------------- |
+| Event ingestion poller    | `EDGAR_POLL`                             | 1 pod (singleton)                   |
+| Source-discovery worker   | `SOURCE_DISCOVER`                        | 1 per researcher                    |
+| Scraper worker            | `SOURCE_SCRAPE`                          | HPA on `SOURCE_SCRAPE` queue depth  |
+| Ingestion worker          | `FINDING_INGEST`                         | `max_tasks` batch                   |
+| Fact extraction worker    | `FACT_EXTRACT`                           | `max_tasks` batch                   |
+| Wiki rebuild worker       | `WIKI_REBUILD`, `WIKI_DEBATE_RESOLVE`    | HPA on `WIKI_REBUILD` queue depth   |
+| Standing-prompt distiller | `STANDING_PROMPT_DISTILL`                | 1 per researcher (debounced)        |
+| Event evaluator           | `EVENT_EVALUATE`, `SILENT_PASSAGE_CHECK` | HPA on `EVENT_EVALUATE` queue depth |
+| Signal delivery worker    | `SIGNAL_NOTIFY`                          | `max_tasks` batch                   |
+| Meta-commentary writer    | `META_COMMENTARY_OPEN`                   | 1 per researcher                    |
 
 **Process model:** Single-threaded Bun event loop per pod. No worker threads at MVP scale. HPA
 adds pod replicas when queue depth exceeds the KEDA threshold. Workers hold no database
@@ -473,15 +621,19 @@ value. The in-process scheduler enqueues a prune task on the disable date.
 
 ## Architecture decision log
 
-| Decision             | Choice                               | Rejected alternative                                                       | Reason                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------- | ------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Frontend bundler     | Vite + React 18 SPA                  | Next.js App Router (ux-ts suggestion)                                      | Product is real-time WebSocket-driven; SSR adds no latency benefit. Bun/Hono already owns the server boundary; a second Next.js server would split the auth and WebSocket boundary.                                                                                                                                                                                      |
-| Runtime              | Bun ≥ 1.1                            | Node 22 + tsx (process-ts initial pick)                                    | Mandated by arch-ts `IMPL-ARCH-002`; aligns with env blueprint k3d requirement. Bun native TS execution eliminates the tsx/tsc toolchain layer.                                                                                                                                                                                                                          |
-| ORM                  | None (`postgres` tagged templates)   | Prisma / Drizzle                                                           | Blueprint data rule requires query-visible SQL. Postgres 16 RLS integration is cleaner without an ORM abstraction layer.                                                                                                                                                                                                                                                 |
-| Task queue           | Postgres SKIP LOCKED + LISTEN/NOTIFY | Redis/BullMQ                                                               | Already implemented in `packages/db/task-queue.ts`; satisfies all task-queue blueprint rules; reduces infrastructure dependency count by one stateful service.                                                                                                                                                                                                           |
-| Auth provider        | Self-hosted `@simplewebauthn/server` | Auth0 / Clerk                                                              | Trading platform; no SaaS custody of credentials. Passkeys satisfy the MFA requirement without OTP infrastructure.                                                                                                                                                                                                                                                       |
-| Schema model         | Domain tables                        | Property graph (`entities`/`relations`/`entity_types` per `IMPL-DATA-002`) | Domain tables with explicit RLS and partition-pruning are simpler to audit and query for regulatory reporting. Fixed regulatory schema makes the graph model's flexibility a liability rather than an asset. This deviation is intentional; do not rewrite to the blueprint default.                                                                                     |
-| Server data fetching | TanStack Query v5                    | Native `fetch` + hand-rolled cache                                         | stale-while-revalidate, background refetch, and the `state-matrix.json` loading/empty/error/success states require non-trivial cache management that would otherwise be rebuilt by hand. Passes Buy criteria: critical functionality not feasible at small size; TanStack Query is the most-maintained headless data-fetching library. Logged in `docs/dependencies.md`. |
+| Decision               | Choice                                                                                                                                     | Rejected alternative                      | Reason                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend bundler       | Vite + React 18 SPA                                                                                                                        | Next.js App Router (ux-ts suggestion)     | Product is real-time WebSocket-driven; SSR adds no latency benefit. Bun/Hono already owns the server boundary; a second Next.js server would split the auth and WebSocket boundary.                                                                                                                                                                                                                                                                                                                                                                        |
+| Runtime                | Bun ≥ 1.1                                                                                                                                  | Node 22 + tsx (process-ts initial pick)   | Mandated by arch-ts `IMPL-ARCH-002`; aligns with env blueprint k3d requirement. Bun native TS execution eliminates the tsx/tsc toolchain layer.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ORM                    | None (`postgres` tagged templates)                                                                                                         | Prisma / Drizzle                          | Blueprint data rule requires query-visible SQL. Postgres 16 RLS integration is cleaner without an ORM abstraction layer.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Task queue             | Postgres SKIP LOCKED + LISTEN/NOTIFY                                                                                                       | Redis/BullMQ                              | Already implemented in `packages/db/task-queue.ts`; satisfies all task-queue blueprint rules; reduces infrastructure dependency count by one stateful service.                                                                                                                                                                                                                                                                                                                                                                                             |
+| Auth provider          | Self-hosted `@simplewebauthn/server`                                                                                                       | Auth0 / Clerk                             | Trading platform; no SaaS custody of credentials. Passkeys satisfy the MFA requirement without OTP infrastructure.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Schema model           | Property graph (`mkt_kb.entities` + `mkt_kb.relations`) for the Knowledge subsystem; domain tables retained for transactional / audit data | Pure domain tables for knowledge entities | The pivoted product is knowledge-graph-shaped — researchers track many entity kinds (Company, Sub-Industry, Thesis, Event, Actor, Canonical Source, Confirmed Fact, Wiki Page, Wiki Debate, Standing Prompt, Signal, plus a methodology meta-commentary entity). Fixed domain tables would force a migration on every new entity kind. The earlier ADR rejecting the property graph applied to the pre-pivot domain and is superseded. Transactional / audit tables (task queue, journal, auth) stay as domain tables — those schemas are not pluralistic. |
+| Versioning             | Full markdown snapshots (`wiki_page_version`, `standing_prompt_version`)                                                                   | Delta storage                             | Smart-crm pattern. Full snapshots make replay a row lookup, not a fold. Indefinite retention is the cost; storage is cheap relative to the audit guarantee that PRD §9 requires.                                                                                                                                                                                                                                                                                                                                                                           |
+| Fact mutability        | Append-only with supersession chain on `confirmed_fact`                                                                                    | Mutable rows                              | Smart-crm pattern. A Postgres trigger blocks `UPDATE`/`DELETE` on `confirmed_fact` rows. Contradictions are new rows pointing at the prior via `supersedes_fact_id`. Preserves the audit chain by construction; researcher corrections create new facts, not destructive edits.                                                                                                                                                                                                                                                                            |
+| Rebuild concurrency    | Status-enum crash-resume on version rows                                                                                                   | Distributed lock or optimistic CAS        | Smart-crm pattern. The `pending → content_written → embedded → indexed` enum is both the work pipeline and the resume marker. Readers see only `indexed`. Composes with the existing task-queue retry semantics; no separate lock service.                                                                                                                                                                                                                                                                                                                 |
+| Golden-doc enforcement | API gate + RLS policy + row trigger (defense in depth)                                                                                     | API gate alone                            | The golden-document invariant in PRD §9 is product-defining. Triple enforcement makes accidental agent writes impossible even under a misconfigured worker token.                                                                                                                                                                                                                                                                                                                                                                                          |
+| Server data fetching   | TanStack Query v5                                                                                                                          | Native `fetch` + hand-rolled cache        | stale-while-revalidate, background refetch, and the `state-matrix.json` loading/empty/error/success states require non-trivial cache management that would otherwise be rebuilt by hand. Passes Buy criteria: critical functionality not feasible at small size; TanStack Query is the most-maintained headless data-fetching library. Logged in `docs/dependencies.md`.                                                                                                                                                                                   |
 
 ---
 
