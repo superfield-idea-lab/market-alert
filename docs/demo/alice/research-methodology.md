@@ -1,6 +1,6 @@
-# Research Methodology — Tom
+# Research Methodology — Alice
 
-> Author: Tom. Golden document. Agents read it; agents do not write to
+> Author: Alice. Golden document. Agents read it; agents do not write to
 > it. Methodology drift, agent suggestions, and learnings live in
 > methodology meta-commentary, never here.
 

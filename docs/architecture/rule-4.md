@@ -292,8 +292,8 @@ footprint) and is fully compatible with EKS managed nodes.
 
 **GitHub Actions + KEDA (for HPA) + ECR (container registry)**
 
-Justified by: The repository is already on GitHub (git user `Tom Kohn`, GitHub Actions
-are the natural CI substrate). ECR integrates with EKS IAM roles for service accounts
+Justified by: The repository is already on GitHub, so GitHub Actions is the natural CI
+substrate. ECR integrates with EKS IAM roles for service accounts
 (IRSA) without static registry credentials — satisfying DEPLOY-P-013 (registry credential
 provisioned at cluster init). GitHub Actions provides concurrency controls per environment
 (enforcing DEPLOY-C-041 rollout-concurrency-serialized-per-environment). Separate

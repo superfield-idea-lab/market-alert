@@ -1,6 +1,6 @@
-# Industry Definition — Tom
+# Industry Definition — Alice
 
-> Author: Tom. Golden document. Agents read it; agents do not write to
+> Author: Alice. Golden document. Agents read it; agents do not write to
 > it. Scope-drift observations from agents accumulate in methodology
 > meta-commentary, never here.
 
