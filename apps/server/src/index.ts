@@ -285,6 +285,14 @@ export default {
       if (testTokenRes) return testTokenRes;
     }
 
+    // /api/tasks-queue must be checked before /api/tasks to prevent the
+    // CSRF-protected /api/tasks handler from intercepting tasks-queue requests
+    // (both paths share the /api/tasks prefix).
+    if (url.pathname.startsWith('/api/tasks-queue')) {
+      const tasksQueueRes = await handleTasksQueueRequest(req, url, appState);
+      if (tasksQueueRes) return tasksQueueRes;
+    }
+
     if (url.pathname.startsWith('/api/tasks')) {
       // Delegated-token result submission route — workers submit results here.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
@@ -292,11 +300,6 @@ export default {
       // Generic task CRUD with CSRF protection (used by CSRF integration tests).
       const tasksRes = await handleTasksRequest(req, url, appState);
       if (tasksRes) return withTrace(tasksRes);
-    }
-
-    if (url.pathname.startsWith('/api/tasks-queue')) {
-      const tasksQueueRes = await handleTasksQueueRequest(req, url, appState);
-      if (tasksQueueRes) return tasksQueueRes;
     }
 
     if (url.pathname.startsWith('/api/audit')) {
