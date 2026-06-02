@@ -150,14 +150,10 @@ async function migrateAuditSchema(databaseUrl: string): Promise<void> {
     connect_timeout: 10,
   });
   try {
-    // Split on semicolons (the audit schema has no dollar-quoted blocks)
-    const statements = schemaSql
-      .split(';')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    for (const stmt of statements) {
-      await db.unsafe(stmt);
-    }
+    // audit-schema.sql contains dollar-quoted PL/pgSQL blocks; pass the whole
+    // file as one unsafe call so semicolons inside $$ bodies are not misread
+    // as statement boundaries (matches pg-container.ts applyAuditSchema).
+    await db.unsafe(schemaSql);
   } finally {
     await db.end({ timeout: 5 });
   }
