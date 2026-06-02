@@ -47,7 +47,6 @@ import { handleCorporateActionIngestionRequest } from './api/corporate-action-in
 import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
-import { handleInternalRelationsRequest } from './api/internal-relations';
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
@@ -430,13 +429,6 @@ export default {
     if (url.pathname.startsWith('/internal/worker/tokens')) {
       const workerTokenRes = await handleWorkerTokensRequest(req, url, appState);
       if (workerTokenRes) return withTrace(workerTokenRes);
-    }
-
-    // Internal worker relation write endpoint — Bearer wiki-write token auth (issue #72).
-    // POST /internal/relations — autolearn worker writes discussed_in relations.
-    if (url.pathname === '/internal/relations') {
-      const internalRelRes = await handleInternalRelationsRequest(req, url, appState);
-      if (internalRelRes) return withTrace(internalRelRes);
     }
 
     // Phase 8 compliance officer endpoints (issue #79).

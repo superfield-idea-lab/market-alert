@@ -122,15 +122,14 @@ test('GET /api/audit/verify returns 403 for non-superuser', async () => {
 });
 
 test('GET /api/audit/verify returns valid: true for superuser on untampered log', async () => {
-  // Trigger an audit event via PATCH /api/admin/users/:id (role change).
-  // The admin PATCH handler emits a user.role_change audit event when the
-  // role value differs from the current value.
-  const patchRes = await fetch(`${BASE}/api/admin/users/${userId}`, {
-    method: 'PATCH',
+  // Trigger an audit event via POST /api/admin/keys (API key creation).
+  // The admin keys handler emits an api_key.create audit event on success.
+  const keyRes = await fetch(`${BASE}/api/admin/keys`, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: authCookie },
-    body: JSON.stringify({ role: 'analyst' }),
+    body: JSON.stringify({ label: `audit-trigger-${Date.now()}` }),
   });
-  expect(patchRes.status).toBe(200);
+  expect(keyRes.status).toBe(201);
 
   // Verify the audit log integrity
   const verifyRes = await fetch(`${BASE}/api/audit/verify`, {

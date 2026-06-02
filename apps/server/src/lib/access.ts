@@ -7,8 +7,6 @@ export interface UserAccessFlags {
   isSuperadmin: boolean;
   isCrmAdmin: boolean;
   isComplianceOfficer: boolean;
-  /** True when the user has role 'bdm' (Business Development Manager). */
-  isBdm: boolean;
   role: string | null;
 }
 
@@ -19,7 +17,6 @@ export interface UserAccessFlags {
  * `properties.role === 'crm_admin'` also counts as a CRM admin.
  * Any user entity with `properties.role === 'compliance_officer'` counts as a
  * compliance officer.
- * Any user entity with `properties.role === 'bdm'` counts as a BDM.
  */
 export async function getUserAccessFlags(userId: string, sql: Sql): Promise<UserAccessFlags> {
   const isSuperadmin = isSuperuser(userId);
@@ -28,7 +25,6 @@ export async function getUserAccessFlags(userId: string, sql: Sql): Promise<User
       isSuperadmin: true,
       isCrmAdmin: true,
       isComplianceOfficer: true,
-      isBdm: false,
       role: 'superuser',
     };
   }
@@ -46,15 +42,6 @@ export async function getUserAccessFlags(userId: string, sql: Sql): Promise<User
     isSuperadmin: false,
     isCrmAdmin: role === 'crm_admin',
     isComplianceOfficer: role === 'compliance_officer',
-    isBdm: role === 'bdm',
     role,
   };
-}
-
-/**
- * Returns true when the user may access CRM entity management endpoints.
- */
-export async function canManageCrmEntities(userId: string, sql: Sql): Promise<boolean> {
-  const flags = await getUserAccessFlags(userId, sql);
-  return flags.isCrmAdmin;
 }
