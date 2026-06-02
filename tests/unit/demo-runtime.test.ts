@@ -23,7 +23,10 @@ describe('demo runtime contract', () => {
 
     // Cluster bootstrap creates registry then cluster with registry attached
     expect(plan[0]?.commands?.[0]).toContain('k3d registry create');
-    expect(plan[0]?.commands?.[1]).toContain('k3d cluster create superfield-demo');
+    // The cluster name is derived from the repo prefix (superfield-market-alert)
+    // plus a commit-hash suffix for traceability between demo clusters and the
+    // git revision they were launched from.
+    expect(plan[0]?.commands?.[1]).toMatch(/k3d cluster create superfield-market-alert-/);
     expect(plan[0]?.commands?.[1]).toContain('--registry-use');
     // Image build uses unified Dockerfile with --target release (no more -f Dockerfile.release)
     expect(plan[2]?.commands?.[0]).toContain('docker build --target release');

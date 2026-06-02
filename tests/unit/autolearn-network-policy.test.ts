@@ -6,15 +6,17 @@
  * ## What is tested
  *
  * 1. k8s/autolearn-worker.yaml exists and contains the required resources.
- * 2. A NetworkPolicy resource named `superfield-autolearn-worker-egress` is present.
- * 3. The NetworkPolicy selects pods with `app: superfield-autolearn-worker`.
+ * 2. A NetworkPolicy resource is present whose name follows the per-run
+ *    `autolearn-worker-egress-<dept>-<customer>` template.
+ * 3. The NetworkPolicy selects pods with `app: autolearn-worker`.
  * 4. Egress to the API server (port 80) is allowed.
  * 5. Egress to Anthropic API (port 443) is allowed.
  * 6. DNS egress (port 53) is allowed.
  * 7. Port 5432 (Postgres) is NOT declared in any egress rule — WORKER-C-006.
- * 8. The Deployment resource exists with `agent-type: autolearn`.
- * 9. The Deployment uses the agent_autolearn DB role (WORKER-C-020).
- * 10. The ANTHROPIC_API_KEY is loaded from a Secret (not hardcoded) — WORKER-T-009.
+ * 8. The ephemeral Job resource exists with `app: autolearn-worker` and
+ *    sets `AGENT_TYPE=autolearn` for the worker container.
+ * 9. The Job uses a per-run worker token Secret (no DB credential in the pod).
+ * 10. The WORKER_TOKEN and API_BASE_URL are loaded from Secrets (WORKER-T-009).
  *
  * ## No mocks
  * All tests read real YAML files from disk using readFileSync.
@@ -79,18 +81,23 @@ describe('NetworkPolicy — egress rules (WORKER-C-006, WORKER-C-024)', () => {
     expect(policies).toHaveLength(1);
   });
 
-  test('NetworkPolicy is named superfield-autolearn-worker-egress', () => {
+  test('NetworkPolicy name follows the per-run autolearn-worker-egress template', () => {
+    // The gardening cron controller interpolates DEPARTMENT_ID and CUSTOMER_ID
+    // at provisioning time. The template name in the manifest is therefore
+    // `autolearn-worker-egress-$(DEPARTMENT_ID)-$(CUSTOMER_ID)`.
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [policy] = documentsOfKind(docs, 'NetworkPolicy');
-    expect(extractField(policy, 'name')).toBe('superfield-autolearn-worker-egress');
+    expect(extractField(policy, 'name')).toBe(
+      'autolearn-worker-egress-$(DEPARTMENT_ID)-$(CUSTOMER_ID)',
+    );
   });
 
-  test('NetworkPolicy selects pods with app: superfield-autolearn-worker', () => {
+  test('NetworkPolicy selects pods with app: autolearn-worker', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [policy] = documentsOfKind(docs, 'NetworkPolicy');
-    expect(policy).toContain('app: superfield-autolearn-worker');
+    expect(policy).toContain('app: autolearn-worker');
     expect(policy).toContain('podSelector');
   });
 
@@ -133,75 +140,81 @@ describe('NetworkPolicy — egress rules (WORKER-C-006, WORKER-C-024)', () => {
   });
 });
 
-// ── Deployment structure ──────────────────────────────────────────────────────
+// ── Ephemeral Job structure ──────────────────────────────────────────────────
+// The autolearn worker is an ephemeral, per-(department, customer) Job rather
+// than a long-lived Deployment. The gardening cron controller (issue #40)
+// creates one Job per run and Kubernetes TTL cleans it up after completion.
 
-describe('Deployment — autolearn worker (WORKER-C-020, WORKER-T-009)', () => {
-  test('manifest contains exactly one Deployment resource', () => {
+describe('Job — autolearn worker (WORKER-C-020, WORKER-T-009)', () => {
+  test('manifest contains exactly one Job resource', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const deployments = documentsOfKind(docs, 'Deployment');
-    expect(deployments).toHaveLength(1);
+    const jobs = documentsOfKind(docs, 'Job');
+    expect(jobs).toHaveLength(1);
   });
 
-  test('Deployment is named superfield-autolearn-worker', () => {
+  test('Job name follows the per-run autolearn-worker template', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(extractField(deployment, 'name')).toBe('superfield-autolearn-worker');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(extractField(job, 'name')).toBe('autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)');
   });
 
-  test('Deployment has agent-type: autolearn label', () => {
+  test('Job pod template carries app: autolearn-worker label', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('agent-type: autolearn');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('app: autolearn-worker');
   });
 
   test('AGENT_TYPE env var is set to autolearn', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain("value: 'autolearn'");
+    const [job] = documentsOfKind(docs, 'Job');
+    // YAML scalar may be quoted or bare — both forms are acceptable.
+    expect(job).toMatch(/value:\s*['"]?autolearn['"]?/);
   });
 
-  test('AGENT_DATABASE_URL is loaded from a Secret — not hardcoded (WORKER-T-009)', () => {
+  test('API_BASE_URL is loaded from a Secret — not hardcoded (WORKER-T-009)', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    // Must reference a secretKeyRef for the DB URL
-    expect(deployment).toContain('AGENT_DATABASE_URL');
-    expect(deployment).toContain('secretKeyRef');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('API_BASE_URL');
+    const section = job.slice(job.indexOf('API_BASE_URL'));
+    expect(section).toContain('secretKeyRef');
   });
 
-  test('ANTHROPIC_API_KEY is loaded from a Secret — not hardcoded (WORKER-T-009)', () => {
+  test('WORKER_TOKEN is loaded from a per-run Secret — not hardcoded (WORKER-T-009)', () => {
+    // The autolearn worker no longer carries an Anthropic API key in the pod
+    // env. It authenticates with the Superfield API via a single-use
+    // WORKER_TOKEN issued by /internal/worker/tokens — see WORKER-T-005.
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('ANTHROPIC_API_KEY');
-    // The value must come from a secretKeyRef, not a plain value field
-    const apiKeySection = deployment.slice(deployment.indexOf('ANTHROPIC_API_KEY'));
-    expect(apiKeySection).toContain('secretKeyRef');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('WORKER_TOKEN');
+    const section = job.slice(job.indexOf('WORKER_TOKEN'));
+    expect(section).toContain('secretKeyRef');
   });
 
-  test('Deployment uses superfield-autolearn-worker-secret Secret', () => {
+  test('Job references the per-run autolearn-token Secret', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('superfield-autolearn-worker-secret');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('autolearn-token-$(DEPARTMENT_ID)-$(CUSTOMER_ID)');
   });
 
-  test('Deployment runs as non-root (securityContext)', () => {
+  test('Job runs as non-root (securityContext)', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('runAsNonRoot: true');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('runAsNonRoot: true');
   });
 
   test('allowPrivilegeEscalation is false', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
-    const [deployment] = documentsOfKind(docs, 'Deployment');
-    expect(deployment).toContain('allowPrivilegeEscalation: false');
+    const [job] = documentsOfKind(docs, 'Job');
+    expect(job).toContain('allowPrivilegeEscalation: false');
   });
 });
 
@@ -215,10 +228,10 @@ describe('ServiceAccount — autolearn worker', () => {
     expect(accounts).toHaveLength(1);
   });
 
-  test('ServiceAccount is named superfield-autolearn-worker', () => {
+  test('ServiceAccount name follows the per-run autolearn-worker template', () => {
     const content = readFileSync(MANIFEST_PATH, 'utf-8');
     const docs = splitYamlDocuments(content);
     const [account] = documentsOfKind(docs, 'ServiceAccount');
-    expect(extractField(account, 'name')).toBe('superfield-autolearn-worker');
+    expect(extractField(account, 'name')).toBe('autolearn-worker-$(DEPARTMENT_ID)-$(CUSTOMER_ID)');
   });
 });

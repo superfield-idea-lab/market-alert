@@ -28,9 +28,9 @@
  * - require-no-automount-sa-token rule is present
  * - require-image-tag-not-latest rule is present
  *
- * ### Dockerfile.autolearn-worker
- * - Builder stage uses pinned bun image digest (WORKER-C-023)
- * - Runtime stage uses distroless bun image digest (WORKER-C-001)
+ * ### Dockerfile — `autolearn-worker` target (unified multi-stage Dockerfile)
+ * - Shared install/builder stages use pinned bun image digest (WORKER-C-023)
+ * - autolearn-worker stage uses distroless bun image digest (WORKER-C-001)
  * - USER directive sets non-root UID (WORKER-T-007)
  * - ENTRYPOINT does not invoke sh or bash (WORKER-C-001)
  *
@@ -52,7 +52,19 @@ const ROOT = resolve(import.meta.dirname, '../..');
 
 const workerManifest = readFileSync(resolve(ROOT, 'k8s/autolearn-worker.yaml'), 'utf-8');
 const admissionPolicy = readFileSync(resolve(ROOT, 'k8s/autolearn-admission-policy.yaml'), 'utf-8');
-const dockerfile = readFileSync(resolve(ROOT, 'Dockerfile.autolearn-worker'), 'utf-8');
+// The legacy Dockerfile.autolearn-worker was consolidated into the unified
+// multi-stage Dockerfile with an `autolearn-worker` target. We read the
+// unified Dockerfile and isolate the autolearn-worker stage so assertions
+// stay scoped to the relevant section.
+const dockerfile = readFileSync(resolve(ROOT, 'Dockerfile'), 'utf-8');
+
+const autolearnStageStart = dockerfile.indexOf('AS autolearn-worker');
+const autolearnStage = (() => {
+  if (autolearnStageStart < 0) return '';
+  const after = dockerfile.slice(autolearnStageStart);
+  const nextStage = after.indexOf('\nFROM ', 1);
+  return nextStage < 0 ? after : after.slice(0, nextStage);
+})();
 
 // ── File existence ────────────────────────────────────────────────────────────
 
@@ -65,8 +77,9 @@ describe('autolearn worker files exist', () => {
     expect(existsSync(resolve(ROOT, 'k8s/autolearn-admission-policy.yaml'))).toBe(true);
   });
 
-  test('Dockerfile.autolearn-worker exists', () => {
-    expect(existsSync(resolve(ROOT, 'Dockerfile.autolearn-worker'))).toBe(true);
+  test('Dockerfile (unified) exists and defines an autolearn-worker stage', () => {
+    expect(existsSync(resolve(ROOT, 'Dockerfile'))).toBe(true);
+    expect(autolearnStageStart).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -240,38 +253,40 @@ describe('autolearn-admission-policy.yaml — Kyverno ClusterPolicy (acceptance 
   });
 });
 
-// ── Dockerfile.autolearn-worker ───────────────────────────────────────────────
+// ── Dockerfile — `autolearn-worker` target ───────────────────────────────────
 
-describe('Dockerfile.autolearn-worker — distroless image (WORKER-C-001)', () => {
-  test('builder stage uses pinned bun image with SHA digest', () => {
+describe('Dockerfile autolearn-worker stage — distroless image (WORKER-C-001)', () => {
+  test('shared builder uses pinned bun image with SHA digest', () => {
     // WORKER-C-023: base image is pinned to a digest, not a floating tag.
-    expect(dockerfile).toMatch(/FROM oven\/bun:\S+@sha256:[a-f0-9]+ AS builder/);
+    // The unified Dockerfile centralizes the builder under the shared `install`
+    // stage which all worker targets build from.
+    expect(dockerfile).toMatch(/FROM oven\/bun:\S+@\$\{BUN_BUILDER_DIGEST\} AS install/);
   });
 
-  test('runtime stage uses distroless bun image with SHA digest', () => {
+  test('autolearn-worker stage uses distroless bun image with pinned digest', () => {
     // WORKER-C-001: no shell in production container.
-    expect(dockerfile).toMatch(/FROM oven\/bun:\S+-distroless@sha256:[a-f0-9]+ AS runtime/);
+    expect(dockerfile).toMatch(
+      /FROM oven\/bun:\S+-distroless@\$\{BUN_DISTROLESS_DIGEST\} AS autolearn-worker/,
+    );
   });
 
-  test('USER directive sets non-root UID in runtime stage', () => {
+  test('autolearn-worker stage sets non-root UID via USER directive', () => {
     // WORKER-T-007: worker must not run as root.
-    expect(dockerfile).toMatch(/^USER 1000:1000/m);
+    expect(autolearnStage).toMatch(/^USER 1000:1000/m);
   });
 
-  test('ENTRYPOINT uses array form (no shell invocation)', () => {
+  test('autolearn-worker ENTRYPOINT uses array form (no shell invocation)', () => {
     // WORKER-C-007: vendor CLI invoked without shell; entrypoint must be array form.
-    expect(dockerfile).toMatch(/^ENTRYPOINT \["/m);
-    // Must not use CMD with sh -c or /bin/sh
-    expect(dockerfile).not.toMatch(/ENTRYPOINT.*sh -c/);
-    expect(dockerfile).not.toMatch(/ENTRYPOINT.*\/bin\/sh/);
+    expect(autolearnStage).toMatch(/^ENTRYPOINT \["/m);
+    expect(autolearnStage).not.toMatch(/ENTRYPOINT.*sh -c/);
+    expect(autolearnStage).not.toMatch(/ENTRYPOINT.*\/bin\/sh/);
   });
 
   test('Claude CLI binary is COPY-ed from build context, not downloaded at runtime', () => {
     // WORKER-C-023: binary copied at build time; no wget/curl at runtime.
-    expect(dockerfile).toContain('COPY');
-    expect(dockerfile).toContain('/usr/local/bin/claude');
-    // No runtime download commands
-    expect(dockerfile).not.toMatch(/RUN.*wget.*claude/);
-    expect(dockerfile).not.toMatch(/RUN.*curl.*claude/);
+    expect(autolearnStage).toContain('COPY');
+    expect(autolearnStage).toContain('/usr/local/bin/claude');
+    expect(autolearnStage).not.toMatch(/RUN.*wget.*claude/);
+    expect(autolearnStage).not.toMatch(/RUN.*curl.*claude/);
   });
 });
