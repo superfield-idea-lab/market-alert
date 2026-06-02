@@ -35,20 +35,12 @@ type DemoEnv = {
 };
 
 async function applyAuditSchema(pgUrl: string): Promise<void> {
-  const rawSql = readFileSync(AUDIT_SCHEMA_PATH, 'utf-8');
-  const stripped = rawSql
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('--'))
-    .join('\n');
-  const statements = stripped
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const schemaSql = readFileSync(AUDIT_SCHEMA_PATH, 'utf-8');
   const sql = postgres(pgUrl, { max: 1, idle_timeout: 5, connect_timeout: 10 });
   try {
-    for (const stmt of statements) {
-      await sql.unsafe(stmt);
-    }
+    // Pass the whole file as one unsafe call — dollar-quoted PL/pgSQL blocks
+    // must not be split on semicolons (matches pg-container.ts applyAuditSchema).
+    await sql.unsafe(schemaSql);
   } finally {
     await sql.end({ timeout: 5 });
   }

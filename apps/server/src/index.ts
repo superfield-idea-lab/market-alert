@@ -43,19 +43,15 @@ import {
   isTestMode,
 } from './api/test-session';
 import { handleDemoSessionRequest, isDemoMode } from './api/demo-session';
-import { handleReidentificationRequest } from './api/reidentification';
-import { handleIngestionRequest } from './api/ingestion';
 import { handleCorporateActionIngestionRequest } from './api/corporate-action-ingestion';
 import { handleEtlCursorRequest } from './api/etl-cursor';
 import { handleCorpusChunksRequest, registerCorpusChunkEntityType } from './api/corpus-chunks';
-import { handleCampaignAnalysisRequest } from './api/campaign-analysis';
 import { handleWorkerTokensRequest } from './api/worker-tokens';
-import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
-import { handleInternalRelationsRequest } from './api/internal-relations';
 import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
 import { handleWikiPendingDraftsRequest } from './api/wiki-pending-drafts';
+import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import {
   handleTranscriptIngestionRequest,
   registerTranscriptEntityType,
@@ -64,10 +60,7 @@ import { handleTranscriptionRequest } from './api/transcription';
 import { handleAnnotationsRequest } from './api/annotations';
 import { handleAnnotationThreadsRequest } from './api/annotation-threads';
 import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
-import { handleBdmCampaignRequest } from './api/bdm-campaign';
-import { handleCampaignSummaryRequest } from './api/campaign-summary';
 import { handleComplianceRequest } from './api/compliance';
-import { handleLegalHoldRequest } from './api/legal-hold';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 import { handleReplayRequest } from './api/replay';
 
@@ -292,6 +285,14 @@ export default {
       if (testTokenRes) return testTokenRes;
     }
 
+    // /api/tasks-queue must be checked before /api/tasks to prevent the
+    // CSRF-protected /api/tasks handler from intercepting tasks-queue requests
+    // (both paths share the /api/tasks prefix).
+    if (url.pathname.startsWith('/api/tasks-queue')) {
+      const tasksQueueRes = await handleTasksQueueRequest(req, url, appState);
+      if (tasksQueueRes) return tasksQueueRes;
+    }
+
     if (url.pathname.startsWith('/api/tasks')) {
       // Delegated-token result submission route — workers submit results here.
       const resultRes = await handleTaskQueueResultRequest(req, url, appState);
@@ -299,11 +300,6 @@ export default {
       // Generic task CRUD with CSRF protection (used by CSRF integration tests).
       const tasksRes = await handleTasksRequest(req, url, appState);
       if (tasksRes) return withTrace(tasksRes);
-    }
-
-    if (url.pathname.startsWith('/api/tasks-queue')) {
-      const tasksQueueRes = await handleTasksQueueRequest(req, url, appState);
-      if (tasksQueueRes) return tasksQueueRes;
     }
 
     if (url.pathname.startsWith('/api/audit')) {
@@ -392,11 +388,6 @@ export default {
       if (annotationsRes) return withTrace(annotationsRes);
     }
 
-    if (url.pathname.startsWith('/api/reidentification')) {
-      const reidentRes = await handleReidentificationRequest(req, url, appState);
-      if (reidentRes) return withTrace(reidentRes);
-    }
-
     // Cluster-internal transcription worker path (issue #57).
     // POST /api/transcriptions — submit a transcript (delegated-token or session-cookie auth)
     // GET  /api/transcriptions — list transcripts
@@ -423,6 +414,13 @@ export default {
       if (corpActRes) return withTrace(corpActRes);
     }
 
+    // Internal worker wiki write endpoint — Bearer wiki-write token auth (issue #39).
+    // POST /internal/wiki/versions — autolearn worker writes draft WikiPageVersion.
+    if (url.pathname.startsWith('/internal/wiki/')) {
+      const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
+      if (internalWikiRes) return withTrace(internalWikiRes);
+    }
+
     // Phase 2: EDGAR ETL cursor read/write (GET|PUT /internal/etl/cursor/:source/:key).
     // Worker reads current watermark before each poll and advances it after a
     // successful batch. Issue #15.
@@ -431,32 +429,9 @@ export default {
       if (cursorRes) return withTrace(cursorRes);
     }
 
-    // API-mediated email ingestion (POST /internal/ingestion/email)
-    // Worker DB role has no INSERT on entities — writes must go through this endpoint.
-    // Blueprint: WORKER-P-001, API-W-001. Issue #28.
-    if (url.pathname.startsWith('/internal/ingestion')) {
-      const ingestionRes = await handleIngestionRequest(req, url, appState);
-      if (ingestionRes) return withTrace(ingestionRes);
-    }
-
     if (url.pathname.startsWith('/api/corpus-chunks')) {
       const corpusRes = await handleCorpusChunksRequest(req, url, appState);
       if (corpusRes) return withTrace(corpusRes);
-    }
-
-    // Phase 7: BDM campaign query endpoint (issue #103).
-    // GET /api/bdm/campaign — reads from kb_analytics only (DATA-C-031).
-    if (url.pathname.startsWith('/api/bdm/')) {
-      const bdmRes = await handleBdmCampaignRequest(req, url, appState);
-      if (bdmRes) return withTrace(bdmRes);
-    }
-
-    // Campaign analysis — BDM picker + anonymised chunk query (issue #74).
-    // GET /api/campaign/entities?type=asset_manager|fund
-    // GET /api/campaign/chunks?entity_id=<id>
-    if (url.pathname.startsWith('/api/campaign')) {
-      const campaignRes = await handleCampaignAnalysisRequest(req, url, appState);
-      if (campaignRes) return withTrace(campaignRes);
     }
 
     // Internal worker token mint + pod-terminate invalidation (issue #36).
@@ -465,27 +440,6 @@ export default {
     if (url.pathname.startsWith('/internal/worker/tokens')) {
       const workerTokenRes = await handleWorkerTokensRequest(req, url, appState);
       if (workerTokenRes) return withTrace(workerTokenRes);
-    }
-
-    // Internal worker wiki write endpoint — Bearer wiki-write token auth (issue #39).
-    // POST /internal/wiki/versions — autolearn worker writes draft WikiPageVersion.
-    if (url.pathname.startsWith('/internal/wiki/')) {
-      const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
-      if (internalWikiRes) return withTrace(internalWikiRes);
-    }
-
-    // Internal worker relation write endpoint — Bearer wiki-write token auth (issue #72).
-    // POST /internal/relations — autolearn worker writes discussed_in relations.
-    if (url.pathname === '/internal/relations') {
-      const internalRelRes = await handleInternalRelationsRequest(req, url, appState);
-      if (internalRelRes) return withTrace(internalRelRes);
-    }
-
-    // Campaign summary endpoint — Phase 7 BDM campaign analysis (issue #75).
-    // POST /api/campaign/summarise — summarise anonymised chunks via Claude API.
-    if (url.pathname.startsWith('/api/campaign/')) {
-      const summaryRes = await handleCampaignSummaryRequest(req, url, appState);
-      if (summaryRes) return withTrace(summaryRes);
     }
 
     // Phase 8 compliance officer endpoints (issue #79).
@@ -521,19 +475,6 @@ export default {
     if (url.pathname.startsWith('/api/replay')) {
       const replayRes = await handleReplayRequest(req, url, appState);
       if (replayRes) return withTrace(replayRes);
-    }
-
-    // Phase 8 legal hold endpoints (issue #82).
-    // POST /api/legal-holds — place a hold (compliance_officer only)
-    // GET  /api/legal-holds — list holds
-    // GET  /api/legal-holds/:holdId — fetch a single hold
-    // POST /api/legal-holds/:holdId/removal-request — initiate four-eyes removal
-    // POST /api/legal-holds/removal-requests/:requestId/approve — co-approve removal
-    // POST /api/legal-holds/removal-requests/:requestId/reject — reject removal
-    // GET  /api/legal-holds/pending-removals — approval queue
-    if (url.pathname.startsWith('/api/legal-holds')) {
-      const legalHoldRes = await handleLegalHoldRequest(req, url, appState);
-      if (legalHoldRes) return withTrace(legalHoldRes);
     }
 
     // Serve static assets. import.meta.dir is the compiled bundle dir (/app/dist)

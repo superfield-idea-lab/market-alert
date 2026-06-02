@@ -197,13 +197,17 @@ test('POST /api/tasks-queue/claim returns 204 when no task is available', async 
 });
 
 test('PATCH /api/tasks-queue/:id updates task status to running', async () => {
+  // Use a unique agent_type to avoid claiming a task enqueued by an earlier test.
+  const stamp = Date.now();
+  const agentType = `patch_status_test_${stamp}`;
+
   // 1. Enqueue a task
   const enqRes = await fetch(`${BASE}/api/tasks-queue`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: authCookie },
     body: JSON.stringify({
-      idempotency_key: `update-status-${Date.now()}`,
-      agent_type: 'coding',
+      idempotency_key: `update-status-${stamp}`,
+      agent_type: agentType,
       job_type: 'review',
       payload: { ref: 'r1' },
     }),
@@ -214,7 +218,7 @@ test('PATCH /api/tasks-queue/:id updates task status to running', async () => {
   const claimRes = await fetch(`${BASE}/api/tasks-queue/claim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: authCookie },
-    body: JSON.stringify({ agent_type: 'coding' }),
+    body: JSON.stringify({ agent_type: agentType }),
   });
   const claimed = await claimRes.json();
   expect(claimed.id).toBe(task.id);
