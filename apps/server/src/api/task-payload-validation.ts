@@ -52,7 +52,7 @@ export function validateTaskPayload(payload: unknown): asserts payload is Record
   for (const key of Object.keys(payload)) {
     if (PAYLOAD_PII_DENYLIST.has(key.toLowerCase())) {
       throw new PayloadValidationError(
-        `payload key "${key}" is not allowed — use a resource ID reference instead`,
+        `payload key "${key}" contains PII — use a resource ID reference instead`,
       );
     }
   }
