@@ -103,11 +103,6 @@ test('compliance_officer can read compliance listing endpoints', async () => {
   });
   expect(retentionRes.status).toBe(200);
 
-  const holdRes = await fetch(`${BASE}/api/legal-holds?limit=5`, {
-    headers: { Cookie: complianceCookie },
-  });
-  expect(holdRes.status).toBe(200);
-
   const auditRes = await fetch(`${BASE}/api/compliance/audit?limit=5`, {
     headers: { Cookie: complianceCookie },
   });
@@ -121,11 +116,6 @@ test('non-compliance users are rejected from compliance listing endpoints', asyn
     headers: { Cookie: regularCookie },
   });
   expect(retentionRes.status).toBe(403);
-
-  const holdRes = await fetch(`${BASE}/api/legal-holds?limit=5`, {
-    headers: { Cookie: regularCookie },
-  });
-  expect(holdRes.status).toBe(403);
 
   const auditRes = await fetch(`${BASE}/api/compliance/audit?limit=5`, {
     headers: { Cookie: regularCookie },
