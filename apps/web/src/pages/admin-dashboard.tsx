@@ -19,8 +19,8 @@
  * - docs/plan.md § Phase 5 acceptance criteria for the real admin UI
  *
  * ## Future Plan issues
- * - #23 — scout for the real PRD-aligned admin dashboard
- * - #24 — implementation of the real admin dashboard
+ * - #88 — scout for the real PRD-aligned admin dashboard
+ * - #89 — implementation of the real admin dashboard
  */
 
 import React from 'react';
@@ -30,15 +30,15 @@ import React from 'react';
  *
  * Renders a placeholder that documents the future admin UI. No data fetching,
  * no WebSocket — safe to render without a running server. The real UI is
- * owned by Plan #24 and gated behind scout #23.
+ * owned by Plan #89 and gated behind scout #88.
  */
 export function AdminDashboard(): React.ReactElement {
   return (
     <main aria-label="Admin dashboard" className="p-8">
       <h1 className="text-xl font-bold text-zinc-900">Admin Dashboard</h1>
-      {/* Phase 5: source configuration, alert suppression, audit trail (Plan #24) */}
+      {/* Phase 5: source configuration, alert suppression, audit trail (Plan #89) */}
       <p data-testid="admin-stub" className="mt-2 text-sm text-zinc-500">
-        Admin dashboard — Phase 5 implementation pending (see Plan #24).
+        Admin dashboard — Phase 5 implementation pending (see Plan #89).
       </p>
     </main>
   );
