@@ -283,8 +283,11 @@ async function configureAuditDatabase(auditAdmin: ReturnType<typeof makePool>): 
 GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(ROLE_NAMES.audit)};
 
 -- Append-only hash-chained audit event log.
--- audit_w may INSERT and SELECT only. No UPDATE, DELETE, or TRUNCATE.
--- This is the primary audit store used by emitAuditEvent.
+-- Immutability is enforced by the audit_events_immutable triggers below —
+-- UPDATE/DELETE/TRUNCATE always raise an exception regardless of role grants.
+-- audit_w needs UPDATE granted so that SELECT ... FOR UPDATE (used by the
+-- hash-chain locking path in audit-service.ts) succeeds; the trigger blocks
+-- any actual row mutation.
 CREATE TABLE IF NOT EXISTS audit_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id TEXT NOT NULL,
@@ -307,8 +310,28 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_ts ON audit_events(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(entity_type, entity_id);
 
--- audit_w: INSERT and SELECT only — no UPDATE, DELETE, or TRUNCATE.
-GRANT INSERT, SELECT ON TABLE audit_events TO ${quoteIdentifier(ROLE_NAMES.audit)};
+CREATE OR REPLACE FUNCTION audit_events_immutable() RETURNS trigger AS $immut$
+BEGIN
+    RAISE EXCEPTION 'audit_events is append-only — % is not permitted', TG_OP;
+END;
+$immut$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER audit_events_no_update
+    BEFORE UPDATE ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
+
+CREATE OR REPLACE TRIGGER audit_events_no_delete
+    BEFORE DELETE ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION audit_events_immutable();
+
+CREATE OR REPLACE TRIGGER audit_events_no_truncate
+    BEFORE TRUNCATE ON audit_events
+    EXECUTE FUNCTION audit_events_immutable();
+
+-- audit_w: INSERT, SELECT, and UPDATE. UPDATE is required only so that
+-- SELECT ... FOR UPDATE can take a row lock; real UPDATE/DELETE/TRUNCATE are
+-- blocked by the immutability triggers above.
+GRANT INSERT, SELECT, UPDATE ON TABLE audit_events TO ${quoteIdentifier(ROLE_NAMES.audit)};
 `);
 }
 
