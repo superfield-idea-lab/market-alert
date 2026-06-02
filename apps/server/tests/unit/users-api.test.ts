@@ -1,6 +1,8 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { handleUsersRequest } from '../../src/api/users';
-import * as adminModule from '../../src/api/admin';
+// `isSuperuser` is determined by the SUPERUSER_ID env var (see
+// apps/server/src/lib/response.ts). We set/restore that env var around each
+// test instead of spying on the helper, which removes one vi.spyOn per test.
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,8 +49,15 @@ function makeRequest(method: string, path: string, cookie = '') {
 // ---------------------------------------------------------------------------
 
 describe('handleUsersRequest()', () => {
+  const originalSuperuserId = process.env.SUPERUSER_ID;
+
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalSuperuserId === undefined) {
+      delete process.env.SUPERUSER_ID;
+    } else {
+      process.env.SUPERUSER_ID = originalSuperuserId;
+    }
   });
 
   test('returns null for non-/api/users paths', async () => {
@@ -74,8 +83,9 @@ describe('handleUsersRequest()', () => {
       id: 'caller-id',
       username: 'caller',
     });
-    // Caller is a superuser so the authorisation check passes before the 404
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(true);
+    // Caller is a superuser so the authorisation check passes before the 404.
+    // isSuperuser() is env-driven; set SUPERUSER_ID to the caller's id.
+    process.env.SUPERUSER_ID = 'caller-id';
 
     const appState = makeAppState([], [{ count: '0' }]);
 
@@ -92,7 +102,8 @@ describe('handleUsersRequest()', () => {
       username: 'caller',
     });
     // Caller is a superuser so the authorisation check passes
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(true);
+    // (isSuperuser reads SUPERUSER_ID from the environment).
+    process.env.SUPERUSER_ID = 'caller-id';
 
     // Target user is a superuser
     const targetUser = { id: 'super-id', properties: { role: 'superuser', username: 'admin' } };
@@ -127,7 +138,8 @@ describe('handleUsersRequest()', () => {
       username: 'caller',
     });
     // Caller is a superuser so the authorisation check passes
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(true);
+    // (isSuperuser reads SUPERUSER_ID from the environment).
+    process.env.SUPERUSER_ID = 'caller-id';
 
     const targetUser = { id: 'super-id', properties: { role: 'superuser', username: 'admin' } };
     const countRow = [{ count: '2' }];
@@ -160,8 +172,8 @@ describe('handleUsersRequest()', () => {
       id: 'caller-id',
       username: 'caller',
     });
-    // Caller is NOT a superuser
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(false);
+    // Caller is NOT a superuser — leave SUPERUSER_ID unset (afterEach restores it).
+    delete process.env.SUPERUSER_ID;
 
     const targetUser = { id: 'other-id', properties: { username: 'other' } };
 
@@ -190,8 +202,8 @@ describe('handleUsersRequest()', () => {
       id: 'self-id',
       username: 'self',
     });
-    // Caller is NOT a superuser, but deletes their own account
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(false);
+    // Caller is NOT a superuser, but deletes their own account — leave SUPERUSER_ID unset.
+    delete process.env.SUPERUSER_ID;
 
     const targetUser = { id: 'self-id', properties: { username: 'self' } };
 
@@ -223,7 +235,8 @@ describe('handleUsersRequest()', () => {
       username: 'caller',
     });
     // Caller is a superuser so the authorisation check passes
-    vi.spyOn(adminModule, 'isSuperuser').mockReturnValue(true);
+    // (isSuperuser reads SUPERUSER_ID from the environment).
+    process.env.SUPERUSER_ID = 'caller-id';
 
     const targetUser = { id: 'regular-id', properties: { username: 'bob' } };
 

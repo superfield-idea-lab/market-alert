@@ -81,7 +81,7 @@ describe('validateTaskPayload (TQ-P-002 opaque-reference-payloads)', () => {
       PayloadValidationError,
     );
     expect(() => validateTaskPayload({ email: 'user@example.com' })).toThrow(
-      'payload key "email" is not allowed — use a resource ID reference instead',
+      'payload key "email" contains PII — use a resource ID reference instead',
     );
   });
 
@@ -158,7 +158,7 @@ describe('validateTaskPayload (TQ-P-002 opaque-reference-payloads)', () => {
 
   test('error message includes the offending key name', () => {
     expect(() => validateTaskPayload({ Email: 'x' })).toThrow(
-      'payload key "Email" is not allowed — use a resource ID reference instead',
+      'payload key "Email" contains PII — use a resource ID reference instead',
     );
   });
 
