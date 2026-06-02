@@ -51,6 +51,7 @@ import { handleDeepcleanRequest } from './api/deepclean';
 import { handleWikiRequest } from './api/wiki';
 import { handleWikiPageViewRequest } from './api/wiki-page-view';
 import { handleWikiPendingDraftsRequest } from './api/wiki-pending-drafts';
+import { handleInternalWikiVersionsRequest } from './api/internal-wiki-versions';
 import {
   handleTranscriptIngestionRequest,
   registerTranscriptEntityType,
@@ -408,6 +409,13 @@ export default {
     if (url.pathname === '/internal/ingestion/corporate-action') {
       const corpActRes = await handleCorporateActionIngestionRequest(req, url, appState);
       if (corpActRes) return withTrace(corpActRes);
+    }
+
+    // Internal worker wiki write endpoint — Bearer wiki-write token auth (issue #39).
+    // POST /internal/wiki/versions — autolearn worker writes draft WikiPageVersion.
+    if (url.pathname.startsWith('/internal/wiki/')) {
+      const internalWikiRes = await handleInternalWikiVersionsRequest(req, url, appState);
+      if (internalWikiRes) return withTrace(internalWikiRes);
     }
 
     // Phase 2: EDGAR ETL cursor read/write (GET|PUT /internal/etl/cursor/:source/:key).
