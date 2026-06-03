@@ -59,12 +59,13 @@ import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { runInitRemote } from '../../packages/db/init-remote';
 import { migrate, migrateMkt } from '../../packages/db/index';
-import { CANONICAL_SOURCES_DDL } from '../../packages/db/canonical-source-store';
 import {
+  CANONICAL_SOURCES_DDL,
   registerCanonicalSource,
   activateCanonicalSource,
   listCanonicalSourcesByMethodology,
   type CanonicalSourceRow,
+  type SqlClient,
 } from '../../packages/db/canonical-source-store';
 import { handleCanonicalSourceRegistrationRequest } from '../../apps/server/src/api/canonical-source-registration';
 import {
@@ -285,18 +286,15 @@ describe('canonical-source-store', () => {
   const tenantId = 'tenant-store-test-001';
 
   test('registerCanonicalSource inserts a new row in pending status', async () => {
-    const source = await registerCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      {
-        methodology_id: methodologyId,
-        author_id: authorId,
-        tenant_id: tenantId,
-        name: 'Test Venue A',
-        url: 'https://test-venue-a.example.com',
-        description: 'A test venue',
-        access_mode: 'public',
-      },
-    );
+    const source = await registerCanonicalSource(sql as unknown as SqlClient, {
+      methodology_id: methodologyId,
+      author_id: authorId,
+      tenant_id: tenantId,
+      name: 'Test Venue A',
+      url: 'https://test-venue-a.example.com',
+      description: 'A test venue',
+      access_mode: 'public',
+    });
 
     expect(source).toBeDefined();
     expect(source.id).toBeTruthy();
@@ -311,28 +309,22 @@ describe('canonical-source-store', () => {
 
   test('registerCanonicalSource is idempotent — no duplicate on second call', async () => {
     // First call — already inserted above.
-    const first = await registerCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      {
-        methodology_id: methodologyId,
-        author_id: authorId,
-        tenant_id: tenantId,
-        name: 'Test Venue A',
-        url: 'https://test-venue-a.example.com',
-      },
-    );
+    const first = await registerCanonicalSource(sql as unknown as SqlClient, {
+      methodology_id: methodologyId,
+      author_id: authorId,
+      tenant_id: tenantId,
+      name: 'Test Venue A',
+      url: 'https://test-venue-a.example.com',
+    });
 
     // Second call — same methodology_id + url.
-    const second = await registerCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      {
-        methodology_id: methodologyId,
-        author_id: authorId,
-        tenant_id: tenantId,
-        name: 'Test Venue A (duplicate attempt)',
-        url: 'https://test-venue-a.example.com',
-      },
-    );
+    const second = await registerCanonicalSource(sql as unknown as SqlClient, {
+      methodology_id: methodologyId,
+      author_id: authorId,
+      tenant_id: tenantId,
+      name: 'Test Venue A (duplicate attempt)',
+      url: 'https://test-venue-a.example.com',
+    });
 
     // Must be the same row (same id).
     expect(first.id).toBe(second.id);
@@ -348,23 +340,17 @@ describe('canonical-source-store', () => {
   });
 
   test('activateCanonicalSource advances status from pending to active', async () => {
-    const source = await registerCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      {
-        methodology_id: methodologyId,
-        author_id: authorId,
-        tenant_id: tenantId,
-        name: 'Test Venue B',
-        url: 'https://test-venue-b.example.com',
-      },
-    );
+    const source = await registerCanonicalSource(sql as unknown as SqlClient, {
+      methodology_id: methodologyId,
+      author_id: authorId,
+      tenant_id: tenantId,
+      name: 'Test Venue B',
+      url: 'https://test-venue-b.example.com',
+    });
 
     expect(source.status).toBe('pending');
 
-    const activated = await activateCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      source.id,
-    );
+    const activated = await activateCanonicalSource(sql as unknown as SqlClient, source.id);
     expect(activated).not.toBeNull();
     expect(activated!.status).toBe('active');
     expect(activated!.id).toBe(source.id);
@@ -372,7 +358,7 @@ describe('canonical-source-store', () => {
 
   test('listCanonicalSourcesByMethodology returns sources for the methodology', async () => {
     const sources = await listCanonicalSourcesByMethodology(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
+      sql as unknown as SqlClient,
       methodologyId,
     );
     // Should have at least the two we created above.
@@ -384,7 +370,7 @@ describe('canonical-source-store', () => {
 
   test('listCanonicalSourcesByMethodology filters by status', async () => {
     const active = await listCanonicalSourcesByMethodology(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
+      sql as unknown as SqlClient,
       methodologyId,
       'active',
     );
@@ -542,7 +528,7 @@ describe('TC-1: source discovery never writes the golden document', () => {
     };
 
     await executeSourceDiscoverTask(
-      task as Parameters<typeof executeSourceDiscoverTask>[0],
+      task as unknown as Parameters<typeof executeSourceDiscoverTask>[0],
       apiBaseUrl,
       TEST_TOKEN,
     );
@@ -584,7 +570,7 @@ describe('TC-2: methodology venue catalog → registered canonical source', () =
     };
 
     const result: SourceDiscoverResult = await executeSourceDiscoverTask(
-      task as Parameters<typeof executeSourceDiscoverTask>[0],
+      task as unknown as Parameters<typeof executeSourceDiscoverTask>[0],
       apiBaseUrl,
       TEST_TOKEN,
     );
@@ -622,7 +608,7 @@ describe('TC-2: methodology venue catalog → registered canonical source', () =
 
     // Second run — venues already registered from TC-2 first test.
     const result2: SourceDiscoverResult = await executeSourceDiscoverTask(
-      task as Parameters<typeof executeSourceDiscoverTask>[0],
+      task as unknown as Parameters<typeof executeSourceDiscoverTask>[0],
       apiBaseUrl,
       TEST_TOKEN,
     );
@@ -646,7 +632,7 @@ describe('TC-2: methodology venue catalog → registered canonical source', () =
 
     // Fetch a pending source from this methodology.
     const sources = await listCanonicalSourcesByMethodology(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
+      sql as unknown as SqlClient,
       methodologyId,
       'pending',
     );
@@ -654,7 +640,7 @@ describe('TC-2: methodology venue catalog → registered canonical source', () =
     // If all were already activated by a previous test run, just verify active ones exist.
     if (sources.length === 0) {
       const activeOnes = await listCanonicalSourcesByMethodology(
-        sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
+        sql as unknown as SqlClient,
         methodologyId,
         'active',
       );
@@ -663,10 +649,7 @@ describe('TC-2: methodology venue catalog → registered canonical source', () =
     }
 
     const toActivate = sources[0];
-    const activated = await activateCanonicalSource(
-      sql as unknown as typeof import('../../packages/db/canonical-source-store').SqlClient,
-      toActivate.id,
-    );
+    const activated = await activateCanonicalSource(sql as unknown as SqlClient, toActivate.id);
 
     expect(activated).not.toBeNull();
     expect(activated!.status).toBe('active');
