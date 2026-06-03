@@ -386,6 +386,44 @@ export async function executeWikiRebuildTask(
     }
 
     currentStatus = 'indexed';
+
+    // --- Trigger STANDING_PROMPT_DISTILL for all researchers scoped to this subject ---
+    //
+    // When a wiki_page_version reaches `indexed`, enqueue a STANDING_PROMPT_DISTILL
+    // task for each researcher whose scope includes this subject. The wiki_version_window
+    // is a 5-minute debounce bucket — a burst of publishes within the same window maps
+    // to the same idempotency key, collapsing to a single distillation pass (issue #79).
+    //
+    // The trigger uses the wiki-rebuild API's internal researchers endpoint. If that
+    // endpoint is unavailable (e.g. older API deployment), the trigger fails silently
+    // and distillation will be enqueued on the next scheduled pass.
+    //
+    // Task key format: sp_distill:<researcher_id>:entity:<subject_id>:<wiki_version_window>
+    try {
+      const publishedAt = new Date();
+      const wikiVersionWindow = new Date(Math.floor(publishedAt.getTime() / 300_000) * 300_000)
+        .toISOString()
+        .slice(0, 16); // YYYY-MM-DDTHH:MM (5-minute bucket)
+
+      // Enqueue one STANDING_PROMPT_DISTILL task via the internal API.
+      // In this phase, we enqueue a single entity-level distillation task
+      // scoped to the published subject. Per-thesis and portfolio distillation
+      // tasks are enqueued by a separate methodology-aware scheduler (follow-on).
+      await fetch(`${apiBaseUrl}/internal/standing-prompt/distill-trigger`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          tenant_id,
+          subject_type,
+          subject_id,
+          wiki_version_window: wikiVersionWindow,
+        }),
+      });
+      // Soft trigger: we do not check the response. If the endpoint is missing
+      // (older server), the distillation will run on the next scheduled pass.
+    } catch {
+      // Network error — non-fatal; distillation will catch up on next pass.
+    }
   }
 
   // --- 5. Attach cites edges for all supporting evidence ---

@@ -1,7 +1,7 @@
 /**
  * @file standing-prompt-store.ts
  *
- * DB access layer for the standing-prompt distillation pipeline — Phase 3 scout (issue #78).
+ * DB access layer for the standing-prompt distillation pipeline — issue #79.
  *
  * ## Design
  *
@@ -13,10 +13,16 @@
  *
  * ### standing_prompts
  *
- * One row per researcher. The `currently_active_version_id` pointer is advanced
- * to a new `standing_prompt_versions` row only when its status reaches `active`.
- * Reading code always follows `currently_active_version_id`; in-progress version
- * rows with status < `active` are never exposed to readers.
+ * One row per (researcher, subject_type, subject_id) triple. The three subject
+ * types correspond to the prompt family (PRD §5, §6):
+ *   - `entity`    — per Company/Ticker on the watchlist (default, most specific)
+ *   - `thesis`    — per named thesis spanning multiple entities (methodology-declared)
+ *   - `portfolio` — coarser portfolio-level fallback (one per researcher)
+ *
+ * The `currently_active_version_id` pointer is advanced to a new
+ * `standing_prompt_versions` row only when its status reaches `active`.
+ * Reading code always follows `currently_active_version_id`; in-progress
+ * version rows with status < `active` are never exposed to readers.
  *
  * ### standing_prompt_versions (status pipeline)
  *
@@ -24,13 +30,19 @@
  *   draft → active
  *
  * A new `active` version supersedes the previous `active` version for the same
- * researcher by flipping the prior row's status to `superseded`.
+ * (standing_prompt_id) by flipping the prior row's status to `superseded`.
+ *
+ * ### Pin / override (PRD §5, §7)
+ *
+ * A researcher may pin any Active version. Pinned prompts block automatic
+ * replacement: `activateStandingPromptVersion` returns early without superseding
+ * the pinned version. Pin state is stored in `standing_prompt_versions.is_pinned`.
  *
  * ### Lifecycle transitions
  *
  * - `draft`      — distillation is in-progress; not yet visible to readers.
- * - `active`     — the current effective prompt for the researcher; exactly one
- *                  row per researcher should be `active` at any given time.
+ * - `active`     — the current effective prompt; exactly one row per
+ *                  standing_prompt_id should be `active` at any given time.
  * - `superseded` — this version was Active and has been replaced by a newer version.
  *
  * ## Idempotency
@@ -38,7 +50,14 @@
  * `insertStandingPromptVersion` uses a `wiki_version_window` key so that
  * re-running the distiller on the same window of published wiki versions produces
  * no new row (ON CONFLICT DO NOTHING on the unique index over
- * (researcher_id, wiki_version_window)).
+ * (standing_prompt_id, wiki_version_window)).
+ *
+ * ## Debounce
+ *
+ * The debounce is implemented by the 5-minute bucket in wiki_version_window.
+ * A burst of wiki publishes within the same 5-minute window maps to the same
+ * (standing_prompt_id, wiki_version_window) key, so only the first distillation
+ * task creates a new version row; subsequent tasks exit early via idempotency.
  *
  * ## Length bound
  *
@@ -47,35 +66,36 @@
  *
  * ## Canonical docs
  *
+ * - docs/prd.md §5, §6, §7 — standing prompt family, routing, pin/override
  * - docs/prd.md §9 — standing prompt hard ceiling
  * - docs/prd.md §10 — distillation cadence
  * - docs/architecture.md §"Standing prompt as derived artifact"
  * - packages/db/mkt-schema.sql — DDL (standing_prompts, standing_prompt_versions)
  * - apps/worker/src/standing-prompt-distill-job.ts — worker handler
  * - apps/server/src/api/standing-prompt-distill-api.ts — internal API endpoints
- * - tests/integration/standing-prompt-distill.spec.ts — integration tests
+ * - tests/integration/standing-prompt-family.spec.ts — integration tests (issue #79)
+ * - tests/integration/standing-prompt-distill.spec.ts — integration tests (issue #78)
  *
- * ## Integration points discovered during scout (issue #78)
- *
- * - WIKI_REBUILD workers (issue #76) must enqueue a STANDING_PROMPT_DISTILL task
- *   when a wiki_page_version reaches `indexed` status for a subject within a
- *   researcher's scope. Task key format:
- *   `sp_distill:<researcher_id>:<wiki_version_window>`
- *   The wiki_version_window is the ISO-8601 timestamp of the publish event, truncated
- *   to the debounce bucket size (e.g. 5-minute windows).
- * - The `currently_active_version_id` update MUST be inside the same transaction
- *   that flips status to `active` and the prior version to `superseded` to prevent
- *   double-active races under concurrent workers.
- * - Thesis and portfolio subjects are out of scope for this scout; the distiller
- *   currently only covers entity-level wiki publishes (AC phase feature).
- * - Pin/override capability is out of scope for this scout (phase feature).
- *
+ * @see https://github.com/superfield-idea-lab/market-alert/issues/79
  * @see https://github.com/superfield-idea-lab/market-alert/issues/78
  */
 
 import type postgres from 'postgres';
 
 export type SqlClient = postgres.Sql;
+
+// ---------------------------------------------------------------------------
+// Subject types
+// ---------------------------------------------------------------------------
+
+/**
+ * The three subject types in the standing-prompt family (PRD §5, §6).
+ *
+ * - `entity`    — per Company/Ticker on the watchlist (default, most specific)
+ * - `thesis`    — per named thesis spanning multiple entities (methodology-declared)
+ * - `portfolio` — coarser portfolio-level fallback (one per researcher, subject_id = 'portfolio')
+ */
+export type StandingPromptSubjectType = 'entity' | 'thesis' | 'portfolio';
 
 // ---------------------------------------------------------------------------
 // standing_prompts
@@ -85,6 +105,8 @@ export type StandingPromptRow = {
   id: string;
   tenant_id: string;
   researcher_id: string;
+  subject_type: StandingPromptSubjectType;
+  subject_id: string;
   currently_active_version_id: string | null;
   created_at: Date;
   updated_at: Date;
@@ -93,10 +115,19 @@ export type StandingPromptRow = {
 export interface UpsertStandingPromptInput {
   tenant_id: string;
   researcher_id: string;
+  /** Subject type: entity (per-ticker), thesis (named thesis), or portfolio (fallback). */
+  subject_type: StandingPromptSubjectType;
+  /**
+   * Subject identifier.
+   * - For entity: the ticker/company id.
+   * - For thesis: the thesis name/id.
+   * - For portfolio: use the constant `'portfolio'`.
+   */
+  subject_id: string;
 }
 
 /**
- * Upsert a standing_prompts row for a researcher.
+ * Upsert a standing_prompts row for a (researcher, subject_type, subject_id) triple.
  *
  * Returns the row. Creates a fresh row if none exists; returns the existing row
  * otherwise. The `currently_active_version_id` pointer is only updated by
@@ -107,32 +138,36 @@ export async function upsertStandingPrompt(
   input: UpsertStandingPromptInput,
 ): Promise<StandingPromptRow> {
   const [row] = await sql<StandingPromptRow[]>`
-    INSERT INTO standing_prompts (tenant_id, researcher_id)
-    VALUES (${input.tenant_id}, ${input.researcher_id})
-    ON CONFLICT (tenant_id, researcher_id) DO UPDATE
+    INSERT INTO standing_prompts (tenant_id, researcher_id, subject_type, subject_id)
+    VALUES (${input.tenant_id}, ${input.researcher_id}, ${input.subject_type}, ${input.subject_id})
+    ON CONFLICT (tenant_id, researcher_id, subject_type, subject_id) DO UPDATE
       SET updated_at = CURRENT_TIMESTAMP
-    RETURNING id, tenant_id, researcher_id, currently_active_version_id,
-              created_at, updated_at
+    RETURNING id, tenant_id, researcher_id, subject_type, subject_id,
+              currently_active_version_id, created_at, updated_at
   `;
   return row;
 }
 
 /**
- * Fetch a standing_prompts row by researcher.
+ * Fetch a standing_prompts row by researcher and subject.
  *
- * Returns null if no row exists for the researcher.
+ * Returns null if no row exists for the (researcher, subject_type, subject_id) triple.
  */
 export async function getStandingPrompt(
   sql: SqlClient,
   tenant_id: string,
   researcher_id: string,
+  subject_type: StandingPromptSubjectType,
+  subject_id: string,
 ): Promise<StandingPromptRow | null> {
   const rows = await sql<StandingPromptRow[]>`
-    SELECT id, tenant_id, researcher_id, currently_active_version_id,
-           created_at, updated_at
+    SELECT id, tenant_id, researcher_id, subject_type, subject_id,
+           currently_active_version_id, created_at, updated_at
     FROM standing_prompts
-    WHERE tenant_id = ${tenant_id}
+    WHERE tenant_id     = ${tenant_id}
       AND researcher_id = ${researcher_id}
+      AND subject_type  = ${subject_type}
+      AND subject_id    = ${subject_id}
     LIMIT 1
   `;
   return rows[0] ?? null;
@@ -159,13 +194,19 @@ export type StandingPromptVersionRow = {
   /**
    * ISO-8601 timestamp bucket identifying the window of wiki_page_versions
    * that triggered this distillation pass. Used as the idempotency key.
-   * Format: `<researcher_id>:<YYYY-MM-DDTHH:MM>` (5-minute bucket).
+   * Format: `YYYY-MM-DDTHH:MM` (5-minute bucket).
    */
   wiki_version_window: string;
   /** Markdown body of the distilled prompt. Bounded at ~250 words. */
   body: string | null;
   status: StandingPromptVersionStatus;
   word_count: number | null;
+  /**
+   * When true, this version is pinned by the researcher (PRD §7).
+   * Pinned prompts block automatic replacement: `activateStandingPromptVersion`
+   * will not supersede a pinned Active version.
+   */
+  is_pinned: boolean;
   created_at: Date;
   updated_at: Date;
 };
@@ -180,8 +221,11 @@ export interface InsertStandingPromptVersionInput {
 /**
  * Insert a new draft standing_prompt_version row.
  *
- * Idempotent: if a row already exists for (researcher_id, wiki_version_window),
+ * Idempotent: if a row already exists for (standing_prompt_id, wiki_version_window),
  * returns `{ row, created: false }` without inserting a duplicate.
+ * This implements the debounce: a burst of wiki publishes within the same
+ * 5-minute window maps to the same key, so only the first distillation task
+ * creates a new version row; subsequent tasks exit early via idempotency.
  */
 export async function insertStandingPromptVersion(
   sql: SqlClient,
@@ -196,9 +240,9 @@ export async function insertStandingPromptVersion(
       ${input.researcher_id},
       ${input.wiki_version_window}
     )
-    ON CONFLICT (researcher_id, wiki_version_window) DO NOTHING
+    ON CONFLICT (standing_prompt_id, wiki_version_window) DO NOTHING
     RETURNING id, standing_prompt_id, tenant_id, researcher_id, wiki_version_window,
-              body, status, word_count, created_at, updated_at
+              body, status, word_count, is_pinned, created_at, updated_at
   `;
 
   if (inserted.length > 0) {
@@ -208,14 +252,21 @@ export async function insertStandingPromptVersion(
   // Row already existed — fetch it.
   const existing = await sql<StandingPromptVersionRow[]>`
     SELECT id, standing_prompt_id, tenant_id, researcher_id, wiki_version_window,
-           body, status, word_count, created_at, updated_at
+           body, status, word_count, is_pinned, created_at, updated_at
     FROM standing_prompt_versions
-    WHERE researcher_id = ${input.researcher_id}
-      AND wiki_version_window = ${input.wiki_version_window}
+    WHERE standing_prompt_id    = ${input.standing_prompt_id}
+      AND wiki_version_window   = ${input.wiki_version_window}
     LIMIT 1
   `;
   return { row: existing[0], created: false };
 }
+
+/**
+ * Result of `activateStandingPromptVersion`.
+ */
+export type ActivateStandingPromptVersionResult =
+  | { activated: true; row: StandingPromptVersionRow }
+  | { activated: false; reason: 'pinned'; pinnedVersionId: string };
 
 /**
  * Set the body of a draft standing_prompt_version.
@@ -224,6 +275,12 @@ export async function insertStandingPromptVersion(
  * Advances status to `active` and patches the `standing_prompts` pointer
  * inside a single transaction; the prior active version is flipped to
  * `superseded` in the same transaction.
+ *
+ * ## Pin protection (PRD §7)
+ *
+ * If the currently active version has `is_pinned = true`, this function returns
+ * `{ activated: false, reason: 'pinned' }` without superseding the pinned version
+ * or activating the new draft. The draft version remains in `draft` status.
  *
  * Only callable on a row currently in `draft` status.
  */
@@ -234,13 +291,31 @@ export async function activateStandingPromptVersion(
     standing_prompt_version_id: string;
     body: string;
   },
-): Promise<StandingPromptVersionRow> {
+): Promise<ActivateStandingPromptVersionResult> {
   const wordCount = countWords(opts.body);
   assertWithinLengthBound(wordCount);
 
-  const [row] = await sql.begin(async (txRaw) => {
+  const result = await sql.begin(async (txRaw) => {
     // postgres.TransactionSql extends Sql at runtime; the cast is safe.
     const tx = txRaw as unknown as SqlClient;
+
+    // Check if the currently active version is pinned (PRD §7).
+    type PinnedCheckRow = { id: string; is_pinned: boolean };
+    const pinnedCheck = await tx<PinnedCheckRow[]>`
+      SELECT spv.id, spv.is_pinned
+      FROM standing_prompt_versions spv
+      WHERE spv.standing_prompt_id = ${opts.standing_prompt_id}
+        AND spv.status = 'active'
+      LIMIT 1
+    `;
+    if (pinnedCheck.length > 0 && pinnedCheck[0].is_pinned) {
+      // Active version is pinned — do not supersede or activate.
+      return {
+        activated: false as const,
+        reason: 'pinned' as const,
+        pinnedVersionId: pinnedCheck[0].id,
+      };
+    }
 
     // Supersede the currently active version, if any.
     await tx`
@@ -260,7 +335,7 @@ export async function activateStandingPromptVersion(
       WHERE id     = ${opts.standing_prompt_version_id}
         AND status = 'draft'
       RETURNING id, standing_prompt_id, tenant_id, researcher_id, wiki_version_window,
-                body, status, word_count, created_at, updated_at
+                body, status, word_count, is_pinned, created_at, updated_at
     `;
 
     // Advance the currently_active_version_id pointer on the parent row.
@@ -271,14 +346,14 @@ export async function activateStandingPromptVersion(
       WHERE id = ${opts.standing_prompt_id}
     `;
 
-    return updated;
+    return { activated: true as const, row: updated[0] };
   });
 
-  return row;
+  return result as ActivateStandingPromptVersionResult;
 }
 
 /**
- * Fetch the currently active standing_prompt_version for a researcher.
+ * Fetch the currently active standing_prompt_version for a researcher and subject.
  *
  * Returns null if no active version exists.
  */
@@ -286,19 +361,72 @@ export async function getActiveStandingPromptVersion(
   sql: SqlClient,
   tenant_id: string,
   researcher_id: string,
+  subject_type: StandingPromptSubjectType,
+  subject_id: string,
 ): Promise<StandingPromptVersionRow | null> {
   const rows = await sql<StandingPromptVersionRow[]>`
     SELECT spv.id, spv.standing_prompt_id, spv.tenant_id, spv.researcher_id,
            spv.wiki_version_window, spv.body, spv.status, spv.word_count,
-           spv.created_at, spv.updated_at
+           spv.is_pinned, spv.created_at, spv.updated_at
     FROM standing_prompt_versions spv
     JOIN standing_prompts sp
       ON sp.id = spv.standing_prompt_id
     WHERE sp.tenant_id     = ${tenant_id}
       AND sp.researcher_id = ${researcher_id}
+      AND sp.subject_type  = ${subject_type}
+      AND sp.subject_id    = ${subject_id}
       AND spv.status       = 'active'
     ORDER BY spv.created_at DESC
     LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Pin / unpin
+// ---------------------------------------------------------------------------
+
+/**
+ * Pin the currently active standing_prompt_version for a prompt.
+ *
+ * Once pinned, automatic distillation will not supersede this version (PRD §7).
+ * Returns the updated version row, or null if no active version exists.
+ */
+export async function pinActiveStandingPromptVersion(
+  sql: SqlClient,
+  standing_prompt_id: string,
+): Promise<StandingPromptVersionRow | null> {
+  const rows = await sql<StandingPromptVersionRow[]>`
+    UPDATE standing_prompt_versions
+    SET is_pinned  = true,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE standing_prompt_id = ${standing_prompt_id}
+      AND status             = 'active'
+    RETURNING id, standing_prompt_id, tenant_id, researcher_id, wiki_version_window,
+              body, status, word_count, is_pinned, created_at, updated_at
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Unpin the currently active standing_prompt_version for a prompt.
+ *
+ * After unpinning, automatic distillation may supersede this version on the
+ * next wiki publish event (PRD §7).
+ * Returns the updated version row, or null if no active version exists.
+ */
+export async function unpinActiveStandingPromptVersion(
+  sql: SqlClient,
+  standing_prompt_id: string,
+): Promise<StandingPromptVersionRow | null> {
+  const rows = await sql<StandingPromptVersionRow[]>`
+    UPDATE standing_prompt_versions
+    SET is_pinned  = false,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE standing_prompt_id = ${standing_prompt_id}
+      AND status             = 'active'
+    RETURNING id, standing_prompt_id, tenant_id, researcher_id, wiki_version_window,
+              body, status, word_count, is_pinned, created_at, updated_at
   `;
   return rows[0] ?? null;
 }
@@ -353,19 +481,39 @@ export class StandingPromptLengthError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
- * DDL for the standing-prompt distillation tables.
+ * DDL for the standing-prompt distillation tables — issue #79.
  *
  * Applied by the test helper and by the production migration runner.
  * Mirrors the authoritative DDL in packages/db/mkt-schema.sql.
  *
- * ## Integration note (issue #78 scout)
+ * ## Schema changes since issue #78 scout
  *
- * `standing_prompt_versions.wiki_version_window` acts as the idempotency key so
- * that re-running the distiller on the same publish-event window produces no new
- * row. The window is a 5-minute ISO-8601 bucket derived from the wiki publish
- * timestamp: truncate to the minute, round down to the nearest 5-minute mark.
- * This debounce collapses burst wiki publishes into a single distillation pass
- * without requiring an external debounce service.
+ * ### standing_prompts
+ *
+ * Added `subject_type` (entity|thesis|portfolio) and `subject_id` columns so
+ * that the prompt family can hold one row per (researcher, subject). The unique
+ * constraint now covers all four columns: (tenant_id, researcher_id, subject_type,
+ * subject_id). For portfolio prompts, `subject_id` is the constant `'portfolio'`.
+ *
+ * ### standing_prompt_versions
+ *
+ * Added `is_pinned` column (default false). Pinned prompts block automatic
+ * replacement: `activateStandingPromptVersion` checks `is_pinned` on the
+ * currently active version before superseding it (PRD §7).
+ *
+ * The idempotency key is now (standing_prompt_id, wiki_version_window) —
+ * changed from (researcher_id, wiki_version_window) to allow the same window
+ * to produce one row per subject rather than one row per researcher.
+ *
+ * ## Debounce
+ *
+ * `wiki_version_window` is a 5-minute ISO-8601 bucket derived from the wiki
+ * publish timestamp: truncate to the minute, round down to the nearest 5-minute
+ * mark (`YYYY-MM-DDTHH:MM`). A burst of wiki publishes within the same window
+ * maps to the same (standing_prompt_id, wiki_version_window) key, so only the
+ * first distillation task creates a new version row; subsequent tasks exit early.
+ *
+ * ## Status transitions
  *
  * The `status` check constraint allows exactly three states: draft → active →
  * superseded. Transitions are enforced at the application layer in
@@ -376,31 +524,39 @@ export class StandingPromptLengthError extends Error {
  * enforcement auditable from the DB row alone.
  */
 export const STANDING_PROMPT_DDL = `
--- standing_prompts — one row per researcher; points at the currently active version.
+-- standing_prompts — one row per (researcher, subject_type, subject_id).
+-- subject_type: entity (per-ticker), thesis (named thesis), portfolio (fallback).
+-- For portfolio prompts, subject_id = 'portfolio'.
 CREATE TABLE IF NOT EXISTS standing_prompts (
   id                              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   tenant_id                       TEXT NOT NULL,
   researcher_id                   TEXT NOT NULL,
+  subject_type                    TEXT NOT NULL DEFAULT 'entity'
+                                    CHECK (subject_type IN ('entity', 'thesis', 'portfolio')),
+  subject_id                      TEXT NOT NULL DEFAULT 'entity',
   currently_active_version_id     TEXT,
   created_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (tenant_id, researcher_id)
+  UNIQUE (tenant_id, researcher_id, subject_type, subject_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_standing_prompts_researcher
   ON standing_prompts (tenant_id, researcher_id);
+CREATE INDEX IF NOT EXISTS idx_standing_prompts_subject
+  ON standing_prompts (tenant_id, researcher_id, subject_type, subject_id);
 
 -- standing_prompt_versions — full-snapshot versions with draft → active → superseded lifecycle.
 -- Status: draft → active (supersedes prior active, which flips to superseded).
 -- Readers follow standing_prompts.currently_active_version_id only at active.
--- Idempotency: UNIQUE (researcher_id, wiki_version_window).
+-- Idempotency: UNIQUE (standing_prompt_id, wiki_version_window).
+-- Pin: is_pinned = true blocks automatic supersession (PRD §7).
 CREATE TABLE IF NOT EXISTS standing_prompt_versions (
   id                  TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   standing_prompt_id  TEXT NOT NULL REFERENCES standing_prompts(id) ON DELETE CASCADE,
   tenant_id           TEXT NOT NULL,
   researcher_id       TEXT NOT NULL,
   -- Idempotency key: ISO-8601 5-minute bucket of the triggering wiki publish window.
-  -- Format: <researcher_id>:<YYYY-MM-DDTHH:MM>
+  -- Format: YYYY-MM-DDTHH:MM
   wiki_version_window TEXT NOT NULL,
   -- Markdown body of the distilled standing prompt. Hard ceiling ~250 words (PRD §9).
   body                TEXT,
@@ -408,9 +564,11 @@ CREATE TABLE IF NOT EXISTS standing_prompt_versions (
                         CHECK (status IN ('draft', 'active', 'superseded')),
   -- Pre-computed word count stored at activation time for auditing.
   word_count          INTEGER,
+  -- Pin flag: when true, automatic distillation will not supersede this version (PRD §7).
+  is_pinned           BOOLEAN NOT NULL DEFAULT false,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (researcher_id, wiki_version_window)
+  UNIQUE (standing_prompt_id, wiki_version_window)
 );
 
 CREATE INDEX IF NOT EXISTS idx_standing_prompt_versions_prompt_id
