@@ -63,6 +63,7 @@ import { handleWikiDraftReviewRequest } from './api/wiki-draft-review';
 import { handleComplianceRequest } from './api/compliance';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 import { handleReplayRequest } from './api/replay';
+import { handleGoldenDocumentsRequest } from './api/golden-documents';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -345,6 +346,16 @@ export default {
     if (url.pathname === '/api/wiki/pending-drafts') {
       const pendingRes = await handleWikiPendingDraftsRequest(req, url, appState);
       if (pendingRes) return withTrace(pendingRes);
+    }
+
+    // Phase 2 golden-document endpoints — researcher-only write path (issue #72).
+    // POST /api/golden-documents       — researcher creates a golden document
+    // GET  /api/golden-documents/:id   — researcher reads a golden document back
+    // Scout stub: returns 501 for all routes; 403 for worker Bearer tokens;
+    // 401 for unauthenticated requests. Real implementation in Phase 2 follow-on.
+    if (url.pathname.startsWith('/api/golden-documents')) {
+      const goldenDocRes = await handleGoldenDocumentsRequest(req, url, appState);
+      if (goldenDocRes) return withTrace(goldenDocRes);
     }
 
     // Wiki draft management + claim-citation coverage check (issue #43).
