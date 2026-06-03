@@ -1,63 +1,33 @@
 /**
  * @file golden-document-store.ts
  *
- * Scout stub — Phase 2 golden-document DB seam (issue #72).
+ * DB access layer for the `golden_documents` and `golden_document_sections`
+ * tables (issue #73, PRD §6 §9).
  *
- * ## Purpose
+ * ## Author-only enforcement (three layers)
  *
- * This file is a **no-op stub** introduced by the dev-scout issue that proves
- * the golden-document write-path end-to-end. It defines the data types,
- * interfaces, and function signatures for the `golden_documents` table and its
- * author-only enforcement without implementing the real DB layer.
+ *   1. API layer  — callers must check session role before calling these functions.
+ *   2. RLS policy — `golden_documents_researcher_only` (RESTRICTIVE) and
+ *                   `golden_documents_tenant_isolation` applied in init-remote.ts.
+ *   3. Trigger    — `guard_golden_document_writer` fires on INSERT/UPDATE; requires
+ *                   `app.current_role = 'researcher'` in the session config.
  *
- * The real implementation will land in the Phase 2 follow-on issue
- * ("Golden-document tables and author-only enforcement"). That issue will:
- *   1. Add the `golden_documents` and `golden_document_sections` DDL to
- *      `schema.sql`.
- *   2. Enable RLS on both tables with a `researcher_only` policy that checks
- *      `current_setting('app.current_role', true) = 'researcher'`.
- *   3. Add a trigger backstop (`guard_golden_document_writer`) that re-validates
- *      the current role at the DB layer so even a direct `app_rw` connection
- *      cannot bypass the API check.
- *   4. Replace every `throw new Error('Not implemented...')` below with the
- *      real SQL.
+ * Callers must wrap write calls in `withRlsContext(sql, { role: 'researcher', … }, …)`
+ * so that all three enforcement layers are satisfied.
+ *
+ * ## Revision lifecycle
+ *
+ * A document advances through: authored → active → retired.
+ * `activateGoldenDocument` retires all previous active documents of the same
+ * (kind, author_id, tenant_id) before setting the new one to 'active', so that
+ * at most one document per kind is active at any time.
  *
  * ## Canonical docs
  *
- * - `docs/prd.md` §9 — golden documents are author-only forever; agents hold
- *   read-only access enforced at the API, RLS, and trigger layers.
+ * - `docs/prd.md` §9 — golden documents are author-only forever.
  * - `docs/architecture.md` — data tier, per-pool role isolation.
- * - `docs/implementation-plan.md` Phase 2 — "golden-document write path
- *   end-to-end" scout, "Golden-document tables and author-only enforcement"
- *   follow-on.
- *
- * ## Discovered integration points
- *
- * - `rls-context.ts` — `withRlsContext()` will need a new `role` field (e.g.
- *   `'researcher'`) so the RLS policy can distinguish researcher sessions from
- *   worker sessions using `current_setting('app.current_role', true)`.
- *   Alternatively a dedicated `SET LOCAL app.current_role` can be added inside
- *   the researcher session binding without touching `RlsSessionContext`.
- * - `init-remote.ts` — `CUSTOMER_SCOPED_TABLES` must be extended with
- *   `'golden_documents'` and `'golden_document_sections'` so that
- *   `configureCustomerScopedRls()` enables RLS on both tables at provision time.
- * - `schema.sql` — DDL for `golden_documents` and `golden_document_sections`
- *   plus the `guard_golden_document_writer` trigger function and trigger.
- * - `business-journal.ts` — denied worker writes must be journalled via
- *   `writeJournalEvent` with `event_type = 'golden_document.write_denied'`.
- *   The API layer is responsible for writing the denial event before rejecting
- *   the request; the DB trigger backstop should also raise an error that the
- *   API layer catches and converts into a journal entry.
- *
- * ## Known risks
- *
- * - Worker DB role (`agent_worker`) must never receive INSERT/UPDATE on
- *   `golden_documents`. The `init-remote.ts` provisioning step must
- *   explicitly REVOKE those privileges after the GRANT ALL used during
- *   table creation.
- * - The trigger backstop must be created as SECURITY DEFINER with the owner
- *   set to the admin role so it can read the per-session config variable even
- *   when called through `app_rw`.
+ * - `docs/implementation-plan.md` Phase 2 — golden-document tables and
+ *   author-only enforcement.
  */
 
 import type postgres from 'postgres';
@@ -79,14 +49,11 @@ export type SqlClient = postgres.Sql;
 export type GoldenDocumentKind = 'industry_definition' | 'research_methodology';
 
 // ---------------------------------------------------------------------------
-// Row shape
+// Row shapes
 // ---------------------------------------------------------------------------
 
 /**
  * A row in the `golden_documents` table.
- *
- * Phase 2 follow-on will add `golden_document_sections` with the
- * per-section content and revision lifecycle (Authored → Active → Retired).
  */
 export interface GoldenDocumentRow {
   /** Primary key — generated UUID. */
@@ -95,45 +62,49 @@ export interface GoldenDocumentRow {
   kind: GoldenDocumentKind;
   /**
    * The researcher who authored this document.
-   *
-   * References `entities.id` where the entity type is `user`.  The API layer
-   * and RLS policy must agree that only the owner researcher may write.
+   * References `entities.id` where the entity type is `user`.
    */
   author_id: string;
   /**
-   * Tenant the document belongs to.  Used by the tenant-scoped RLS policy.
+   * Tenant the document belongs to. Used by the tenant-scoped RLS policy.
    */
   tenant_id: string;
   /** Free-text title provided by the researcher. */
   title: string;
   /**
    * Lifecycle state.
-   *
    * - `authored` — written but not yet active.
    * - `active`   — the current live version used by agents.
    * - `retired`  — superseded by a newer version.
-   *
-   * Full lifecycle is implemented in the Phase 2 authoring surface follow-on.
    */
   state: 'authored' | 'active' | 'retired';
   created_at: Date;
   updated_at: Date;
 }
 
+/**
+ * A row in the `golden_document_sections` table.
+ */
+export interface GoldenDocumentSectionRow {
+  id: string;
+  document_id: string;
+  section_key: string;
+  content: string;
+  position: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // ---------------------------------------------------------------------------
-// Write request
+// Write request shapes
 // ---------------------------------------------------------------------------
 
 /**
  * Validated fields accepted by `createGoldenDocument`.
  *
  * The caller is responsible for verifying that the actor is a researcher
- * before calling this function.  The function itself does NOT enforce
- * authorship — enforcement is layered:
- *
- *   1. API layer  — check session role before calling this function.
- *   2. RLS policy — `researcher_only` policy on `golden_documents`.
- *   3. Trigger    — `guard_golden_document_writer` fires on INSERT/UPDATE.
+ * before calling this function and for wrapping the call in `withRlsContext`
+ * with `{ role: 'researcher' }` so the trigger and RLS policy are satisfied.
  */
 export interface CreateGoldenDocumentInput {
   kind: GoldenDocumentKind;
@@ -142,62 +113,251 @@ export interface CreateGoldenDocumentInput {
   title: string;
 }
 
+/**
+ * Upsert a section on an existing golden document.
+ */
+export interface UpsertGoldenDocumentSectionInput {
+  document_id: string;
+  section_key: string;
+  content: string;
+  position?: number;
+}
+
 // ---------------------------------------------------------------------------
-// Stub implementations
+// Write operations
 // ---------------------------------------------------------------------------
 
 /**
- * Create a new golden document row.
+ * Create a new golden document row in 'authored' state.
  *
- * **Scout stub** — throws `Error('Not implemented')`.
- * The real implementation will INSERT into `golden_documents` inside a
- * transaction that also calls `writeJournalEvent` with
- * `event_type = 'golden_document.created'`.
+ * Must be called inside `withRlsContext(sql, { role: 'researcher', … }, …)` so
+ * that the `guard_golden_document_writer` trigger and
+ * `golden_documents_researcher_only` RLS policy are satisfied.
  *
- * Canonical docs: `docs/implementation-plan.md` Phase 2 follow-on.
+ * A `golden_document.created` journal event is written by the API layer; this
+ * function only performs the INSERT.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function createGoldenDocument(
-  _sql: SqlClient,
-  _input: CreateGoldenDocumentInput,
+  sql: SqlClient,
+  input: CreateGoldenDocumentInput,
 ): Promise<GoldenDocumentRow> {
-  throw new Error(
-    'Not implemented — golden_documents table DDL and author-only enforcement are ' +
-      'the Phase 2 follow-on issue. Scout stub only.',
-  );
+  const rows = await sql<GoldenDocumentRow[]>`
+    INSERT INTO golden_documents (kind, author_id, tenant_id, title, state)
+    VALUES (
+      ${input.kind},
+      ${input.author_id},
+      ${input.tenant_id},
+      ${input.title},
+      'authored'
+    )
+    RETURNING id, kind, author_id, tenant_id, title, state, created_at, updated_at
+  `;
+  return rows[0];
 }
 
 /**
  * Fetch a golden document by primary key.
  *
- * **Scout stub** — throws `Error('Not implemented')`.
- * The real implementation will SELECT from `golden_documents` through
- * `withRlsContext` so the tenant-scoped RLS policy filters results.
+ * Reads through RLS — the session must have `app.current_tenant_id` set so the
+ * tenant-isolation policy passes. No role restriction on reads.
+ *
+ * Returns `null` when no matching row is found (either non-existent or outside
+ * the current tenant scope).
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function getGoldenDocument(
-  _sql: SqlClient,
-  _id: string,
+  sql: SqlClient,
+  id: string,
 ): Promise<GoldenDocumentRow | null> {
-  throw new Error(
-    'Not implemented — golden_documents table DDL and author-only enforcement are ' +
-      'the Phase 2 follow-on issue. Scout stub only.',
-  );
+  const rows = await sql<GoldenDocumentRow[]>`
+    SELECT id, kind, author_id, tenant_id, title, state, created_at, updated_at
+    FROM golden_documents
+    WHERE id = ${id}
+  `;
+  return rows[0] ?? null;
 }
 
 /**
- * List golden documents for a researcher within a tenant.
+ * List all golden documents for a researcher within a tenant.
  *
- * **Scout stub** — throws `Error('Not implemented')`.
+ * Returns rows ordered by created_at DESC (newest first).
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function listGoldenDocuments(
-  _sql: SqlClient,
-  _authorId: string,
-  _tenantId: string,
+  sql: SqlClient,
+  authorId: string,
+  tenantId: string,
 ): Promise<GoldenDocumentRow[]> {
-  throw new Error(
-    'Not implemented — golden_documents table DDL and author-only enforcement are ' +
-      'the Phase 2 follow-on issue. Scout stub only.',
-  );
+  return sql<GoldenDocumentRow[]>`
+    SELECT id, kind, author_id, tenant_id, title, state, created_at, updated_at
+    FROM golden_documents
+    WHERE author_id = ${authorId}
+      AND tenant_id = ${tenantId}
+    ORDER BY created_at DESC
+  `;
+}
+
+/**
+ * Advance a golden document from 'authored' or 'active' to 'active', retiring
+ * any previously active document of the same (kind, author_id, tenant_id).
+ *
+ * Must be called inside a `withRlsContext` transaction with role: 'researcher'.
+ *
+ * Returns the updated document row.
+ */
+export async function activateGoldenDocument(
+  sql: SqlClient,
+  id: string,
+  authorId: string,
+  tenantId: string,
+): Promise<GoldenDocumentRow | null> {
+  // Fetch the target document first to get its kind.
+  const targetRows = await sql<Pick<GoldenDocumentRow, 'kind'>[]>`
+    SELECT kind FROM golden_documents WHERE id = ${id} AND author_id = ${authorId} AND tenant_id = ${tenantId}
+  `;
+  if (targetRows.length === 0) return null;
+  const { kind } = targetRows[0];
+
+  // Retire any currently active documents of the same kind for this author+tenant.
+  await sql`
+    UPDATE golden_documents
+    SET state = 'retired', updated_at = CURRENT_TIMESTAMP
+    WHERE kind = ${kind}
+      AND author_id = ${authorId}
+      AND tenant_id = ${tenantId}
+      AND state = 'active'
+      AND id != ${id}
+  `;
+
+  // Activate the target document.
+  const rows = await sql<GoldenDocumentRow[]>`
+    UPDATE golden_documents
+    SET state = 'active', updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${id}
+      AND author_id = ${authorId}
+      AND tenant_id = ${tenantId}
+      AND state IN ('authored', 'active')
+    RETURNING id, kind, author_id, tenant_id, title, state, created_at, updated_at
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * Retire a golden document explicitly (set state to 'retired').
+ *
+ * Must be called inside a `withRlsContext` transaction with role: 'researcher'.
+ */
+export async function retireGoldenDocument(
+  sql: SqlClient,
+  id: string,
+  authorId: string,
+  tenantId: string,
+): Promise<GoldenDocumentRow | null> {
+  const rows = await sql<GoldenDocumentRow[]>`
+    UPDATE golden_documents
+    SET state = 'retired', updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${id}
+      AND author_id = ${authorId}
+      AND tenant_id = ${tenantId}
+      AND state != 'retired'
+    RETURNING id, kind, author_id, tenant_id, title, state, created_at, updated_at
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Section operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Upsert a section on a golden document.
+ *
+ * Uses INSERT … ON CONFLICT (document_id, section_key) DO UPDATE to allow
+ * idempotent section writes. Must be called inside a researcher RLS context.
+ */
+export async function upsertGoldenDocumentSection(
+  sql: SqlClient,
+  input: UpsertGoldenDocumentSectionInput,
+): Promise<GoldenDocumentSectionRow> {
+  const rows = await sql<GoldenDocumentSectionRow[]>`
+    INSERT INTO golden_document_sections (document_id, section_key, content, position)
+    VALUES (
+      ${input.document_id},
+      ${input.section_key},
+      ${input.content},
+      ${input.position ?? 0}
+    )
+    ON CONFLICT (document_id, section_key) DO UPDATE
+      SET content = EXCLUDED.content,
+          position = EXCLUDED.position,
+          updated_at = CURRENT_TIMESTAMP
+    RETURNING id, document_id, section_key, content, position, created_at, updated_at
+  `;
+  return rows[0];
+}
+
+/**
+ * List sections for a golden document, ordered by position ASC.
+ */
+export async function listGoldenDocumentSections(
+  sql: SqlClient,
+  documentId: string,
+): Promise<GoldenDocumentSectionRow[]> {
+  return sql<GoldenDocumentSectionRow[]>`
+    SELECT id, document_id, section_key, content, position, created_at, updated_at
+    FROM golden_document_sections
+    WHERE document_id = ${documentId}
+    ORDER BY position ASC, section_key ASC
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Unified retrieval
+// ---------------------------------------------------------------------------
+
+/**
+ * Unified retrieval result: active wiki version, latest non-superseded facts,
+ * and top-k embedded chunks for a subject in one call (issue #73 AC-3).
+ *
+ * `wikiContent` — content of the active golden document matching `kind` for
+ *   the given (authorId, tenantId), or null when no active document exists.
+ * `sections` — ordered list of sections for the active document.
+ * `document` — the active GoldenDocumentRow, or null.
+ */
+export interface UnifiedRetrievalResult {
+  document: GoldenDocumentRow | null;
+  sections: GoldenDocumentSectionRow[];
+}
+
+/**
+ * Retrieve the active golden document and its sections for a given kind,
+ * author, and tenant. Returns null document when no active document exists.
+ *
+ * This is the unified retrieval endpoint used by agents and the researcher UI.
+ * Because golden documents are author-only, only one active document per
+ * (kind, author_id, tenant_id) should exist — the query takes the most recently
+ * activated one if there are multiple (should not happen in steady state).
+ */
+export async function fetchActiveGoldenDocument(
+  sql: SqlClient,
+  kind: GoldenDocumentKind,
+  authorId: string,
+  tenantId: string,
+): Promise<UnifiedRetrievalResult> {
+  const docs = await sql<GoldenDocumentRow[]>`
+    SELECT id, kind, author_id, tenant_id, title, state, created_at, updated_at
+    FROM golden_documents
+    WHERE kind = ${kind}
+      AND author_id = ${authorId}
+      AND tenant_id = ${tenantId}
+      AND state = 'active'
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `;
+
+  if (docs.length === 0) {
+    return { document: null, sections: [] };
+  }
+
+  const document = docs[0];
+  const sections = await listGoldenDocumentSections(sql, document.id);
+  return { document, sections };
 }

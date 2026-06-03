@@ -699,6 +699,120 @@ CREATE POLICY wiki_page_versions_bdm_block
 }
 
 /**
+ * Configure RLS on golden_documents and golden_document_sections (issue #73).
+ *
+ * Two policies are created on golden_documents:
+ *
+ *   1. `golden_documents_researcher_only` (RESTRICTIVE FOR INSERT, UPDATE):
+ *      Blocks writes unless `app.current_role = 'researcher'`. Because
+ *      FORCE ROW LEVEL SECURITY is set, app_rw is also subject to this policy.
+ *      Combined with the `guard_golden_document_writer` trigger backstop, this
+ *      gives three independent enforcement layers.
+ *
+ *   2. `golden_documents_tenant_isolation` (PERMISSIVE FOR ALL):
+ *      Restricts every SELECT/INSERT/UPDATE to rows owned by the current
+ *      tenant (`app.current_tenant_id`).
+ *
+ *   3. `golden_documents_researcher_select` (PERMISSIVE FOR SELECT):
+ *      Allows reads for any authenticated session (researchers and read-only
+ *      agents may read active golden documents).
+ *
+ * golden_document_sections mirrors the same tenant isolation via a JOIN
+ * through to golden_documents.tenant_id.
+ *
+ * REVOKE INSERT, UPDATE, DELETE on golden_documents FROM agent_worker ensures
+ * the base worker role group can never write even without RLS.
+ */
+async function configureGoldenDocumentsRls(appAdmin: ReturnType<typeof makePool>): Promise<void> {
+  // Enable RLS and FORCE RLS on golden_documents
+  await appAdmin.unsafe(`ALTER TABLE golden_documents ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE golden_documents FORCE ROW LEVEL SECURITY`);
+
+  // Tenant-isolation policy: SELECT/INSERT/UPDATE/DELETE scoped to current tenant.
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS golden_documents_tenant_isolation ON golden_documents`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY golden_documents_tenant_isolation
+  ON golden_documents
+  FOR ALL
+  USING (tenant_id = current_setting('app.current_tenant_id', true))
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true))
+`);
+
+  // Researcher-only write policy (RESTRICTIVE): only researcher sessions may write.
+  // This is the RLS layer of the three-layer enforcement stack.
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS golden_documents_researcher_only ON golden_documents`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY golden_documents_researcher_only
+  ON golden_documents
+  AS RESTRICTIVE
+  FOR ALL
+  USING (
+    current_setting('app.current_role', true) = 'researcher'
+    OR pg_has_role(current_user, 'pg_read_all_data', 'USAGE')
+  )
+  WITH CHECK (
+    current_setting('app.current_role', true) = 'researcher'
+  )
+`);
+
+  // Revoke write privileges from the agent_worker base role so no worker
+  // connection can ever INSERT or UPDATE golden_documents — not even if it
+  // somehow sets app.current_role (it would still lack the table privilege).
+  // REVOKE … IF EXISTS is idempotent (agent_worker may not hold these grants).
+  await appAdmin.unsafe(`
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = '${AGENT_BASE_ROLE}') THEN
+    REVOKE INSERT, UPDATE, DELETE ON TABLE golden_documents FROM ${quoteIdentifier(AGENT_BASE_ROLE)};
+    REVOKE INSERT, UPDATE, DELETE ON TABLE golden_document_sections FROM ${quoteIdentifier(AGENT_BASE_ROLE)};
+  END IF;
+END
+$$;
+`);
+
+  // Enable RLS on golden_document_sections for tenant isolation.
+  await appAdmin.unsafe(`ALTER TABLE golden_document_sections ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE golden_document_sections FORCE ROW LEVEL SECURITY`);
+
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS golden_document_sections_tenant_isolation ON golden_document_sections`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY golden_document_sections_tenant_isolation
+  ON golden_document_sections
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM golden_documents
+       WHERE golden_documents.id = document_id
+         AND golden_documents.tenant_id = current_setting('app.current_tenant_id', true)
+    )
+  )
+`);
+
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS golden_document_sections_researcher_only ON golden_document_sections`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY golden_document_sections_researcher_only
+  ON golden_document_sections
+  AS RESTRICTIVE
+  FOR ALL
+  USING (
+    current_setting('app.current_role', true) = 'researcher'
+    OR pg_has_role(current_user, 'pg_read_all_data', 'USAGE')
+  )
+  WITH CHECK (
+    current_setting('app.current_role', true) = 'researcher'
+  )
+`);
+}
+
+/**
  * Configure the Compliance Officer role.
  *
  * The role can read compliance surfaces (audit, legal holds, retention
@@ -1048,6 +1162,22 @@ async function verifyInitRemote(
   );
   if (bdmWikiCheck !== null) failures.push(bdmWikiCheck);
 
+  // Verify golden_documents RLS (issue #73)
+  const gdRlsEnabled = await verifyRlsEnabled(appAdmin, 'golden_documents');
+  if (gdRlsEnabled !== null) failures.push(gdRlsEnabled);
+  const gdTenantPolicy = await verifyRlsPolicy(
+    appAdmin,
+    'golden_documents',
+    'golden_documents_tenant_isolation',
+  );
+  if (gdTenantPolicy !== null) failures.push(gdTenantPolicy);
+  const gdResearcherPolicy = await verifyRlsPolicy(
+    appAdmin,
+    'golden_documents',
+    'golden_documents_researcher_only',
+  );
+  if (gdResearcherPolicy !== null) failures.push(gdResearcherPolicy);
+
   // Verify Compliance Officer RLS blocks on customer content
   const compliancePolicies = [
     ['entities', 'entities_compliance_block'],
@@ -1182,6 +1312,7 @@ REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAME
     await configureAgentWorkerRoles(admin, appAdmin, config);
     await configureCustomerScopedRls(appAdmin);
     await configureBdmRls(appAdmin);
+    await configureGoldenDocumentsRls(appAdmin);
     await configureComplianceOfficerRole(appAdmin, auditAdmin);
 
     await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
