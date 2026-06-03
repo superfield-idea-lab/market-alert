@@ -392,3 +392,43 @@ CREATE INDEX IF NOT EXISTS idx_wiki_page_cites_version_id
   ON wiki_page_cites (wiki_page_version_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_page_cites_target
   ON wiki_page_cites (target_id, target_type);
+
+-- ---------------------------------------------------------------------------
+-- wiki_debates — contested claims that have not converged (issue #77)
+-- ---------------------------------------------------------------------------
+--
+-- Opened by the fact-check worker when two confirmed_facts for the same
+-- attribute disagree beyond a confidence threshold. Resolved or archived via
+-- the WIKI_DEBATE_RESOLVE worker or by the researcher directly.
+--
+-- Lifecycle: open → resolved | archived
+--
+-- evidence_a / evidence_b: JSON arrays of confirmed_fact or corpus_chunk IDs
+-- supporting each side of the debate.
+--
+-- Architecture ref: docs/architecture.md §"Knowledge subsystem"
+CREATE TABLE IF NOT EXISTS wiki_debates (
+  id                      TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id               TEXT NOT NULL,
+  wiki_page_id            TEXT NOT NULL,
+  wiki_page_version_id    TEXT NOT NULL,
+  -- Short human-readable description of the contested claim.
+  claim                   TEXT NOT NULL,
+  -- JSON arrays of evidence IDs supporting each side of the debate.
+  evidence_a              TEXT NOT NULL DEFAULT '[]',
+  evidence_b              TEXT NOT NULL DEFAULT '[]',
+  status                  TEXT NOT NULL DEFAULT 'open'
+                            CHECK (status IN ('open', 'resolved', 'archived')),
+  resolution_note         TEXT,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_debates_page
+  ON wiki_debates (wiki_page_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_debates_tenant_status
+  ON wiki_debates (tenant_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_debates_version
+  ON wiki_debates (wiki_page_version_id);

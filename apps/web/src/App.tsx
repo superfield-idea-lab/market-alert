@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Bell, ClipboardList, Settings, Shield, User, BookOpen } from 'lucide-react';
+import { Bell, ClipboardList, Settings, Shield, User, BookOpen, Globe } from 'lucide-react';
 import { AdminDashboard } from './pages/admin-dashboard';
 import { SettingsPage } from './pages/settings';
 import TraderPage from './pages/trader';
 import TradeProposalForm from './components/TradeProposalForm';
 import { GoldenDocumentsPage } from './pages/golden-documents';
+import { WikiNavPage } from './pages/wiki-nav';
 
-type ActiveView = 'alerts' | 'trade-proposal' | 'settings' | 'admin' | 'golden-documents';
+type ActiveView = 'alerts' | 'trade-proposal' | 'settings' | 'admin' | 'golden-documents' | 'wiki';
 
 function App() {
   const { user, logout, loading } = useAuth();
@@ -80,6 +81,16 @@ function App() {
               <BookOpen size={20} strokeWidth={2.5} />
             </button>
 
+            {/* Wiki Navigation — browse, search, drill-in with citations (issue #77) */}
+            <button
+              onClick={() => setActiveView('wiki')}
+              title="Wiki"
+              data-testid="nav-wiki"
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'wiki' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+            >
+              <Globe size={20} strokeWidth={2.5} />
+            </button>
+
             {/* Admin — only for privileged users */}
             {canAccessAdmin && (
               <button
@@ -112,6 +123,7 @@ function App() {
             {activeView === 'trade-proposal' && <TradeProposalForm />}
             {activeView === 'settings' && <SettingsPage />}
             {activeView === 'golden-documents' && <GoldenDocumentsPage />}
+            {activeView === 'wiki' && <WikiNavPage tenantId={user.id} />}
             {activeView === 'admin' && canAccessAdmin && <AdminDashboard />}
             {activeView === 'admin' && !canAccessAdmin && (
               <div className="p-8 text-zinc-400 text-sm">
