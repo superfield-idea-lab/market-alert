@@ -1,0 +1,18 @@
+{
+  "canonical_source": {
+    "id": "cs-fixture-001",
+    "methodology_id": "meth-fixture-001",
+    "author_id": "user-fixture-001",
+    "tenant_id": "tenant-fixture-001",
+    "name": "SEC EDGAR (Test)",
+    "url": "https://www.sec.gov/cgi-bin/browse-edgar",
+    "description": "Primary source for 8-K filings",
+    "access_mode": "public",
+    "status": "active"
+  },
+  "raw_content": "Company: BioTech Corp\nTicker: BTC\nCEO: Jane Smith\nRevenue: $450M\nEarnings: $1.2 per share\nOutlook: positive\n\nBioTech Corp reported strong Q3 results today, citing a 12% increase in revenue driven by the successful launch of its lead drug candidate. The company raised its full-year guidance.\n\nRating: Buy\nPrice_target: $85\n",
+  "content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "contradicting_content": "Company: BioTech Corp\nTicker: BTC\nCEO: Bob Johnson\nRevenue: $420M\nEarnings: $0.95 per share\nOutlook: neutral\n\nRevised BioTech Corp Q3 results after accounting restatement. Revenue lower than initially reported.\n\nRating: Hold\nPrice_target: $70\n",
+  "contradicting_hash": "a4b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1",
+  "malformed_content": ""
+}

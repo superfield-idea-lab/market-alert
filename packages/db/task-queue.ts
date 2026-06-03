@@ -45,6 +45,10 @@ export const TaskType = {
   TRADE_SETTLE: 'TRADE_SETTLE',
   // Phase 3 — Canonical-source discovery (issue #74)
   SOURCE_DISCOVER: 'SOURCE_DISCOVER',
+  // Phase 3 — Canonical-source scraping, ingestion, fact extraction (issue #75)
+  SOURCE_SCRAPE: 'SOURCE_SCRAPE',
+  FINDING_INGEST: 'FINDING_INGEST',
+  FACT_EXTRACT: 'FACT_EXTRACT',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -70,6 +74,10 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.TRADE_SETTLE]: 'scheduler',
   // Phase 3 (issue #74)
   [TaskType.SOURCE_DISCOVER]: 'source_discovery',
+  // Phase 3 (issue #75)
+  [TaskType.SOURCE_SCRAPE]: 'source_scraper',
+  [TaskType.FINDING_INGEST]: 'ingestion',
+  [TaskType.FACT_EXTRACT]: 'fact_extraction',
 };
 
 /**
@@ -112,6 +120,10 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.TRADE_SETTLE,
   // Phase 3 (issue #74): source-discovery payload carries only UUIDs
   TaskType.SOURCE_DISCOVER,
+  // Phase 3 (issue #75): scrape/ingest/fact payloads carry only IDs
+  TaskType.SOURCE_SCRAPE,
+  TaskType.FINDING_INGEST,
+  TaskType.FACT_EXTRACT,
 ]);
 
 /**

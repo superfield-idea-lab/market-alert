@@ -161,3 +161,147 @@ CREATE TABLE IF NOT EXISTS etl_cursors (
 
 CREATE INDEX IF NOT EXISTS idx_etl_cursors_source_key
   ON etl_cursors (source, cursor_key);
+
+-- ---------------------------------------------------------------------------
+-- source_findings — scraped payloads from canonical sources (issue #75)
+-- ---------------------------------------------------------------------------
+--
+-- One row per unique scraped payload, identified by (canonical_source_id, content_hash).
+-- Duplicate scrapes (same content_hash) are collapsed by ON CONFLICT DO NOTHING.
+--
+-- Status lifecycle:  raw → ingested | quarantined
+--   raw         — scraped but not yet chunked
+--   ingested    — chunked into corpus_chunk rows
+--   quarantined — malformed payload; moved to etl_quarantine for inspection
+--
+-- Blueprint refs:
+--   WORKER-P-001 (API-gateway sole writer)
+--   DATA-D-006   (four-pool Postgres)
+--   docs/architecture.md — SOURCE_SCRAPE, FINDING_INGEST workers
+CREATE TABLE IF NOT EXISTS source_findings (
+  id                    TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  canonical_source_id   TEXT        NOT NULL,
+  tenant_id             TEXT        NOT NULL,
+  -- SHA-256 hex digest of the raw scraped payload for dedup.
+  content_hash          TEXT        NOT NULL,
+  -- Raw text payload from the scraper.
+  raw_content           TEXT        NOT NULL,
+  -- Optional URL or identifier within the source for tracing.
+  source_url            TEXT,
+  -- Optional scrape timestamp (defaults to row creation time if not supplied).
+  scraped_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status                TEXT        NOT NULL DEFAULT 'raw'
+                                    CHECK (status IN ('raw', 'ingested', 'quarantined')),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Dedup: same content from the same source is one row.
+  UNIQUE (canonical_source_id, content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_findings_source_status
+  ON source_findings (canonical_source_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_source_findings_tenant_status
+  ON source_findings (tenant_id, status, created_at);
+
+-- ---------------------------------------------------------------------------
+-- confirmed_facts — append-only extracted facts with supersession chain (issue #75)
+-- ---------------------------------------------------------------------------
+--
+-- Immutable at the DB layer. No UPDATE or DELETE on data columns is ever permitted.
+-- A Postgres trigger enforces this (see guard_confirmed_fact_immutable below).
+-- Contradictions produce a NEW row; the old row gains a superseded_by_id pointer
+-- (the only allowed patch) and the new row carries a supersedes_fact_id back-link.
+--
+-- Blueprint refs:
+--   docs/architecture.md §"Confirmed facts: append-only with supersession chain"
+--   WORKER-P-001 (API-gateway sole writer)
+CREATE TABLE IF NOT EXISTS confirmed_facts (
+  id                    TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id             TEXT        NOT NULL,
+  -- The corpus_chunk row from which this fact was extracted.
+  corpus_chunk_id       TEXT        NOT NULL,
+  -- The entity this fact pertains to (company, thesis, actor, etc.).
+  subject_entity_id     TEXT        NOT NULL,
+  subject_entity_type   TEXT        NOT NULL,
+  -- The attribute / claim name (e.g. "revenue_2024", "ceo_name").
+  attribute             TEXT        NOT NULL,
+  -- The fact value as a JSON-serialisable string.
+  value                 TEXT        NOT NULL,
+  -- Confidence score [0, 1] as produced by the extraction model.
+  confidence            NUMERIC(5,4) CHECK (confidence >= 0 AND confidence <= 1),
+  -- Supersession chain: points to the prior fact this one contradicts/updates.
+  supersedes_fact_id    TEXT,
+  -- Set by a NARROW trigger exception when this row is superseded.
+  -- NULL while the fact is the current head of its chain.
+  superseded_by_id      TEXT,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  -- No updated_at: immutable rows are never updated.
+);
+
+CREATE INDEX IF NOT EXISTS idx_confirmed_facts_chunk
+  ON confirmed_facts (corpus_chunk_id);
+
+CREATE INDEX IF NOT EXISTS idx_confirmed_facts_subject
+  ON confirmed_facts (tenant_id, subject_entity_id, attribute, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_confirmed_facts_supersession
+  ON confirmed_facts (supersedes_fact_id)
+  WHERE supersedes_fact_id IS NOT NULL;
+
+-- Trigger: guard confirmed_fact immutability
+-- Blocks UPDATE on data columns and all DELETE operations.
+-- The only permitted UPDATE is setting superseded_by_id (narrow exception for audit trail).
+CREATE OR REPLACE FUNCTION guard_confirmed_fact_immutable()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'confirmed_facts rows are immutable: DELETE is not permitted (id=%)', OLD.id
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- Allow ONLY the superseded_by_id pointer to change.
+  IF OLD.corpus_chunk_id      IS DISTINCT FROM NEW.corpus_chunk_id      OR
+     OLD.subject_entity_id    IS DISTINCT FROM NEW.subject_entity_id    OR
+     OLD.subject_entity_type  IS DISTINCT FROM NEW.subject_entity_type  OR
+     OLD.attribute            IS DISTINCT FROM NEW.attribute            OR
+     OLD.value                IS DISTINCT FROM NEW.value                OR
+     OLD.confidence           IS DISTINCT FROM NEW.confidence           OR
+     OLD.supersedes_fact_id   IS DISTINCT FROM NEW.supersedes_fact_id   OR
+     OLD.tenant_id            IS DISTINCT FROM NEW.tenant_id            OR
+     OLD.created_at           IS DISTINCT FROM NEW.created_at THEN
+    RAISE EXCEPTION 'confirmed_facts rows are immutable: only superseded_by_id may be set (id=%)', OLD.id
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_confirmed_facts_immutable ON confirmed_facts;
+CREATE TRIGGER trg_confirmed_facts_immutable
+  BEFORE UPDATE OR DELETE ON confirmed_facts
+  FOR EACH ROW EXECUTE FUNCTION guard_confirmed_fact_immutable();
+
+-- ---------------------------------------------------------------------------
+-- etl_quarantine — malformed scrape payloads (issue #75)
+-- ---------------------------------------------------------------------------
+--
+-- Receives payloads that the ingestion worker cannot parse. Neither the queue
+-- nor the scraper is blocked by quarantined rows; they are retained for
+-- operator inspection.
+--
+-- Blueprint refs:
+--   docs/architecture.md — "Quarantine and DLQ"
+CREATE TABLE IF NOT EXISTS etl_quarantine (
+  id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  source              TEXT        NOT NULL,
+  -- Optional reference to the source_finding row that caused the quarantine.
+  source_finding_id   TEXT,
+  -- JSON-serialised payload that could not be parsed.
+  raw_payload         TEXT        NOT NULL,
+  -- Human-readable error message from the parser.
+  error_message       TEXT        NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_etl_quarantine_source
+  ON etl_quarantine (source, created_at DESC);
