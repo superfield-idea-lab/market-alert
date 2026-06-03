@@ -63,8 +63,6 @@ import {
   getRawFilingByIdempotencyKey,
   getMarketEventByRawFilingId,
   markFilingNormalized,
-  type RawFilingRow,
-  type MarketEventRow,
 } from '../../packages/db/mkt-market-event-store';
 
 // ---------------------------------------------------------------------------
