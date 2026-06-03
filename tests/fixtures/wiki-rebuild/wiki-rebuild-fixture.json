@@ -1,0 +1,32 @@
+{
+  "tenant_id": "tenant-wiki-76",
+  "subject_type": "canonical_source",
+  "subject_id": "cs-wiki-76-001",
+  "facts": [
+    {
+      "attribute": "ceo",
+      "value": "Jane Smith",
+      "confidence": 0.7
+    },
+    {
+      "attribute": "revenue",
+      "value": "$450M",
+      "confidence": 0.7
+    },
+    {
+      "attribute": "ticker",
+      "value": "BTC",
+      "confidence": 0.7
+    }
+  ],
+  "chunks": [
+    {
+      "content": "BioTech Corp reported strong Q3 results, citing 12% revenue growth.",
+      "chunk_index": 0
+    },
+    {
+      "content": "CEO Jane Smith raised full-year guidance after drug launch success.",
+      "chunk_index": 1
+    }
+  ]
+}

@@ -93,6 +93,7 @@ import {
   buildTranscriptionCliPayload,
   validateTranscriptionResult,
 } from './transcription-job';
+import { WIKI_REBUILD_JOB_TYPE, executeWikiRebuildTask } from './wiki-rebuild-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -302,6 +303,20 @@ async function tryClaimAndExecute(
         sigtermGraceMs,
       });
       result = validateTranscriptionResult(rawResult);
+    } else if (task.job_type === WIKI_REBUILD_JOB_TYPE) {
+      // Wiki rebuild worker — Phase 3 scout (issue #76).
+      // Reads facts/chunks for a subject, synthesises a full-snapshot wiki page
+      // version through the pending → content_written → embedded → indexed
+      // pipeline, attaches cites edges, and flips currently_published only at
+      // indexed. Crash-resume: resumes from stalled stage on retry.
+      if (!task.delegated_token) {
+        throw new Error(`Task ${task.id} has no delegated token — cannot call wiki rebuild API`);
+      }
+      result = (await executeWikiRebuildTask(
+        task,
+        apiBaseUrl,
+        task.delegated_token,
+      )) as unknown as Record<string, unknown>;
     } else {
       result = await invokeCodex(task.payload, timeoutMs, sigtermGraceMs);
     }
