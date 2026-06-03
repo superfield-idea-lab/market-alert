@@ -89,8 +89,6 @@ afterAll(async () => {
 
 describe('golden-document write path — researcher session', () => {
   test('researcher creates an industry_definition and reads it back', async () => {
-    let createdId: string;
-
     // Create via withRlsContext with role: 'researcher'
     const doc = await withRlsContext(
       sql as never,
@@ -111,7 +109,7 @@ describe('golden-document write path — researcher session', () => {
     expect(doc.title).toBe('My Industry Definition');
     expect(doc.state).toBe('authored');
 
-    createdId = doc.id;
+    const createdId = doc.id;
 
     // Read it back via withRlsContext
     const fetched = await withRlsContext(
