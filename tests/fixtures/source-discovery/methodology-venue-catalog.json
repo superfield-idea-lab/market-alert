@@ -1,0 +1,32 @@
+{
+  "document": {
+    "id": "meth-fixture-001",
+    "kind": "research_methodology",
+    "author_id": "user-fixture-001",
+    "tenant_id": "tenant-fixture-001",
+    "title": "Alice's Biotech Research Methodology",
+    "state": "active",
+    "created_at": "2026-01-01T00:00:00.000Z",
+    "updated_at": "2026-01-01T00:00:00.000Z"
+  },
+  "sections": [
+    {
+      "id": "section-fixture-001",
+      "document_id": "meth-fixture-001",
+      "section_key": "overview",
+      "content": "This methodology covers small-cap clinical-stage biotech companies. Sources are ranked by regulatory authority, then by peer-reviewed publication, then by press release.",
+      "position": 0,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "section-fixture-002",
+      "document_id": "meth-fixture-001",
+      "section_key": "venue_catalog",
+      "content": "[{\"name\":\"SEC EDGAR\",\"url\":\"https://www.sec.gov/cgi-bin/browse-edgar\",\"description\":\"Primary source for 8-K filings and regulatory submissions\",\"access_mode\":\"public\"},{\"name\":\"FDA Drug Databases\",\"url\":\"https://www.accessdata.fda.gov/scripts/cder/daf/\",\"description\":\"FDA drug approval database for NDA/BLA tracking\",\"access_mode\":\"public\"},{\"name\":\"ClinicalTrials.gov\",\"url\":\"https://clinicaltrials.gov/\",\"description\":\"Active trial registrations and results postings\",\"access_mode\":\"public\"}]",
+      "position": 1,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

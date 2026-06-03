@@ -21,6 +21,11 @@ import type postgres from 'postgres';
  *   CORP_ACTION_ADVANCE — Scheduler: advance corporate action state machine (agent_type: scheduler)
  *   TRADE_SETTLE        — Scheduler: advance trade settlement state machine (agent_type: scheduler)
  *
+ * Phase 3 — Canonical-source discovery (issue #74, TQ-D-001):
+ *   SOURCE_DISCOVER — Read the active Research Methodology, extract venue catalog,
+ *                     and register designated venues as Active canonical_sources.
+ *                     (agent_type: source_discovery)
+ *
  * Blueprint refs: TQ-D-001 (single-table multi-type queue).
  */
 export const TaskType = {
@@ -38,6 +43,8 @@ export const TaskType = {
   ALERT_SUPPLEMENT: 'ALERT_SUPPLEMENT',
   CORP_ACTION_ADVANCE: 'CORP_ACTION_ADVANCE',
   TRADE_SETTLE: 'TRADE_SETTLE',
+  // Phase 3 — Canonical-source discovery (issue #74)
+  SOURCE_DISCOVER: 'SOURCE_DISCOVER',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -61,6 +68,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.ALERT_SUPPLEMENT]: 'enrichment',
   [TaskType.CORP_ACTION_ADVANCE]: 'scheduler',
   [TaskType.TRADE_SETTLE]: 'scheduler',
+  // Phase 3 (issue #74)
+  [TaskType.SOURCE_DISCOVER]: 'source_discovery',
 };
 
 /**
@@ -101,6 +110,8 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.ALERT_SUPPLEMENT,
   TaskType.CORP_ACTION_ADVANCE,
   TaskType.TRADE_SETTLE,
+  // Phase 3 (issue #74): source-discovery payload carries only UUIDs
+  TaskType.SOURCE_DISCOVER,
 ]);
 
 /**
