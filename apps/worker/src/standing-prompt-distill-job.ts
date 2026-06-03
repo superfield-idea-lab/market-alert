@@ -218,7 +218,7 @@ export async function executeStandingPromptDistillTask(
   // Workers must never hold a DB URL (WORKER-T-001).
   assertNoDatabaseUrl();
 
-  const payload = task.payload as StandingPromptDistillPayload;
+  const payload = task.payload as unknown as StandingPromptDistillPayload;
   const { researcher_id, tenant_id, wiki_version_window } = payload;
 
   const authHeaders: Record<string, string> = {

@@ -238,7 +238,10 @@ export async function activateStandingPromptVersion(
   const wordCount = countWords(opts.body);
   assertWithinLengthBound(wordCount);
 
-  const [row] = await sql.begin(async (tx) => {
+  const [row] = await sql.begin(async (txRaw) => {
+    // postgres.TransactionSql extends Sql at runtime; the cast is safe.
+    const tx = txRaw as unknown as SqlClient;
+
     // Supersede the currently active version, if any.
     await tx`
       UPDATE standing_prompt_versions
