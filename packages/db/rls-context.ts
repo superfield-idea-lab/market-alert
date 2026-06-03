@@ -61,6 +61,16 @@ export interface RlsSessionContext {
    * changing the underlying app_rw database role yet.
    */
   bdmDepartmentId?: string;
+  /**
+   * Session role used for golden-document author-only enforcement (issue #73).
+   *
+   * Set to `'researcher'` for researcher sessions that may write golden
+   * documents. Leave unset (or set to any other value) for all other sessions.
+   * The value is forwarded to `app.current_role` via SET LOCAL and is checked
+   * by the `guard_golden_document_writer` trigger backstop and the
+   * `golden_documents_researcher_only` RLS policy.
+   */
+  role?: string;
 }
 
 /**
@@ -92,7 +102,7 @@ export function withRlsContext<T>(
   context: RlsSessionContext,
   callback: (tx: TxSql) => Promise<T>,
 ): Promise<T> {
-  const { userId, tenantId, rmCustomerIds, bdmDepartmentId } = context;
+  const { userId, tenantId, rmCustomerIds, bdmDepartmentId, role } = context;
   return sqlPool.begin(async (tx) => {
     const userIdEsc = escapeConfigValue(userId);
     const tenantIdEsc = tenantId !== null ? escapeConfigValue(tenantId) : '';
@@ -110,6 +120,15 @@ export function withRlsContext<T>(
       await tx.unsafe(
         `SET LOCAL app.current_bdm_department_id = '${escapeConfigValue(bdmDepartmentId)}'`,
       );
+    }
+
+    // Set app.current_role for golden-document author-only enforcement (issue #73).
+    // The guard_golden_document_writer trigger and researcher_only RLS policy
+    // read this variable to distinguish researcher sessions from all others.
+    // Note: "app.current_role" must be double-quoted as a GUC parameter name
+    // because `current_role` is a reserved keyword in PostgreSQL.
+    if (role !== undefined) {
+      await tx.unsafe(`SET LOCAL "app.current_role" = '${escapeConfigValue(role)}'`);
     }
 
     return callback(tx as unknown as Sql);

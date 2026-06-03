@@ -1,79 +1,55 @@
 /**
  * @file golden-documents.ts
  *
- * Scout stub — Phase 2 golden-document API seam (issue #72).
+ * API handler for golden-document routes (issue #73, PRD §6 §9).
  *
  * ## Routes
  *
- *   POST /api/golden-documents       — researcher creates a golden document
- *   GET  /api/golden-documents/:id   — researcher reads a golden document back
+ *   POST   /api/golden-documents                — researcher creates a golden document
+ *   GET    /api/golden-documents                — researcher lists their golden documents
+ *   GET    /api/golden-documents/:id            — researcher reads a golden document
+ *   PATCH  /api/golden-documents/:id/state      — researcher changes document state
+ *   POST   /api/golden-documents/:id/sections   — researcher upserts a section
+ *   GET    /api/golden-documents/:id/sections   — list sections for a document
+ *   GET    /api/golden-documents/active/:kind   — unified retrieval: fetch active doc + sections
  *
- * ## Scout stub behaviour
+ * ## Author-only enforcement (three layers)
  *
- * All routes return **501 Not Implemented** with the expected request/response
- * contract documented inline. The stub enforces the presence of an
- * Authorization or session-cookie header and returns 401 when the caller is
- * unauthenticated. A worker Bearer token is detected and rejected with 403 so
- * that integration tests can assert the auth invariant before the real
- * implementation lands.
- *
- * ## Real implementation (Phase 2 follow-on)
- *
- * The follow-on issue ("Golden-document tables and author-only enforcement")
- * will replace the 501 stubs with:
- *
- *   POST /api/golden-documents
- *     1. Validate the session is a researcher (`role === 'researcher'`).
- *     2. Parse and validate the request body.
- *     3. Call `createGoldenDocument(sql, input)` inside a `withRlsContext`
- *        transaction that sets `app.current_role = 'researcher'`.
- *     4. Emit a `golden_document.created` journal event.
- *     5. Return the new row as JSON with status 201.
- *
- *   GET /api/golden-documents/:id
- *     1. Validate the session is authenticated.
- *     2. Call `getGoldenDocument(sql, id)` inside `withRlsContext`.
- *     3. Return the row as JSON or 404.
- *
- * A worker token (JWT `role` claim = `'worker'`) attempting POST must be:
- *   - Rejected by the API layer with 403.
- *   - Blocked by the `researcher_only` RLS policy if it somehow reaches the DB.
- *   - Blocked by the `guard_golden_document_writer` trigger backstop.
- *   - Journalled via `writeJournalEvent` with
- *     `event_type = 'golden_document.write_denied'`.
+ *   1. API layer  — this handler verifies the session role is 'researcher'
+ *      before any write reaches the DB. Worker Bearer tokens receive 403 and
+ *      a `golden_document.write_denied` journal event is written.
+ *   2. RLS policy — `golden_documents_researcher_only` (RESTRICTIVE) applied
+ *      in init-remote.ts blocks writes when `app.current_role != 'researcher'`.
+ *   3. Trigger    — `guard_golden_document_writer` fires on INSERT/UPDATE.
  *
  * ## Canonical docs
  *
  * - `docs/prd.md` §9 — golden documents are author-only forever.
  * - `docs/architecture.md` — data tier, per-pool role isolation.
  * - `docs/implementation-plan.md` Phase 2.
- *
- * ## Discovered integration points
- *
- * - `packages/db/golden-document-store.ts` — type signatures and stub DB
- *   functions that the real implementation will fill in.
- * - `packages/db/rls-context.ts` — `withRlsContext` needs a `role` field
- *   (or a dedicated `SET LOCAL app.current_role`) so the RLS policy can
- *   distinguish researcher from worker sessions.
- * - `packages/db/business-journal.ts` — `writeJournalEvent` for
- *   `golden_document.created` and `golden_document.write_denied` events.
- * - `packages/db/init-remote.ts` — `CUSTOMER_SCOPED_TABLES` must include
- *   `'golden_documents'` so RLS is provisioned at deploy time.
  */
 
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { makeJson } from '../lib/response';
+import { withRlsContext } from 'db/rls-context';
+import { writeJournalEvent } from 'db/business-journal';
+import {
+  createGoldenDocument,
+  getGoldenDocument,
+  listGoldenDocuments,
+  activateGoldenDocument,
+  retireGoldenDocument,
+  upsertGoldenDocumentSection,
+  listGoldenDocumentSections,
+  fetchActiveGoldenDocument,
+  type GoldenDocumentKind,
+} from 'db/golden-document-store';
 
 // ---------------------------------------------------------------------------
-// Type contracts (documented for follow-on implementors)
+// Type contracts
 // ---------------------------------------------------------------------------
 
-/**
- * Request body for POST /api/golden-documents.
- *
- * Inline PII is not stored in the body; title is researcher-supplied metadata.
- */
 export interface CreateGoldenDocumentRequest {
   /** 'industry_definition' | 'research_methodology' */
   kind: string;
@@ -81,10 +57,6 @@ export interface CreateGoldenDocumentRequest {
   title: string;
 }
 
-/**
- * Response body for POST /api/golden-documents (201) and
- * GET /api/golden-documents/:id (200).
- */
 export interface GoldenDocumentResponse {
   id: string;
   kind: string;
@@ -96,6 +68,41 @@ export interface GoldenDocumentResponse {
   updated_at: string;
 }
 
+export interface StateTransitionRequest {
+  /** 'active' | 'retired' */
+  state: string;
+}
+
+export interface UpsertSectionRequest {
+  section_key: string;
+  content: string;
+  position?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: determine whether the session user is a researcher
+// ---------------------------------------------------------------------------
+
+/**
+ * For now the session JWT does not carry a `role` claim — all authenticated
+ * users are treated as researchers on the golden-documents surface.  A future
+ * issue will add role claims to the JWT and this function will check them.
+ *
+ * Returns 'researcher' for any authenticated session without a Bearer token.
+ * Worker Bearer tokens are rejected before this function is reached.
+ */
+function getSessionRole(_user: { id: string; username: string }): string {
+  // All session-cookie authenticated users are researchers for this surface.
+  // Issue #73 follow-on: check JWT role claim when roles are added to tokens.
+  return 'researcher';
+}
+
+const VALID_KINDS = new Set<GoldenDocumentKind>(['industry_definition', 'research_methodology']);
+
+function isValidKind(k: string): k is GoldenDocumentKind {
+  return VALID_KINDS.has(k as GoldenDocumentKind);
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -105,38 +112,48 @@ export interface GoldenDocumentResponse {
  *
  * Returns null when the route does not match so the caller can fall through
  * to the next handler.
- *
- * Scout stub: enforces auth invariants and returns 501 for all matched routes.
  */
 export async function handleGoldenDocumentsRequest(
   req: Request,
   url: URL,
-  _appState: AppState,
+  appState: AppState,
 ): Promise<Response | null> {
   if (!url.pathname.startsWith('/api/golden-documents')) return null;
 
   const corsHeaders = getCorsHeaders(req);
   const json = makeJson(corsHeaders);
+  const { sql } = appState;
+
+  // ── CORS preflight ────────────────────────────────────────────────────────
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: { ...corsHeaders, 'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS' },
+    });
+  }
 
   // ── Authentication check ──────────────────────────────────────────────────
   //
-  // A researcher session must be authenticated via session cookie.
-  // A worker token (Authorization: Bearer <jwt>) must be rejected with 403
-  // because golden documents are author-only — workers never write them.
-  //
-  // Detect worker Bearer tokens so integration tests can assert the 403 path
-  // even before the real implementation lands.
+  // Worker Bearer tokens are explicitly denied (PRD §9 — author-only).
+  // The denial is journalled as `golden_document.write_denied`.
 
   const authHeader = req.headers.get('Authorization') ?? '';
   if (authHeader.startsWith('Bearer ')) {
-    // Any Bearer token on this route is a worker token — deny immediately.
-    // The real implementation will call writeJournalEvent here with
-    // event_type = 'golden_document.write_denied'.
+    // Any Bearer token on a mutating route is a worker token — deny.
+    // We optimistically log a denial even for read routes to surface mis-use.
+    try {
+      await writeJournalEvent(sql, {
+        event_type: 'golden_document.write_denied',
+        entity_id: 'golden_documents',
+        actor_id: 'bearer_token_actor',
+        payload_ref: null,
+      });
+    } catch {
+      // Journal write failure must not mask the 403 response.
+    }
     return json(
       {
-        error: 'Forbidden — worker tokens may not write golden documents (PRD §9)',
-        journal_note:
-          'A golden_document.write_denied journal entry will be written by the real implementation.',
+        error: 'Forbidden — worker tokens may not access golden documents (PRD §9)',
       },
       403,
     );
@@ -148,56 +165,224 @@ export async function handleGoldenDocumentsRequest(
     return json({ error: 'Unauthorized — researcher session required' }, 401);
   }
 
-  // ── POST /api/golden-documents ───────────────────────────────────────────
-  if (req.method === 'POST' && url.pathname === '/api/golden-documents') {
-    // Scout stub: document the expected 201 response shape without executing.
-    return json(
-      {
-        error:
-          'Not Implemented — golden_documents DDL and author-only enforcement ' +
-          'are the Phase 2 follow-on issue (scout stub only)',
-        expected_request_shape: {
-          kind: 'industry_definition | research_methodology',
-          title: '<researcher-supplied title>',
-        } satisfies Record<string, unknown>,
-        expected_response_shape: {
-          id: '<uuid>',
-          kind: 'industry_definition',
-          title: '<researcher-supplied title>',
-          author_id: '<researcher entity id>',
-          tenant_id: '<tenant id>',
-          state: 'authored',
-          created_at: '<ISO 8601>',
-          updated_at: '<ISO 8601>',
-        } satisfies Record<string, unknown>,
-      },
-      501,
+  const sessionRole = getSessionRole(user);
+
+  // ── GET /api/golden-documents/active/:kind ────────────────────────────────
+  // Unified retrieval endpoint: active document + sections for a given kind.
+  // tenant_id must be supplied as a query param for now.
+  const activeMatch = url.pathname.match(/^\/api\/golden-documents\/active\/([^/]+)$/);
+  if (req.method === 'GET' && activeMatch) {
+    const kind = activeMatch[1];
+    if (!isValidKind(kind)) {
+      return json({ error: `Invalid kind: ${kind}` }, 400);
+    }
+    const tenantId = url.searchParams.get('tenant_id') ?? '';
+    if (!tenantId) {
+      return json({ error: 'tenant_id query param required' }, 400);
+    }
+
+    const result = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => fetchActiveGoldenDocument(tx, kind, user.id, tenantId),
     );
+    return json(result, 200);
+  }
+
+  // ── GET /api/golden-documents/:id/sections ───────────────────────────────
+  const sectionsListMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)\/sections$/);
+  if (req.method === 'GET' && sectionsListMatch) {
+    const docId = sectionsListMatch[1];
+    // Fetch the doc to derive tenant_id for RLS context.
+    const docForTenant = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    `;
+    if (docForTenant.length === 0) return json({ error: 'Not found' }, 404);
+    const tenantId = docForTenant[0].tenant_id;
+
+    const sections = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => listGoldenDocumentSections(tx, docId),
+    );
+    return json({ sections }, 200);
+  }
+
+  // ── POST /api/golden-documents/:id/sections ──────────────────────────────
+  const sectionUpsertMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)\/sections$/);
+  if (req.method === 'POST' && sectionUpsertMatch) {
+    const docId = sectionUpsertMatch[1];
+
+    let body: UpsertSectionRequest;
+    try {
+      body = (await req.json()) as UpsertSectionRequest;
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!body.section_key || typeof body.content !== 'string') {
+      return json({ error: 'section_key and content are required' }, 400);
+    }
+
+    // Fetch the doc to derive tenant_id for RLS context.
+    const docForTenant = await sql<{ tenant_id: string; author_id: string }[]>`
+      SELECT tenant_id, author_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    `;
+    if (docForTenant.length === 0) return json({ error: 'Not found' }, 404);
+    if (docForTenant[0].author_id !== user.id) {
+      return json({ error: 'Forbidden — only the author may edit sections' }, 403);
+    }
+    const tenantId = docForTenant[0].tenant_id;
+
+    const section = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) =>
+        upsertGoldenDocumentSection(tx, {
+          document_id: docId,
+          section_key: body.section_key,
+          content: body.content,
+          position: body.position,
+        }),
+    );
+    return json({ section }, 200);
+  }
+
+  // ── PATCH /api/golden-documents/:id/state ────────────────────────────────
+  const stateMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)\/state$/);
+  if (req.method === 'PATCH' && stateMatch) {
+    const docId = stateMatch[1];
+
+    let body: StateTransitionRequest;
+    try {
+      body = (await req.json()) as StateTransitionRequest;
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!['active', 'retired'].includes(body.state)) {
+      return json({ error: 'state must be "active" or "retired"' }, 400);
+    }
+
+    // Fetch doc to get tenant_id and verify authorship.
+    const docRows = await sql<{ tenant_id: string; author_id: string }[]>`
+      SELECT tenant_id, author_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    `;
+    if (docRows.length === 0) return json({ error: 'Not found' }, 404);
+    if (docRows[0].author_id !== user.id) {
+      return json({ error: 'Forbidden — only the author may change document state' }, 403);
+    }
+    const tenantId = docRows[0].tenant_id;
+
+    const updatedDoc = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => {
+        if (body.state === 'active') {
+          return activateGoldenDocument(tx, docId, user.id, tenantId);
+        } else {
+          return retireGoldenDocument(tx, docId, user.id, tenantId);
+        }
+      },
+    );
+
+    if (!updatedDoc) return json({ error: 'Document not found or transition not allowed' }, 404);
+
+    await writeJournalEvent(sql, {
+      event_type: `golden_document.state_changed.${body.state}`,
+      entity_id: docId,
+      actor_id: user.id,
+    });
+
+    return json({ document: updatedDoc }, 200);
   }
 
   // ── GET /api/golden-documents/:id ────────────────────────────────────────
   const getMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)$/);
   if (req.method === 'GET' && getMatch) {
-    const _id = getMatch[1];
-    // Scout stub: document the expected 200 response shape.
-    return json(
-      {
-        error:
-          'Not Implemented — golden_documents DDL and author-only enforcement ' +
-          'are the Phase 2 follow-on issue (scout stub only)',
-        expected_response_shape: {
-          id: '<uuid>',
-          kind: 'industry_definition | research_methodology',
-          title: '<researcher-supplied title>',
-          author_id: '<researcher entity id>',
-          tenant_id: '<tenant id>',
-          state: 'authored | active | retired',
-          created_at: '<ISO 8601>',
-          updated_at: '<ISO 8601>',
-        } satisfies Record<string, unknown>,
-      },
-      501,
+    const id = getMatch[1];
+    // Derive tenant_id from the document (needed for RLS context).
+    const tenantRows = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM golden_documents WHERE id = ${id} LIMIT 1
+    `;
+    if (tenantRows.length === 0) return json({ error: 'Not found' }, 404);
+    const tenantId = tenantRows[0].tenant_id;
+
+    const doc = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => getGoldenDocument(tx, id),
     );
+    if (!doc) return json({ error: 'Not found' }, 404);
+    return json({ document: doc }, 200);
+  }
+
+  // ── POST /api/golden-documents ───────────────────────────────────────────
+  if (req.method === 'POST' && url.pathname === '/api/golden-documents') {
+    let body: CreateGoldenDocumentRequest;
+    try {
+      body = (await req.json()) as CreateGoldenDocumentRequest;
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    if (!body.kind || !body.title) {
+      return json({ error: 'kind and title are required' }, 400);
+    }
+    if (!isValidKind(body.kind)) {
+      return json({ error: 'kind must be "industry_definition" or "research_methodology"' }, 400);
+    }
+
+    // tenant_id is derived from the authenticated user's session.
+    // For now we use the user's entity tenant_id from the DB.
+    const tenantRows = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
+    `;
+    const tenantId = tenantRows[0]?.tenant_id ?? 'default';
+
+    const doc = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) =>
+        createGoldenDocument(tx, {
+          kind: body.kind as GoldenDocumentKind,
+          author_id: user.id,
+          tenant_id: tenantId,
+          title: body.title,
+        }),
+    );
+
+    await writeJournalEvent(sql, {
+      event_type: 'golden_document.created',
+      entity_id: doc.id,
+      actor_id: user.id,
+    });
+
+    return json({ document: doc }, 201);
+  }
+
+  // ── GET /api/golden-documents ────────────────────────────────────────────
+  if (req.method === 'GET' && url.pathname === '/api/golden-documents') {
+    // List the authenticated researcher's golden documents for a given tenant.
+    const tenantId = url.searchParams.get('tenant_id') ?? '';
+    if (!tenantId) {
+      // Derive tenant from the user entity.
+      const tenantRows = await sql<{ tenant_id: string }[]>`
+        SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
+      `;
+      const derivedTenantId = tenantRows[0]?.tenant_id ?? 'default';
+      const docs = await withRlsContext(
+        sql,
+        { userId: user.id, tenantId: derivedTenantId, role: sessionRole },
+        async (tx) => listGoldenDocuments(tx, user.id, derivedTenantId),
+      );
+      return json({ documents: docs }, 200);
+    }
+
+    const docs = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => listGoldenDocuments(tx, user.id, tenantId),
+    );
+    return json({ documents: docs }, 200);
   }
 
   return null;

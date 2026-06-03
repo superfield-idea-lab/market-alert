@@ -1298,3 +1298,95 @@ CREATE INDEX IF NOT EXISTS idx_labeled_ground_truth_tenant_id
 
 INSERT INTO _schema_version (migration) VALUES ('label-clearance-001')
   ON CONFLICT (migration) DO NOTHING;
+
+-- ============================================================================
+-- Golden documents — author-only enforcement (issue #73, PRD §6, §9)
+--
+-- Two golden document kinds:
+--   industry_definition  — Alice's definition of the industry she covers.
+--   research_methodology — Alice's methodology for evaluating companies.
+--
+-- Revision lifecycle per document kind:
+--   authored → active → retired
+--
+-- Only one 'active' document per (kind, author_id, tenant_id) is enforced by
+-- the application layer (not a DB constraint, to allow atomic transitions).
+--
+-- Author-only enforcement is layered:
+--   1. API layer  — session role check before touching DB.
+--   2. RLS policy — researcher_only policy on golden_documents (init-remote.ts).
+--   3. Trigger    — guard_golden_document_writer fires on INSERT/UPDATE.
+--
+-- golden_document_sections: per-section content enabling structured authoring.
+--   Each section belongs to exactly one golden_document (FK, CASCADE DELETE).
+--   section_key: an opaque slug identifying the section (e.g. "overview",
+--     "sectors", "methodology_step_1"). Unique per document.
+--   content: Markdown body for this section.
+--   position: display order (ascending).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS golden_documents (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  kind        TEXT NOT NULL CHECK (kind IN ('industry_definition', 'research_methodology')),
+  author_id   TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  tenant_id   TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  state       TEXT NOT NULL DEFAULT 'authored'
+                CHECK (state IN ('authored', 'active', 'retired')),
+  created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_golden_documents_author_tenant
+  ON golden_documents (author_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_golden_documents_kind_state
+  ON golden_documents (kind, state);
+CREATE INDEX IF NOT EXISTS idx_golden_documents_tenant_id
+  ON golden_documents (tenant_id);
+
+CREATE TABLE IF NOT EXISTS golden_document_sections (
+  id           TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  document_id  TEXT NOT NULL REFERENCES golden_documents(id) ON DELETE CASCADE,
+  section_key  TEXT NOT NULL,
+  content      TEXT NOT NULL DEFAULT '',
+  position     INTEGER NOT NULL DEFAULT 0,
+  created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (document_id, section_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_golden_document_sections_document_id
+  ON golden_document_sections (document_id, position ASC);
+
+-- Trigger backstop: guard_golden_document_writer
+-- Rejects INSERT or UPDATE on golden_documents unless the session variable
+-- "app.current_role" is exactly 'researcher'. This is the third layer of
+-- author-only enforcement and fires even for direct app_rw connections that
+-- somehow bypass the API and RLS layers.
+--
+-- Note: "app.current_role" must be referenced with double-quotes in SET LOCAL
+-- statements because current_role is a reserved PostgreSQL keyword. The
+-- current_setting() call does NOT need quotes (it takes a text argument).
+--
+-- The function is defined SECURITY DEFINER so it can always read
+-- current_setting(...) regardless of the calling role.
+CREATE OR REPLACE FUNCTION guard_golden_document_writer()
+  RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  IF current_setting('app.current_role', true) IS DISTINCT FROM 'researcher' THEN
+    RAISE EXCEPTION
+      'golden_documents write denied: app.current_role must be researcher (got %)',
+      coalesce(current_setting('app.current_role', true), '(unset)')
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_golden_documents_writer_guard ON golden_documents;
+CREATE TRIGGER trg_golden_documents_writer_guard
+  BEFORE INSERT OR UPDATE ON golden_documents
+  FOR EACH ROW EXECUTE FUNCTION guard_golden_document_writer();
+
+INSERT INTO _schema_version (migration) VALUES ('golden-documents-001')
+  ON CONFLICT (migration) DO NOTHING;
