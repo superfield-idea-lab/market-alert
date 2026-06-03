@@ -179,18 +179,25 @@ function startLocalServer(state: AppState): Promise<{ server: Server; url: strin
 function makeTask(jobType: string, payload: Record<string, unknown>) {
   return {
     id: `task-${crypto.randomUUID()}`,
+    idempotency_key: crypto.randomUUID(),
     job_type: jobType,
     agent_type: 'test',
     payload,
-    status: 'claimed',
+    status: 'claimed' as const,
+    correlation_id: null,
+    created_by: 'test',
+    claimed_by: 'test',
+    claimed_at: new Date(),
+    claim_expires_at: null,
     delegated_token: TEST_TOKEN,
+    result: null,
+    error_message: null,
+    attempt: 1,
+    max_attempts: 3,
+    next_retry_at: null,
+    priority: 0,
     created_at: new Date(),
     updated_at: new Date(),
-    claim_expires_at: null,
-    attempts: 1,
-    max_attempts: 3,
-    priority: 0,
-    error_message: null,
   };
 }
 

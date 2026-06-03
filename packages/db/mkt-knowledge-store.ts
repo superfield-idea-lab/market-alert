@@ -249,7 +249,11 @@ export async function insertConfirmedFact(
   sql: SqlClient,
   input: InsertConfirmedFactInput,
 ): Promise<ConfirmedFactRow> {
-  return sql.begin(async (tx) => {
+  return sql.begin(async (txRaw) => {
+    // Cast to Sql to access generic typed template literals.
+    // postgres.TransactionSql extends Sql at runtime; the cast is safe.
+    const tx = txRaw as unknown as SqlClient;
+
     const rows = await tx<ConfirmedFactRow[]>`
       INSERT INTO confirmed_facts
         (tenant_id, corpus_chunk_id, subject_entity_id, subject_entity_type,

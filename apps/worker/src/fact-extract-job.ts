@@ -150,7 +150,7 @@ export async function executeFactExtractTask(
 ): Promise<FactExtractResult> {
   assertNoDatabaseUrl(env);
 
-  const payload = task.payload as FactExtractPayload;
+  const payload = task.payload as unknown as FactExtractPayload;
   const { corpus_chunk_id } = payload;
 
   // --- 1. Fetch the corpus_chunk ---

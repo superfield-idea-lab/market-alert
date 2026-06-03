@@ -136,7 +136,7 @@ export async function executeFindingIngestTask(
 ): Promise<FindingIngestResult> {
   assertNoDatabaseUrl(env);
 
-  const payload = task.payload as FindingIngestPayload;
+  const payload = task.payload as unknown as FindingIngestPayload;
   const { source_finding_id } = payload;
 
   // --- 1. Fetch the source_finding ---

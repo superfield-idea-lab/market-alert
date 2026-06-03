@@ -130,7 +130,7 @@ export async function executeSourceScrapeTask(
 ): Promise<SourceScrapeResult> {
   assertNoDatabaseUrl(env);
 
-  const payload = task.payload as SourceScrapePayload;
+  const payload = task.payload as unknown as SourceScrapePayload;
   const { canonical_source_id } = payload;
 
   // --- 1. Fetch canonical source metadata ---
