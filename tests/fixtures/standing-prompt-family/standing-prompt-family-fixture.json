@@ -1,0 +1,32 @@
+{
+  "tenant_id": "tenant-sp-79",
+  "researcher_id": "researcher-sp-79-001",
+  "entity_subject_id": "company-sp-79-aapl",
+  "thesis_subject_id": "thesis-sp-79-biotech",
+  "wiki_version_window_1": "2024-02-01T09:00",
+  "wiki_version_window_2": "2024-02-01T09:05",
+  "entity_wiki_page": {
+    "subject_type": "company",
+    "subject_id": "company-sp-79-aapl",
+    "body": "Apple Inc reported strong quarterly results with iPhone revenue up 15%. The company continues to invest in AI capabilities. Services revenue reached a record high driven by App Store and subscription growth. Tim Cook highlighted expansion into emerging markets."
+  },
+  "thesis_wiki_pages": [
+    {
+      "subject_type": "thesis",
+      "subject_id": "thesis-sp-79-biotech",
+      "body": "Small-cap biotech thesis: focus on late-stage clinical catalysts with binary readouts. Key metrics: FDA PDUFA dates, Phase 3 success rates, cash runway. Portfolio targets companies with orphan drug designations and strong IP moats."
+    }
+  ],
+  "portfolio_wiki_pages": [
+    {
+      "subject_type": "company",
+      "subject_id": "company-sp-79-aapl",
+      "body": "Apple Inc reported strong quarterly results with iPhone revenue up 15%."
+    },
+    {
+      "subject_type": "company",
+      "subject_id": "company-sp-79-msft",
+      "body": "Microsoft Azure cloud revenue grew 29% YoY, driven by AI services adoption."
+    }
+  ]
+}

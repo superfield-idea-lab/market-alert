@@ -103,7 +103,7 @@ export const STANDING_PROMPT_DISTILL_JOB_TYPE = 'STANDING_PROMPT_DISTILL' as con
 /**
  * Payload for a STANDING_PROMPT_DISTILL task.
  *
- * Task key format: `sp_distill:<researcher_id>:<wiki_version_window>`
+ * Task key format: `sp_distill:<researcher_id>:<subject_type>:<subject_id>:<wiki_version_window>`
  * Triggered by: wiki_page_version publish events (WIKI_REBUILD indexed stage).
  */
 export interface StandingPromptDistillPayload {
@@ -112,12 +112,31 @@ export interface StandingPromptDistillPayload {
   /** Tenant scope for the distillation. */
   tenant_id: string;
   /**
+   * Subject type for the standing prompt (PRD §5, §6).
+   *
+   * - `entity`    — per Company/Ticker on the watchlist (default, most specific)
+   * - `thesis`    — per named thesis spanning multiple entities (methodology-declared)
+   * - `portfolio` — coarser portfolio-level fallback (one per researcher)
+   *
+   * Defaults to `'entity'` when absent (backward compat with issue #78).
+   */
+  subject_type?: 'entity' | 'thesis' | 'portfolio';
+  /**
+   * Subject identifier.
+   * - For entity: the ticker/company id.
+   * - For thesis: the thesis name/id.
+   * - For portfolio: the constant `'portfolio'`.
+   *
+   * Defaults to `researcher_id` when absent (backward compat with issue #78).
+   */
+  subject_id?: string;
+  /**
    * 5-minute ISO-8601 bucket identifying the publish-event window that triggered
    * this distillation. Format: `YYYY-MM-DDTHH:MM` (truncated to the minute,
    * rounded down to the nearest 5 minutes).
    *
    * Used as the idempotency key in standing_prompt_versions. Re-running the
-   * distiller for the same window produces no new row.
+   * distiller for the same window produces no new row (debounce).
    */
   wiki_version_window: string;
 }
@@ -129,14 +148,21 @@ export interface StandingPromptDistillPayload {
 export interface StandingPromptDistillResult {
   researcher_id: string;
   tenant_id: string;
+  subject_type: 'entity' | 'thesis' | 'portfolio';
+  subject_id: string;
   wiki_version_window: string;
   standing_prompt_id: string | null;
   standing_prompt_version_id: string | null;
   /**
    * True when the window was already distilled (idempotent early-exit).
-   * AC: "Distillation is idempotent for the same wiki window."
+   * AC: "Distillation is idempotent for the same wiki window." (debounce)
    */
   already_distilled: boolean;
+  /**
+   * True when the currently active version is pinned and blocked automatic replacement.
+   * AC: "A pinned prompt is not replaced by automatic distillation."
+   */
+  pinned_blocked: boolean;
   /** Word count of the distilled prompt body. */
   word_count: number | null;
   error: string | null;
@@ -220,6 +246,9 @@ export async function executeStandingPromptDistillTask(
 
   const payload = task.payload as unknown as StandingPromptDistillPayload;
   const { researcher_id, tenant_id, wiki_version_window } = payload;
+  // Default to entity for backward compat with issue #78 tasks.
+  const subject_type = payload.subject_type ?? 'entity';
+  const subject_id = payload.subject_id ?? researcher_id;
 
   const authHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -230,17 +259,20 @@ export async function executeStandingPromptDistillTask(
   const promptRes = await fetch(`${apiBaseUrl}/internal/standing-prompt/prompt`, {
     method: 'POST',
     headers: authHeaders,
-    body: JSON.stringify({ tenant_id, researcher_id }),
+    body: JSON.stringify({ tenant_id, researcher_id, subject_type, subject_id }),
   });
 
   if (!promptRes.ok) {
     return {
       researcher_id,
       tenant_id,
+      subject_type,
+      subject_id,
       wiki_version_window,
       standing_prompt_id: null,
       standing_prompt_version_id: null,
       already_distilled: false,
+      pinned_blocked: false,
       word_count: null,
       error: `Failed to upsert standing_prompts: HTTP ${promptRes.status}`,
     };
@@ -248,7 +280,7 @@ export async function executeStandingPromptDistillTask(
 
   const { standing_prompt_id } = (await promptRes.json()) as { standing_prompt_id: string };
 
-  // --- 2. Create draft version (idempotency check) ---
+  // --- 2. Create draft version (idempotency / debounce check) ---
   const versionRes = await fetch(`${apiBaseUrl}/internal/standing-prompt/version`, {
     method: 'POST',
     headers: authHeaders,
@@ -264,10 +296,13 @@ export async function executeStandingPromptDistillTask(
     return {
       researcher_id,
       tenant_id,
+      subject_type,
+      subject_id,
       wiki_version_window,
       standing_prompt_id,
       standing_prompt_version_id: null,
       already_distilled: false,
+      pinned_blocked: false,
       word_count: null,
       error: `Failed to create draft version: HTTP ${versionRes.status}`,
     };
@@ -279,15 +314,18 @@ export async function executeStandingPromptDistillTask(
     wiki_version_window: string;
   };
 
-  // Idempotent early-exit: this window was already distilled.
+  // Idempotent early-exit: this window was already distilled for this subject (debounce).
   if (versionData.status === 'exists') {
     return {
       researcher_id,
       tenant_id,
+      subject_type,
+      subject_id,
       wiki_version_window,
       standing_prompt_id,
       standing_prompt_version_id: versionData.standing_prompt_version_id,
       already_distilled: true,
+      pinned_blocked: false,
       word_count: null,
       error: null,
     };
@@ -295,9 +333,14 @@ export async function executeStandingPromptDistillTask(
 
   const standing_prompt_version_id = versionData.standing_prompt_version_id;
 
-  // --- 3. Fetch published wiki pages for this researcher ---
+  // --- 3. Fetch published wiki pages for this researcher / subject ---
+  const wikiPageParams = new URLSearchParams({
+    tenant_id,
+    researcher_id,
+    subject_type,
+  });
   const wikiRes = await fetch(
-    `${apiBaseUrl}/internal/standing-prompt/wiki-pages?tenant_id=${encodeURIComponent(tenant_id)}&researcher_id=${encodeURIComponent(researcher_id)}`,
+    `${apiBaseUrl}/internal/standing-prompt/wiki-pages?${wikiPageParams.toString()}`,
     { headers: authHeaders },
   );
 
@@ -305,10 +348,13 @@ export async function executeStandingPromptDistillTask(
     return {
       researcher_id,
       tenant_id,
+      subject_type,
+      subject_id,
       wiki_version_window,
       standing_prompt_id,
       standing_prompt_version_id,
       already_distilled: false,
+      pinned_blocked: false,
       word_count: null,
       error: `Failed to fetch wiki pages: HTTP ${wikiRes.status}`,
     };
@@ -340,10 +386,13 @@ export async function executeStandingPromptDistillTask(
     return {
       researcher_id,
       tenant_id,
+      subject_type,
+      subject_id,
       wiki_version_window,
       standing_prompt_id,
       standing_prompt_version_id,
       already_distilled: false,
+      pinned_blocked: false,
       word_count: errBody.word_count ?? null,
       error: `Failed to activate version: HTTP ${activateRes.status} — ${errBody.error ?? 'unknown error'}`,
     };
@@ -352,17 +401,38 @@ export async function executeStandingPromptDistillTask(
   const activateData = (await activateRes.json()) as {
     standing_prompt_version_id: string;
     status: string;
-    word_count: number;
+    word_count: number | null;
+    pinned_version_id?: string;
   };
+
+  // Pin-blocked: the currently active version is pinned; distillation was skipped.
+  if (activateData.status === 'pinned_blocked') {
+    return {
+      researcher_id,
+      tenant_id,
+      subject_type,
+      subject_id,
+      wiki_version_window,
+      standing_prompt_id,
+      standing_prompt_version_id,
+      already_distilled: false,
+      pinned_blocked: true,
+      word_count: null,
+      error: null,
+    };
+  }
 
   return {
     researcher_id,
     tenant_id,
+    subject_type,
+    subject_id,
     wiki_version_window,
     standing_prompt_id,
     standing_prompt_version_id: activateData.standing_prompt_version_id,
     already_distilled: false,
-    word_count: activateData.word_count,
+    pinned_blocked: false,
+    word_count: activateData.word_count ?? null,
     error: null,
   };
 }
