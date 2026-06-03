@@ -43,7 +43,6 @@ import {
   upsertGoldenDocumentSection,
   listGoldenDocumentSections,
   fetchActiveGoldenDocument,
-  type GoldenDocumentRow,
 } from './golden-document-store';
 
 // ---------------------------------------------------------------------------
@@ -401,11 +400,11 @@ describe('golden-document write path — worker write denied', () => {
         // Set tenant context but NOT the role — simulates any non-researcher caller.
         await tx.unsafe(`SET LOCAL app.current_user_id = '${RESEARCHER_ID}'`);
         await tx.unsafe(`SET LOCAL app.current_tenant_id = '${TENANT_ID}'`);
-        // Direct INSERT — must be rejected by trigger.
-        await tx`
-          INSERT INTO golden_documents (kind, author_id, tenant_id, title, state)
-          VALUES ('industry_definition', ${RESEARCHER_ID}, ${TENANT_ID}, 'Denied', 'authored')
-        `;
+        // Direct INSERT via unsafe — must be rejected by trigger.
+        await tx.unsafe(
+          `INSERT INTO golden_documents (kind, author_id, tenant_id, title, state)` +
+            ` VALUES ('industry_definition', '${RESEARCHER_ID}', '${TENANT_ID}', 'Denied', 'authored')`,
+        );
       }),
     ).rejects.toThrow(/insufficient_privilege|golden_documents write denied/i);
   });
@@ -418,10 +417,11 @@ describe('golden-document write path — worker write denied', () => {
         await tx.unsafe(`SET LOCAL app.current_user_id = '${RESEARCHER_ID}'`);
         await tx.unsafe(`SET LOCAL app.current_tenant_id = '${TENANT_ID}'`);
         await tx.unsafe(`SET LOCAL "app.current_role" = 'worker'`);
-        await tx`
-          INSERT INTO golden_documents (kind, author_id, tenant_id, title, state)
-          VALUES ('industry_definition', ${RESEARCHER_ID}, ${TENANT_ID}, 'Denied', 'authored')
-        `;
+        // Direct INSERT via unsafe — must be rejected by trigger.
+        await tx.unsafe(
+          `INSERT INTO golden_documents (kind, author_id, tenant_id, title, state)` +
+            ` VALUES ('industry_definition', '${RESEARCHER_ID}', '${TENANT_ID}', 'Denied', 'authored')`,
+        );
       }),
     ).rejects.toThrow(/insufficient_privilege|golden_documents write denied/i);
   });
