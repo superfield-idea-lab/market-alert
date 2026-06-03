@@ -64,6 +64,9 @@ import { handleComplianceRequest } from './api/compliance';
 import { handleLabelClearanceRequest } from './api/label-clearance';
 import { handleReplayRequest } from './api/replay';
 import { handleGoldenDocumentsRequest } from './api/golden-documents';
+import { handleWikiRebuildApiRequest } from './api/wiki-rebuild-api';
+import { handleWikiDebateApiRequest } from './api/wiki-debate-api';
+import { handleWikiNavApiRequest } from './api/wiki-nav-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -356,6 +359,38 @@ export default {
     if (url.pathname.startsWith('/api/golden-documents')) {
       const goldenDocRes = await handleGoldenDocumentsRequest(req, url, appState);
       if (goldenDocRes) return withTrace(goldenDocRes);
+    }
+
+    // Wiki rebuild internal API — wiki_pages, wiki_page_versions_mkt, wiki_page_cites
+    // (issue #76 scout; registered here for issue #77 full implementation).
+    // POST  /internal/wiki-rebuild/page-version       — upsert/resume version
+    // PATCH /internal/wiki-rebuild/page-version/:id/status — advance pipeline
+    // POST  /internal/wiki-rebuild/cites              — insert citation edge
+    // GET   /internal/wiki-rebuild/facts              — list confirmed_facts
+    // GET   /internal/wiki-rebuild/chunks             — list corpus_chunks
+    if (url.pathname.startsWith('/internal/wiki-rebuild')) {
+      const wikiRebuildRes = await handleWikiRebuildApiRequest(req, url, appState);
+      if (wikiRebuildRes) return withTrace(wikiRebuildRes);
+    }
+
+    // Wiki debate lifecycle — open/resolve/archive contested claims (issue #77).
+    // POST  /internal/wiki-debate           — open a new debate
+    // GET   /internal/wiki-debate           — list debates (by page or tenant)
+    // GET   /internal/wiki-debate/:id       — fetch a single debate
+    // PATCH /internal/wiki-debate/:id/status — resolve or archive
+    if (url.pathname.startsWith('/internal/wiki-debate')) {
+      const wikiDebateRes = await handleWikiDebateApiRequest(req, url, appState);
+      if (wikiDebateRes) return withTrace(wikiDebateRes);
+    }
+
+    // Wiki navigation API — browse, search, and drill-in (issue #77).
+    // GET /api/wiki-nav/pages                                   — list / search pages
+    // GET /api/wiki-nav/pages/:id                               — drill-in with citations
+    // GET /api/wiki-nav/pages/:id/versions                      — version history
+    // GET /api/wiki-nav/pages/:id/versions/:vid                 — specific prior version
+    if (url.pathname.startsWith('/api/wiki-nav')) {
+      const wikiNavRes = await handleWikiNavApiRequest(req, url, appState);
+      if (wikiNavRes) return withTrace(wikiNavRes);
     }
 
     // Wiki draft management + claim-citation coverage check (issue #43).
