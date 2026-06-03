@@ -305,3 +305,90 @@ CREATE TABLE IF NOT EXISTS etl_quarantine (
 
 CREATE INDEX IF NOT EXISTS idx_etl_quarantine_source
   ON etl_quarantine (source, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- wiki_pages — one row per subject (issue #76)
+-- ---------------------------------------------------------------------------
+--
+-- Unique on (tenant_id, subject_type, subject_id).
+-- Points at the currently_published_version_id only when a version has
+-- reached `indexed` status in the wiki_page_versions_mkt pipeline.
+-- Readers MUST follow currently_published_version_id; in-progress version
+-- rows with status < indexed are never exposed.
+--
+-- Architecture ref: docs/architecture.md §"Wiki pages: full-snapshot versioning"
+CREATE TABLE IF NOT EXISTS wiki_pages (
+  id                              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id                       TEXT NOT NULL,
+  subject_type                    TEXT NOT NULL,
+  subject_id                      TEXT NOT NULL,
+  currently_published_version_id  TEXT,
+  created_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, subject_type, subject_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_subject
+  ON wiki_pages (tenant_id, subject_type, subject_id);
+
+-- ---------------------------------------------------------------------------
+-- wiki_page_versions_mkt — full-snapshot versions with crash-resume pipeline (issue #76)
+-- ---------------------------------------------------------------------------
+--
+-- Status pipeline: pending → content_written → embedded → indexed
+--
+-- Crash-resume: the worker advances status one stage at a time and commits
+-- after each stage. If the pod crashes, the row is left at its intermediate
+-- status; the next re-scheduled WIKI_REBUILD task calls
+-- getStalledWikiPageVersion and resumes from the next stage.
+--
+-- body_ciphertext: AES-256-GCM encrypted markdown body (set at content_written).
+--
+-- Architecture ref: docs/architecture.md §"Wiki pages: full-snapshot versioning"
+CREATE TABLE IF NOT EXISTS wiki_page_versions_mkt (
+  id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  wiki_page_id    TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+  tenant_id       TEXT NOT NULL,
+  subject_type    TEXT NOT NULL,
+  subject_id      TEXT NOT NULL,
+  body_ciphertext TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'content_written', 'embedded', 'indexed')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_mkt_page_id
+  ON wiki_page_versions_mkt (wiki_page_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_mkt_status
+  ON wiki_page_versions_mkt (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wiki_page_versions_mkt_subject
+  ON wiki_page_versions_mkt (tenant_id, subject_type, subject_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- wiki_page_cites — citation edges from version to supporting evidence (issue #76)
+-- ---------------------------------------------------------------------------
+--
+-- Typed directed edges: wiki_page_version → corpus_chunk | confirmed_fact.
+-- On corpus_chunk retraction (FK cascade on corpus_chunks), the cites edges
+-- are deleted automatically. The wiki page is not immediately rewritten; the
+-- next WIKI_REBUILD pass re-derives the page from remaining evidence.
+--
+-- Idempotent: UNIQUE (wiki_page_version_id, target_id, target_type).
+--
+-- Architecture ref: docs/architecture.md §"Citations: first-class relation edges"
+CREATE TABLE IF NOT EXISTS wiki_page_cites (
+  id                    TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  wiki_page_version_id  TEXT NOT NULL
+                          REFERENCES wiki_page_versions_mkt(id) ON DELETE CASCADE,
+  target_id             TEXT NOT NULL,
+  target_type           TEXT NOT NULL
+                          CHECK (target_type IN ('corpus_chunk', 'confirmed_fact')),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (wiki_page_version_id, target_id, target_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_page_cites_version_id
+  ON wiki_page_cites (wiki_page_version_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_page_cites_target
+  ON wiki_page_cites (target_id, target_type);

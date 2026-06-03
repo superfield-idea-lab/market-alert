@@ -26,6 +26,23 @@ import type postgres from 'postgres';
  *                     and register designated venues as Active canonical_sources.
  *                     (agent_type: source_discovery)
  *
+ * Phase 3 — Wiki rebuild: facts and chunks to a published wiki page (issue #76, TQ-D-001):
+ *   WIKI_REBUILD — For one subject (subject_type + subject_id), read its confirmed_facts
+ *                  and corpus_chunks, synthesise a full-snapshot wiki_page_version, advance
+ *                  it through the pending → content_written → embedded → indexed pipeline,
+ *                  attach cites edges to supporting evidence, and flip
+ *                  wiki_page.currently_published only when status reaches indexed.
+ *                  Crash-resume: the version row is left at its stalled stage and the next
+ *                  re-scheduled worker resumes from that stage rather than restarting.
+ *                  (agent_type: wiki_rebuild)
+ *
+ *                  Task key: wiki_rebuild:<subject_type>:<subject_id>:<trigger>
+ *                  Trigger values: scheduled | fact_extract | manual
+ *
+ *                  Architecture refs:
+ *                    - docs/architecture.md §"Wiki pages: full-snapshot versioning"
+ *                    - docs/architecture.md §"Citations: first-class relation edges"
+ *
  * Blueprint refs: TQ-D-001 (single-table multi-type queue).
  */
 export const TaskType = {
@@ -49,6 +66,8 @@ export const TaskType = {
   SOURCE_SCRAPE: 'SOURCE_SCRAPE',
   FINDING_INGEST: 'FINDING_INGEST',
   FACT_EXTRACT: 'FACT_EXTRACT',
+  // Phase 3 — Wiki rebuild: facts/chunks → published wiki page (issue #76)
+  WIKI_REBUILD: 'WIKI_REBUILD',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -78,6 +97,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.SOURCE_SCRAPE]: 'source_scraper',
   [TaskType.FINDING_INGEST]: 'ingestion',
   [TaskType.FACT_EXTRACT]: 'fact_extraction',
+  // Phase 3 (issue #76)
+  [TaskType.WIKI_REBUILD]: 'wiki_rebuild',
 };
 
 /**
