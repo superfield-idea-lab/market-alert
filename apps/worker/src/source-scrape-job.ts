@@ -201,7 +201,7 @@ export async function executeSourceScrapeTask(
   }
 
   let rawContent: string;
-  let scrapeUrl = sourceData.url;
+  const scrapeUrl = sourceData.url;
 
   try {
     const scrapeRes = await fetch(scrapeUrl, {

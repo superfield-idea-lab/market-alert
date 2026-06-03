@@ -49,7 +49,6 @@
 import { beforeAll, afterAll, describe, test, expect } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
 import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { runInitRemote } from '../../packages/db/init-remote';

@@ -42,7 +42,6 @@ import {
   markFindingIngested,
   markFindingQuarantined,
   insertConfirmedFact,
-  getConfirmedFact,
   listCurrentFacts,
   quarantinePayload,
   type InsertSourceFindingInput,
