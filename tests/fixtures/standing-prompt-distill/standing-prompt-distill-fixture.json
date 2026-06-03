@@ -1,0 +1,17 @@
+{
+  "tenant_id": "tenant-sp-78",
+  "researcher_id": "researcher-sp-78-001",
+  "wiki_version_window": "2024-01-15T10:00",
+  "wiki_pages": [
+    {
+      "subject_type": "company",
+      "subject_id": "company-sp-78-001",
+      "body": "BioTech Corp reported strong Q3 results, citing 12% revenue growth driven by their lead drug pipeline. CEO Jane Smith raised full-year guidance after a successful drug launch. The company holds three FDA-approved compounds and expects two additional approvals in the next 12 months."
+    },
+    {
+      "subject_type": "company",
+      "subject_id": "company-sp-78-002",
+      "body": "FinTech Solutions expanded its payments platform into Southeast Asia, targeting 50M unbanked customers. Revenue reached $120M with 35% YoY growth. The company signed partnerships with three regional banks and expects breakeven by Q2 next year."
+    }
+  ]
+}

@@ -43,6 +43,25 @@ import type postgres from 'postgres';
  *                    - docs/architecture.md §"Wiki pages: full-snapshot versioning"
  *                    - docs/architecture.md §"Citations: first-class relation edges"
  *
+ * Phase 3 — Standing-prompt distillation (issue #78, TQ-D-001):
+ *   STANDING_PROMPT_DISTILL — For one researcher, read all published wiki_page_versions
+ *                             within the researcher's scope, distil a compact bounded
+ *                             standing_prompt_version (hard ceiling ~250 words, target
+ *                             ~100 words), flip the prior Active prompt to Superseded, and
+ *                             mark the new version Active.
+ *                             Idempotent: re-running on the same wiki version window
+ *                             produces no new standing_prompt_version row.
+ *                             A debounce window collapses bursts of wiki publishes.
+ *                             (agent_type: sp_distiller)
+ *
+ *                             Task key: sp_distill:<researcher_id>:<wiki_version_window>
+ *                             Triggered by: wiki_page_version publish events
+ *
+ *                             Architecture refs:
+ *                               - docs/architecture.md §"Standing prompt as derived artifact"
+ *                               - packages/db/standing-prompt-store.ts — DB store
+ *                               - apps/server/src/api/standing-prompt-distill-api.ts — API
+ *
  * Blueprint refs: TQ-D-001 (single-table multi-type queue).
  */
 export const TaskType = {
@@ -68,6 +87,8 @@ export const TaskType = {
   FACT_EXTRACT: 'FACT_EXTRACT',
   // Phase 3 — Wiki rebuild: facts/chunks → published wiki page (issue #76)
   WIKI_REBUILD: 'WIKI_REBUILD',
+  // Phase 3 — Standing-prompt distillation: wiki publish → bounded active standing prompt (issue #78)
+  STANDING_PROMPT_DISTILL: 'STANDING_PROMPT_DISTILL',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -99,6 +120,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.FACT_EXTRACT]: 'fact_extraction',
   // Phase 3 (issue #76)
   [TaskType.WIKI_REBUILD]: 'wiki_rebuild',
+  // Phase 3 (issue #78)
+  [TaskType.STANDING_PROMPT_DISTILL]: 'sp_distiller',
 };
 
 /**
@@ -145,6 +168,8 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.SOURCE_SCRAPE,
   TaskType.FINDING_INGEST,
   TaskType.FACT_EXTRACT,
+  // Phase 3 (issue #78): standing-prompt distill payload carries only researcher_id + window
+  TaskType.STANDING_PROMPT_DISTILL,
 ]);
 
 /**
