@@ -13,7 +13,9 @@
       "core": ["./packages/core/index.ts"],
       "db": ["./packages/db/index.ts"],
       "db/*": ["./packages/db/*.ts"],
-      "embedding": ["./packages/embedding/index.ts"]
+      "embedding": ["./packages/embedding/index.ts"],
+      "integrations": ["./packages/integrations/src/index.ts"],
+      "integrations/*": ["./packages/integrations/src/*"]
     }
   },
   "exclude": ["node_modules", "apps/web/tests/component", "apps/web/src/sw.ts"]
