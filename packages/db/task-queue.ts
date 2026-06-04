@@ -62,6 +62,20 @@ import type postgres from 'postgres';
  *                               - packages/db/standing-prompt-store.ts — DB store
  *                               - apps/server/src/api/standing-prompt-distill-api.ts — API
  *
+ * Phase 6 — Silent-passage detection (issue #81):
+ *   SILENT_PASSAGE_CHECK — Detect when an anticipated catalyst window closes with no Detected event.
+ *                          Transitions the Expected market_event to PassedSilently.
+ *                          Enqueued by the SILENT_PASSAGE_CHECK cron or event-feed poller when
+ *                          anticipated_window_close is reached with no disclosure.
+ *                          (agent_type: event_evaluator)
+ *
+ *                          Task key: silent_check:<expected_event_id>:<window_close>
+ *
+ *                          Architecture refs:
+ *                            - docs/architecture.md § task-type table (SILENT_PASSAGE_CHECK row)
+ *                            - docs/prd.md §9 — silent-passage latency ≤ 15 min of window close
+ *                            - packages/db/mkt-market-event-store.ts — transitionToPassedSilently
+ *
  * Blueprint refs: TQ-D-001 (single-table multi-type queue).
  */
 export const TaskType = {
@@ -91,6 +105,8 @@ export const TaskType = {
   STANDING_PROMPT_DISTILL: 'STANDING_PROMPT_DISTILL',
   // Phase 6 — Event ingestion: EDGAR filing → normalized market event (issue #80)
   EVENT_EVALUATE: 'EVENT_EVALUATE',
+  // Phase 6 — Silent-passage detection: Expected event window closes with no Detected event (issue #81)
+  SILENT_PASSAGE_CHECK: 'SILENT_PASSAGE_CHECK',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -126,6 +142,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.STANDING_PROMPT_DISTILL]: 'sp_distiller',
   // Phase 6 (issue #80)
   [TaskType.EVENT_EVALUATE]: 'event_evaluator',
+  // Phase 6 — Silent-passage detection (issue #81)
+  [TaskType.SILENT_PASSAGE_CHECK]: 'event_evaluator',
 };
 
 /**
@@ -176,6 +194,8 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.STANDING_PROMPT_DISTILL,
   // Phase 6 (issue #80): event evaluate payload carries only market_event_id
   TaskType.EVENT_EVALUATE,
+  // Phase 6 (issue #81): silent-passage check payload carries only expected_event_id + window_close
+  TaskType.SILENT_PASSAGE_CHECK,
 ]);
 
 /**
@@ -221,6 +241,24 @@ export class PayloadPiiError extends Error {
  */
 export function buildEdgarPollIdempotencyKey(formType: string, accessionNumber: string): string {
   return `edgar_poll:${formType}:${accessionNumber}`;
+}
+
+/**
+ * Builds an idempotency key for SILENT_PASSAGE_CHECK tasks.
+ *
+ * Format: silent_check:<expected_event_id>:<window_close_iso>
+ * Example: silent_check:abc123:2026-06-01T00:00:00.000Z
+ *
+ * The window_close ISO string makes each check for a given event+window unique.
+ * Re-scheduling the same check for the same window close produces no duplicate task.
+ *
+ * Architecture ref: docs/architecture.md § task-type table (SILENT_PASSAGE_CHECK row)
+ */
+export function buildSilentPassageCheckIdempotencyKey(
+  expectedEventId: string,
+  windowClose: Date,
+): string {
+  return `silent_check:${expectedEventId}:${windowClose.toISOString()}`;
 }
 
 /**

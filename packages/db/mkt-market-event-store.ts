@@ -161,9 +161,14 @@ export interface RawFilingRow {
  * TypeScript representation of a `market_events` row.
  *
  * Normalized catalyst event. One row per real-world event.
- * Cross-venue dedup (follow-on) collapses duplicate events from different
+ * Cross-venue dedup (issue #81) collapses duplicate events from different
  * venues into a single row via the composite identity key
- * (subject_entity_id, event_type, event_date).
+ * (subject_entity_id, event_type, event_date window).
+ *
+ * `anticipated_window_close` is set for Expected events with a known
+ * anticipated catalyst window. The SILENT_PASSAGE_CHECK worker transitions
+ * Expected events to PassedSilently when the window closes with no Detected
+ * event (PRD §9 latency target: ≤ 15 min of window close).
  */
 export interface MarketEventRow {
   id: string;
@@ -173,6 +178,8 @@ export interface MarketEventRow {
   subject_entity_id: string | null;
   subject_entity_type: string;
   event_date: Date;
+  /** ISO-8601 UTC close of the anticipated catalyst window. Null for non-Expected events. */
+  anticipated_window_close: Date | null;
   description: string | null;
   status: MarketEventStatus;
   created_at: Date;
@@ -211,9 +218,45 @@ export interface InsertMarketEventOptions {
   subject_entity_id?: string | null;
   subject_entity_type?: string;
   event_date: Date;
+  /**
+   * Close of the anticipated catalyst window. Set only for Expected events.
+   * The SILENT_PASSAGE_CHECK worker uses this to detect silent passage.
+   * PRD §9 latency target: ≤ 15 min after anticipated_window_close.
+   */
+  anticipated_window_close?: Date | null;
   description?: string | null;
   status?: MarketEventStatus;
   sql?: SqlClient;
+}
+
+// ---------------------------------------------------------------------------
+// Composite identity query types (cross-venue dedup — issue #81)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for finding an existing market_event by composite identity.
+ *
+ * The composite identity (subject_entity_id, event_type, event_date window)
+ * is used to collapse the same real-world event arriving via different venues
+ * (e.g. wire lead + later filing) into a single market_event row.
+ *
+ * The event_date window is defined by the dedup window in seconds. The query
+ * returns the best-matching existing event within ±window_seconds of event_date.
+ *
+ * PRD §9: "A single real-world event arriving via different venues must collapse
+ * to one event. Deduplication uses a composite identity (subject entity, event
+ * type, anticipated date window) and tolerates lag between venues."
+ */
+export interface FindByCompositeIdentityOptions {
+  subject_entity_id: string;
+  event_type: string;
+  event_date: Date;
+  /**
+   * Window in seconds around event_date to search for matching events.
+   * Default: 86400 (24 hours). Handles filings lagging the wire lead by up to 24h.
+   */
+  dedup_window_seconds?: number;
+  sql: SqlClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +354,7 @@ export async function insertMarketEvent(
     subject_entity_id = null,
     subject_entity_type = 'company',
     event_date,
+    anticipated_window_close = null,
     description = null,
     status = 'Detected',
     sql,
@@ -320,13 +364,18 @@ export async function insertMarketEvent(
     throw new Error('[mkt-market-event-store] sql client is required for insertMarketEvent');
   }
 
+  const anticipatedWindowCloseIso = anticipated_window_close
+    ? anticipated_window_close.toISOString()
+    : null;
+
   const rows = await sql<MarketEventRow[]>`
     INSERT INTO market_events
       (raw_filing_id, source, event_type, subject_entity_id,
-       subject_entity_type, event_date, description, status)
+       subject_entity_type, event_date, anticipated_window_close, description, status)
     VALUES
       (${raw_filing_id}, ${source}, ${event_type}, ${subject_entity_id},
-       ${subject_entity_type}, ${event_date.toISOString()}, ${description}, ${status})
+       ${subject_entity_type}, ${event_date.toISOString()}, ${anticipatedWindowCloseIso},
+       ${description}, ${status})
     ON CONFLICT (raw_filing_id) DO NOTHING
     RETURNING *
   `;
@@ -368,6 +417,209 @@ export async function getMarketEventByRawFilingId(
   const rows = await sqlClient<MarketEventRow[]>`
     SELECT * FROM market_events
     WHERE raw_filing_id = ${raw_filing_id}
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-venue deduplication (issue #81)
+// ---------------------------------------------------------------------------
+
+/** Default dedup window in seconds: 24 hours. */
+export const DEFAULT_DEDUP_WINDOW_SECONDS = 86_400;
+
+/**
+ * Finds an existing market_event by composite identity.
+ *
+ * The composite identity (subject_entity_id, event_type) with an event_date
+ * within ±dedup_window_seconds matches the same real-world event arriving via
+ * different venues. Returns the best-match row (closest event_date), or null
+ * if no match exists.
+ *
+ * This is the dedup gate in the event-ingestion handler:
+ *   1. EDGAR filing arrives for (subject, event_type, event_date).
+ *   2. Call dedupMarketEventByCompositeIdentity — if a match is found, it is
+ *      the canonical event row; mark the new raw_filing as 'normalized' and
+ *      skip creating a duplicate market_event.
+ *   3. If no match, call insertMarketEvent as normal.
+ *
+ * PRD §9: "A single real-world event arriving via different venues must
+ * collapse to one event. Deduplication uses a composite identity (subject
+ * entity, event type, anticipated date window) and tolerates lag between
+ * venues."
+ *
+ * Architecture ref: docs/architecture.md § "Market-event feed" (cross-venue dedup)
+ */
+export async function dedupMarketEventByCompositeIdentity(
+  options: FindByCompositeIdentityOptions,
+): Promise<MarketEventRow | null> {
+  const {
+    subject_entity_id,
+    event_type,
+    event_date,
+    dedup_window_seconds = DEFAULT_DEDUP_WINDOW_SECONDS,
+    sql,
+  } = options;
+
+  // Query for existing events matching the composite identity within the dedup window.
+  // Only match active (non-terminal) statuses: Expected, Detected, Enriched.
+  // Closed / Disputed / PassedSilently events are terminal and should not absorb new filings.
+  const rows = await sql<MarketEventRow[]>`
+    SELECT * FROM market_events
+    WHERE subject_entity_id = ${subject_entity_id}
+      AND event_type = ${event_type}
+      AND ABS(EXTRACT(EPOCH FROM (event_date - ${event_date.toISOString()}::TIMESTAMPTZ))) <= ${dedup_window_seconds}
+      AND status IN ('Expected', 'Detected', 'Enriched')
+    ORDER BY ABS(EXTRACT(EPOCH FROM (event_date - ${event_date.toISOString()}::TIMESTAMPTZ))) ASC,
+             created_at ASC
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// State machine transition guards (issue #81)
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid state machine transitions for market_events.
+ *
+ * State machine (PRD §6):
+ *   Expected → Detected → Enriched → Evaluated → Closed
+ *   Expected → PassedSilently  (silent passage — no Detected event before window close)
+ *   Detected → Disputed        (conflict with a later authoritative filing)
+ *   Enriched → Disputed        (conflict discovered during enrichment)
+ *
+ * Terminal states: Closed, Disputed, PassedSilently.
+ *
+ * Architecture ref: docs/architecture.md § "Catalyst event state machine"
+ */
+export const VALID_MARKET_EVENT_TRANSITIONS: ReadonlyMap<
+  MarketEventStatus,
+  ReadonlySet<MarketEventStatus>
+> = new Map([
+  ['Expected', new Set<MarketEventStatus>(['Detected', 'PassedSilently'])],
+  ['Detected', new Set<MarketEventStatus>(['Enriched', 'Disputed'])],
+  ['Enriched', new Set<MarketEventStatus>(['Evaluated', 'Disputed'])],
+  ['Evaluated', new Set<MarketEventStatus>(['Closed'])],
+  ['Closed', new Set<MarketEventStatus>()],
+  ['Disputed', new Set<MarketEventStatus>()],
+  ['PassedSilently', new Set<MarketEventStatus>()],
+]);
+
+/**
+ * Returns true if the transition from `from` to `to` is permitted by the
+ * catalyst state machine (PRD §6).
+ *
+ * Use this guard before any UPDATE that changes market_events.status to ensure
+ * illegal transitions are rejected at the application layer before they reach
+ * the DB.
+ */
+export function isValidMarketEventTransition(
+  from: MarketEventStatus,
+  to: MarketEventStatus,
+): boolean {
+  return VALID_MARKET_EVENT_TRANSITIONS.get(from)?.has(to) ?? false;
+}
+
+/**
+ * Advances a market_event from `from` to `to` status, enforcing the state
+ * machine guard.
+ *
+ * Returns the updated row, or null if the row was not found or was already in
+ * a different status than `from` (concurrent update — caller should retry).
+ *
+ * @throws Error if the transition is not permitted by the state machine.
+ */
+export async function transitionMarketEventStatus(
+  marketEventId: string,
+  from: MarketEventStatus,
+  to: MarketEventStatus,
+  sqlClient: SqlClient,
+): Promise<MarketEventRow | null> {
+  if (!isValidMarketEventTransition(from, to)) {
+    throw new Error(
+      `[mkt-market-event-store] Invalid state machine transition: ${from} → ${to}. ` +
+        'See VALID_MARKET_EVENT_TRANSITIONS for allowed paths.',
+    );
+  }
+
+  const rows = await sqlClient<MarketEventRow[]>`
+    UPDATE market_events
+    SET status = ${to}, updated_at = NOW()
+    WHERE id = ${marketEventId}
+      AND status = ${from}
+    RETURNING *
+  `;
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Silent-passage detection (issue #81)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lists all market_events in 'Expected' status whose anticipated_window_close
+ * has passed (i.e. the anticipated catalyst window is now closed).
+ *
+ * These are candidates for SILENT_PASSAGE_CHECK: the worker verifies that no
+ * Detected event exists for the same composite identity, then calls
+ * `transitionToPassedSilently` for each one.
+ *
+ * The `as_of` date defaults to NOW(). Pass an explicit date for testing.
+ *
+ * Architecture ref: docs/architecture.md § task-type table (SILENT_PASSAGE_CHECK row)
+ * PRD §9: silent-passage events evaluated within 15 min of anticipated window closing.
+ */
+export async function listExpectedEventsWithExpiredWindows(
+  sqlClient: SqlClient,
+  asOf: Date = new Date(),
+): Promise<MarketEventRow[]> {
+  return sqlClient<MarketEventRow[]>`
+    SELECT * FROM market_events
+    WHERE status = 'Expected'
+      AND anticipated_window_close IS NOT NULL
+      AND anticipated_window_close <= ${asOf.toISOString()}::TIMESTAMPTZ
+    ORDER BY anticipated_window_close ASC
+  `;
+}
+
+/**
+ * Transitions one Expected market_event to PassedSilently.
+ *
+ * Called by the SILENT_PASSAGE_CHECK worker after confirming that:
+ *   1. The anticipated_window_close has passed.
+ *   2. No Detected event exists for the same composite identity.
+ *
+ * Uses `transitionMarketEventStatus` to enforce the state machine guard
+ * (Expected → PassedSilently is a permitted transition).
+ *
+ * Returns the updated row, or null if the row was not found or had already
+ * transitioned out of 'Expected' (concurrent update).
+ *
+ * PRD §9: "An anticipated catalyst window closing with no disclosure is itself
+ * a Passed Silently event."
+ */
+export async function transitionToPassedSilently(
+  marketEventId: string,
+  sqlClient: SqlClient,
+): Promise<MarketEventRow | null> {
+  return transitionMarketEventStatus(marketEventId, 'Expected', 'PassedSilently', sqlClient);
+}
+
+/**
+ * Returns a market_event row by its primary key.
+ *
+ * Returns null if no row exists.
+ */
+export async function getMarketEventById(
+  marketEventId: string,
+  sqlClient: SqlClient,
+): Promise<MarketEventRow | null> {
+  const rows = await sqlClient<MarketEventRow[]>`
+    SELECT * FROM market_events
+    WHERE id = ${marketEventId}
     LIMIT 1
   `;
   return rows[0] ?? null;
