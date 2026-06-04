@@ -107,6 +107,8 @@ export const TaskType = {
   EVENT_EVALUATE: 'EVENT_EVALUATE',
   // Phase 6 — Silent-passage detection: Expected event window closes with no Detected event (issue #81)
   SILENT_PASSAGE_CHECK: 'SILENT_PASSAGE_CHECK',
+  // Phase 6 — Signal delivery: outbound multi-channel notification per delivered signal (issue #85)
+  SIGNAL_NOTIFY: 'SIGNAL_NOTIFY',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -144,6 +146,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.EVENT_EVALUATE]: 'event_evaluator',
   // Phase 6 — Silent-passage detection (issue #81)
   [TaskType.SILENT_PASSAGE_CHECK]: 'event_evaluator',
+  // Phase 6 — Signal delivery: outbound multi-channel notification (issue #85)
+  [TaskType.SIGNAL_NOTIFY]: 'signal_delivery',
 };
 
 /**
@@ -196,6 +200,8 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.EVENT_EVALUATE,
   // Phase 6 (issue #81): silent-passage check payload carries only expected_event_id + window_close
   TaskType.SILENT_PASSAGE_CHECK,
+  // Phase 6 (issue #85): signal-notify payload carries only signal_id + channel
+  TaskType.SIGNAL_NOTIFY,
 ]);
 
 /**
@@ -241,6 +247,22 @@ export class PayloadPiiError extends Error {
  */
 export function buildEdgarPollIdempotencyKey(formType: string, accessionNumber: string): string {
   return `edgar_poll:${formType}:${accessionNumber}`;
+}
+
+/**
+ * Builds an idempotency key for SIGNAL_NOTIFY tasks.
+ *
+ * Format: notify:<signal_id>:<channel>
+ * Example: notify:abc123:email
+ *
+ * One task per (signal, channel) pair. Re-enqueueing the same (signal_id, channel)
+ * is safe — ON CONFLICT DO NOTHING prevents duplicates.
+ *
+ * Architecture ref: docs/architecture.md § task-type table (SIGNAL_NOTIFY row)
+ * Issue ref: #85
+ */
+export function buildSignalNotifyIdempotencyKey(signalId: string, channel: string): string {
+  return `notify:${signalId}:${channel}`;
 }
 
 /**

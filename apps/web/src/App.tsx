@@ -4,7 +4,7 @@ import { Login } from './components/Login';
 import { Bell, ClipboardList, Settings, Shield, User, BookOpen, Globe } from 'lucide-react';
 import { AdminDashboard } from './pages/admin-dashboard';
 import { SettingsPage } from './pages/settings';
-import TraderPage from './pages/trader';
+import { SignalFeedPage } from './pages/signal-feed';
 import TradeProposalForm from './components/TradeProposalForm';
 import { GoldenDocumentsPage } from './pages/golden-documents';
 import { WikiNavPage } from './pages/wiki-nav';
@@ -119,7 +119,7 @@ function App() {
       <main className="flex-1 flex overflow-hidden relative">
         <div className="flex-1 flex flex-col bg-white">
           <div className="flex-1 overflow-hidden overflow-y-auto">
-            {activeView === 'alerts' && <TraderPage />}
+            {activeView === 'alerts' && <SignalFeedPage />}
             {activeView === 'trade-proposal' && <TradeProposalForm />}
             {activeView === 'settings' && <SettingsPage />}
             {activeView === 'golden-documents' && <GoldenDocumentsPage />}

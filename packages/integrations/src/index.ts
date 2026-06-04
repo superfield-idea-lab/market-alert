@@ -35,4 +35,19 @@
 
 // Phase 0 stub — no runtime exports yet.
 // Phase 2 adds EdgarClient and the fixture-recording harness.
-export {};
+
+// Phase 6 (issue #85): SIGNAL_NOTIFY outbound delivery adapters.
+export {
+  sendEmailNotification,
+  renderEmailBody,
+  renderEmailHtml,
+} from './signal-notify/email-adapter';
+export { sendSmsNotification, renderSmsBody } from './signal-notify/sms-adapter';
+export { sendWebhookNotification, computeHmacSignature } from './signal-notify/webhook-adapter';
+export type {
+  SignalNotifyPayload,
+  EmailAdapterConfig,
+  SmsAdapterConfig,
+  WebhookAdapterConfig,
+  SignalNotifyResult,
+} from './signal-notify/types';

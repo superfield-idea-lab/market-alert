@@ -67,6 +67,7 @@ import { handleGoldenDocumentsRequest } from './api/golden-documents';
 import { handleWikiRebuildApiRequest } from './api/wiki-rebuild-api';
 import { handleWikiDebateApiRequest } from './api/wiki-debate-api';
 import { handleWikiNavApiRequest } from './api/wiki-nav-api';
+import { handleSignalFeedRequest } from './api/signal-feed-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -391,6 +392,19 @@ export default {
     if (url.pathname.startsWith('/api/wiki-nav')) {
       const wikiNavRes = await handleWikiNavApiRequest(req, url, appState);
       if (wikiNavRes) return withTrace(wikiNavRes);
+    }
+
+    // Signal feed and SIGNAL_NOTIFY internal API (issue #85).
+    // GET    /api/signals                         — list researcher signals (sortable/filterable)
+    // PATCH  /api/signals/:id/status              — acknowledge/act/dismiss a signal
+    // GET    /internal/signal-notify/signal       — fetch enriched signal (worker internal)
+    // GET    /internal/signal-notify/channels     — fetch researcher channel config (worker internal)
+    if (
+      url.pathname.startsWith('/api/signals') ||
+      url.pathname.startsWith('/internal/signal-notify')
+    ) {
+      const signalFeedRes = await handleSignalFeedRequest(req, url, appState);
+      if (signalFeedRes) return withTrace(signalFeedRes);
     }
 
     // Wiki draft management + claim-citation coverage check (issue #43).
