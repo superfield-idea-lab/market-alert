@@ -104,6 +104,7 @@
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { isSuperuser, makeJson } from '../lib/response';
+import { listAllCanonicalSources, getCanonicalSource } from 'db/canonical-source-store';
 
 // ---------------------------------------------------------------------------
 // Role check helper (identical pattern to replay.ts and admin-source-scope-api.ts)
@@ -251,33 +252,75 @@ export async function handlePipelineHealthRequest(
   const sourceMatch = url.pathname.match(/^\/api\/admin\/pipeline-health\/sources\/([^/]+)$/);
   if (sourceMatch) {
     const sourceId = sourceMatch[1]!;
-    void sourceId; // used in full implementation
 
-    // TODO (phase full implementation): query canonical_sources WHERE id = sourceId
-    // and join task_queue queue depth. Return 404 if not found.
-    return json(
-      {
-        error: 'Not implemented — per-source pipeline health is a phase follow-on (issue #88)',
-      },
-      501,
-    );
+    const source = await getCanonicalSource(sql, sourceId);
+    if (!source) {
+      return json({ error: `Source not found: ${sourceId}` }, 404);
+    }
+
+    // Per-source queue depth: count pending + claimed tasks for this source's
+    // SOURCE_SCRAPE agent_type. We use the source ID as a correlation_id pattern.
+    const depthRows = await sql<{ depth: string }[]>`
+      SELECT COUNT(*)::TEXT AS depth
+      FROM task_queue
+      WHERE agent_type IN ('source_scraper', 'source_discovery')
+        AND status IN ('pending', 'claimed')
+        AND correlation_id = ${sourceId}
+    `;
+    const queueDepth = parseInt(depthRows[0]?.depth ?? '0', 10);
+
+    const entry: SourceHealthEntry = {
+      id: source.id,
+      name: source.name,
+      url: source.url,
+      status: source.status,
+      access_mode: source.access_mode,
+      queue_depth: queueDepth,
+      updated_at:
+        source.updated_at instanceof Date
+          ? source.updated_at.toISOString()
+          : String(source.updated_at),
+    };
+
+    return json(entry, 200);
   }
 
   // ── Route: GET /api/admin/pipeline-health ─────────────────────────────────
   if (url.pathname === '/api/admin/pipeline-health') {
-    // TODO (phase full implementation):
-    //   1. SELECT id, name, url, status, access_mode, updated_at
-    //      FROM canonical_sources ORDER BY updated_at DESC.
-    //   2. SELECT agent_type, COUNT(*) AS depth
-    //      FROM task_queue WHERE status IN ('pending', 'claimed')
-    //      GROUP BY agent_type.
-    //   3. Merge into PipelineHealthResponse and return 200.
-    return json(
-      {
-        error: 'Not implemented — pipeline health view is a phase follow-on (issue #88)',
-      },
-      501,
-    );
+    // 1. Fetch all canonical sources (admin read — no tenant filter).
+    const sources = await listAllCanonicalSources(sql, 200);
+
+    // 2. Aggregate queue depths by agent_type for all non-terminal task statuses.
+    const queueRows = await sql<{ agent_type: string; depth: string }[]>`
+      SELECT agent_type, COUNT(*)::TEXT AS depth
+      FROM task_queue
+      WHERE status IN ('pending', 'claimed')
+      GROUP BY agent_type
+      ORDER BY agent_type ASC
+    `;
+    const queueDepths: Record<string, number> = {};
+    for (const row of queueRows) {
+      queueDepths[row.agent_type] = parseInt(row.depth, 10);
+    }
+
+    // 3. Build per-source entries (queue_depth = 0 unless a per-source join is available).
+    const sourceEntries: SourceHealthEntry[] = sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      url: s.url,
+      status: s.status,
+      access_mode: s.access_mode,
+      queue_depth: 0, // Per-source depth requires correlation_id; aggregate is in queue_depths.
+      updated_at: s.updated_at instanceof Date ? s.updated_at.toISOString() : String(s.updated_at),
+    }));
+
+    const response: PipelineHealthResponse = {
+      sources: sourceEntries,
+      queue_depths: queueDepths,
+      as_of: new Date().toISOString(),
+    };
+
+    return json(response, 200);
   }
 
   return null;

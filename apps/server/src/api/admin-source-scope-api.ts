@@ -91,6 +91,8 @@
 import type { AppState } from '../index';
 import { getCorsHeaders, getAuthenticatedUser } from './auth';
 import { isSuperuser, makeJson } from '../lib/response';
+import { updateSourceScope, getCanonicalSource } from 'db/canonical-source-store';
+import { emitAuditEvent } from '../policies/audit-service';
 
 // ---------------------------------------------------------------------------
 // Role check helper (identical pattern to replay.ts)
@@ -230,23 +232,42 @@ export async function handleAdminSourceScopeRequest(
     return json({ error: 'access_mode must be one of: public, authenticated, api_key' }, 400);
   }
 
-  // ── Stub response ─────────────────────────────────────────────────────────
-  //
-  // The full implementation will:
-  //   1. Verify the source exists in canonical_sources (404 if missing).
-  //   2. Apply the scope change via UPDATE canonical_sources SET … .
-  //   3. Emit a source.scope_adjusted business_journal event (AUDIT-C-001).
-  //   4. Enqueue async pipeline reconciliation (re-run SOURCE_DISCOVER).
-  //   5. Return 200 with the updated AdminSourceScopeResponse.
-  //
-  // For now we return 501 to make the stub boundary explicit.
-  void sourceId; // used in full implementation
-  void body; // used in full implementation
+  // ── Verify source exists ──────────────────────────────────────────────────
+  const existing = await getCanonicalSource(sql, sourceId);
+  if (!existing) {
+    return json({ error: `Source not found: ${sourceId}` }, 404);
+  }
 
-  return json(
-    {
-      error: 'Not implemented — admin source-scope adjustment is a phase follow-on (issue #88)',
-    },
-    501,
-  );
+  // ── Emit audit event BEFORE mutation (write-before-read invariant) ────────
+  await emitAuditEvent({
+    actor_id: user.id,
+    action: 'source.scope_adjusted',
+    entity_type: 'canonical_source',
+    entity_id: sourceId,
+    before: { access_mode: existing.access_mode },
+    after: { access_mode: body.access_mode ?? existing.access_mode, reason: body.reason ?? null },
+    ts: new Date().toISOString(),
+  });
+
+  // ── Apply scope mutation ──────────────────────────────────────────────────
+  const updated = await updateSourceScope(sql, sourceId, {
+    access_mode: body.access_mode,
+    reason: body.reason,
+  });
+
+  if (!updated) {
+    // Race: row vanished between the existence check and the update.
+    return json({ error: `Source not found: ${sourceId}` }, 404);
+  }
+
+  const response: AdminSourceScopeResponse = {
+    source_id: updated.id,
+    access_mode: updated.access_mode,
+    updated_at:
+      updated.updated_at instanceof Date
+        ? updated.updated_at.toISOString()
+        : String(updated.updated_at),
+  };
+
+  return json(response, 200);
 }

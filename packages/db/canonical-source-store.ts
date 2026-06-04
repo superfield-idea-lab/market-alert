@@ -276,6 +276,73 @@ export async function listCanonicalSourcesByMethodology(
 }
 
 // ---------------------------------------------------------------------------
+// Admin scope adjustment (issue #89)
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for Admin scope adjustments on a canonical source.
+ */
+export interface UpdateSourceScopeInput {
+  /** New access mode for the source. */
+  access_mode?: 'public' | 'authenticated' | 'api_key' | null;
+  /** Optional human-readable note stored in audit trail. */
+  reason?: string | null;
+}
+
+/**
+ * Update the access_mode (scope) of a canonical source.
+ *
+ * Returns the updated row, or null when the source does not exist.
+ *
+ * ## Integration point
+ *
+ * Called by `PATCH /api/admin/sources/:id/scope` after the caller emits a
+ * `source.scope_adjusted` business_journal event.
+ *
+ * @see apps/server/src/api/admin-source-scope-api.ts
+ */
+export async function updateSourceScope(
+  sql: SqlClient,
+  id: string,
+  input: UpdateSourceScopeInput,
+): Promise<CanonicalSourceRow | null> {
+  const rows = await sql<CanonicalSourceRow[]>`
+    UPDATE canonical_sources
+    SET
+      access_mode = COALESCE(${input.access_mode ?? null}, access_mode),
+      updated_at  = CURRENT_TIMESTAMP
+    WHERE id = ${id}
+    RETURNING id, methodology_id, author_id, tenant_id, name, url,
+              description, access_mode, status, created_at, updated_at
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * List all canonical sources across all tenants (admin read path).
+ *
+ * Ordered by updated_at DESC. The admin view bypasses tenant-scoped RLS
+ * because this query is executed by the app pool with the admin session.
+ *
+ * @param limit   Max rows to return (default 100).
+ * @param offset  Pagination offset (default 0).
+ */
+export async function listAllCanonicalSources(
+  sql: SqlClient,
+  limit = 100,
+  offset = 0,
+): Promise<CanonicalSourceRow[]> {
+  return sql<CanonicalSourceRow[]>`
+    SELECT id, methodology_id, author_id, tenant_id, name, url,
+           description, access_mode, status, created_at, updated_at
+    FROM canonical_sources
+    ORDER BY updated_at DESC
+    LIMIT ${limit}
+    OFFSET ${offset}
+  `;
+}
+
+// ---------------------------------------------------------------------------
 // DDL helper (used by migrateMkt in packages/db/index.ts)
 // ---------------------------------------------------------------------------
 

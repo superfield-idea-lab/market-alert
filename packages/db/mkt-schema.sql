@@ -657,3 +657,119 @@ CREATE TABLE IF NOT EXISTS signal_cites (
 
 CREATE INDEX IF NOT EXISTS idx_signal_cites_signal_id
   ON signal_cites (signal_id);
+
+-- ---------------------------------------------------------------------------
+-- canonical_sources — registered venue/source catalog (issue #74, Phase 3)
+-- ---------------------------------------------------------------------------
+--
+-- One row per unique (methodology_id, url) pair. The discovery worker uses
+-- ON CONFLICT (methodology_id, url) DO NOTHING for idempotency.
+--
+-- Status lifecycle:  pending → active → retired
+-- Access mode:       public | authenticated | api_key | NULL (undeclared)
+--
+-- Architecture refs:
+--   docs/prd.md §3    — Researcher venue discovery
+--   docs/architecture.md — mkt_kb schema inventory
+CREATE TABLE IF NOT EXISTS canonical_sources (
+  id               TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  methodology_id   TEXT        NOT NULL,
+  author_id        TEXT        NOT NULL,
+  tenant_id        TEXT        NOT NULL,
+  name             TEXT        NOT NULL,
+  url              TEXT        NOT NULL,
+  description      TEXT,
+  access_mode      TEXT        CHECK (access_mode IN ('public', 'authenticated', 'api_key')),
+  status           TEXT        NOT NULL DEFAULT 'pending'
+                               CHECK (status IN ('pending', 'active', 'retired')),
+  UNIQUE (methodology_id, url),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_sources_methodology_id
+  ON canonical_sources (methodology_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_sources_author_tenant
+  ON canonical_sources (author_id, tenant_id, status);
+
+-- ---------------------------------------------------------------------------
+-- researcher_budgets — per-researcher monthly cost envelope (issue #89)
+-- ---------------------------------------------------------------------------
+--
+-- One row per researcher per monthly period. The Admin sets the monthly_limit_usd
+-- for each researcher. Workers record cost against this envelope via the
+-- cost_ledger table below; the system tunes cadence to stay inside the limit.
+--
+-- Architecture refs:
+--   docs/prd.md §2, §7 — per-researcher cost envelope
+--   docs/architecture.md §"Admin, cost envelope, and replay"
+CREATE TABLE IF NOT EXISTS researcher_budgets (
+  id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id           TEXT        NOT NULL,
+  researcher_id       TEXT        NOT NULL,
+  -- ISO-8601 billing period start (e.g. '2026-06-01').
+  period_start        DATE        NOT NULL,
+  -- Monthly budget ceiling in USD (or abstract cost units).
+  monthly_limit_usd   NUMERIC(12,4) NOT NULL DEFAULT 0,
+  -- Updated by Admin when the budget is adjusted.
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tenant_id, researcher_id, period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_researcher_budgets_researcher
+  ON researcher_budgets (tenant_id, researcher_id, period_start DESC);
+
+-- ---------------------------------------------------------------------------
+-- cost_ledger — append-only cost metering entries (issue #89)
+-- ---------------------------------------------------------------------------
+--
+-- One row per metered operation. Workers record cost after each billable step
+-- (scrape, wiki-rebuild, distill, event-evaluation). The Admin and researcher
+-- can see aggregate spend via the /api/cost endpoint.
+--
+-- operation_type values:
+--   source_scrape           — one scrape call against a canonical source
+--   wiki_rebuild            — one wiki_page_version build pass
+--   standing_prompt_distill — one standing-prompt distillation call
+--   event_evaluate          — one EVENT_EVALUATE call
+--
+-- cost_usd is the estimated cost in USD (or abstract cost units consistent
+-- with monthly_limit_usd). Callers supply an estimate; the system uses it
+-- for budget enforcement without requiring an exact billing feed.
+--
+-- Architecture refs:
+--   docs/prd.md §7 — cost metering and cadence tuning
+--   docs/architecture.md §"Admin, cost envelope, and replay"
+CREATE TABLE IF NOT EXISTS cost_ledger (
+  id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id           TEXT        NOT NULL,
+  researcher_id       TEXT        NOT NULL,
+  -- Billing period to which this entry belongs (matches researcher_budgets.period_start).
+  period_start        DATE        NOT NULL,
+  -- Billable operation category.
+  operation_type      TEXT        NOT NULL
+                                  CHECK (operation_type IN (
+                                    'source_scrape',
+                                    'wiki_rebuild',
+                                    'standing_prompt_distill',
+                                    'event_evaluate'
+                                  )),
+  -- Reference to the task that generated this cost (optional — not all
+  -- cost entries are task-driven).
+  task_id             TEXT,
+  -- Estimated cost in USD (or abstract cost units).
+  cost_usd            NUMERIC(12,6) NOT NULL DEFAULT 0,
+  -- Free-form metadata (model used, token count, scrape size, etc.).
+  metadata            JSONB,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  -- No updated_at: cost entries are immutable.
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_researcher_period
+  ON cost_ledger (tenant_id, researcher_id, period_start, operation_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_task_id
+  ON cost_ledger (task_id)
+  WHERE task_id IS NOT NULL;
