@@ -1,0 +1,22 @@
+{
+  "_comment": "Fixture for signal-routing integration tests — issue #83",
+  "tenant_id": "tenant-routing-83",
+  "researcher_id": "researcher-routing-83",
+  "entity_id": "entity-CORP-001",
+  "thesis_id": "thesis-CORP-001",
+  "entity_prompt_body": "CORP Corp entity thesis: monitor quarterly filings for revenue growth signals. Signal HIGH when GAAP revenue exceeds prior year by 10%+.",
+  "thesis_prompt_body": "CORP Corp thesis: all entities in the CORP group — monitor for cross-entity revenue and cost trends.",
+  "portfolio_prompt_body": "Portfolio fallback: monitor all entities for material financial disclosures.",
+  "wiki_version_window_entity": "2026-01-20T10:00",
+  "wiki_version_window_thesis": "2026-01-20T10:05",
+  "wiki_version_window_portfolio": "2026-01-20T10:10",
+  "market_event": {
+    "source": "edgar",
+    "event_type": "10-Q",
+    "subject_entity_id": "entity-CORP-001",
+    "subject_entity_type": "company",
+    "event_date": "2026-01-20T14:00:00.000Z",
+    "description": "CORP Corp files 10-Q with 12% YoY revenue growth.",
+    "status": "Detected"
+  }
+}
