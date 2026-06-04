@@ -49,13 +49,10 @@
 
 import type { TaskQueueRow } from 'db/task-queue';
 import { assertNoDatabaseUrl } from './startup';
-import type {
-  SignalNotifyPayload,
-  SignalNotifyResult,
-} from '../../packages/integrations/src/signal-notify/types';
-import { sendEmailNotification } from '../../packages/integrations/src/signal-notify/email-adapter';
-import { sendSmsNotification } from '../../packages/integrations/src/signal-notify/sms-adapter';
-import { sendWebhookNotification } from '../../packages/integrations/src/signal-notify/webhook-adapter';
+import type { SignalNotifyPayload, SignalNotifyResult } from 'integrations';
+import { sendEmailNotification } from 'integrations/signal-notify/email-adapter';
+import { sendSmsNotification } from 'integrations/signal-notify/sms-adapter';
+import { sendWebhookNotification } from 'integrations/signal-notify/webhook-adapter';
 
 /** The job_type constant for SIGNAL_NOTIFY tasks. */
 export const SIGNAL_NOTIFY_JOB_TYPE = 'SIGNAL_NOTIFY' as const;

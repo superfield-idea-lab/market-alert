@@ -7,7 +7,9 @@
     "skipLibCheck": true,
     "paths": {
       "db/*": ["../../packages/db/*"],
-      "db": ["../../packages/db/index.ts"]
+      "db": ["../../packages/db/index.ts"],
+      "integrations/*": ["../../packages/integrations/src/*"],
+      "integrations": ["../../packages/integrations/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
