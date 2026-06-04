@@ -71,6 +71,9 @@ import { handleSignalFeedRequest } from './api/signal-feed-api';
 import { handleWikiInlineEditRequest } from './api/wiki-inline-edit-api';
 import { handleAdminSourceScopeRequest } from './api/admin-source-scope-api';
 import { handlePipelineHealthRequest } from './api/pipeline-health-api';
+import { handleAdminDlqRequest } from './api/admin-dlq-api';
+import { handleCostTelemetryRequest } from './api/cost-telemetry-api';
+import { handleEventReplayRequest, handleSignalReplayRequest } from './api/event-replay-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -315,12 +318,15 @@ export default {
       if (auditRes) return withTrace(auditRes);
     }
 
-    // Phase (Admin, cost envelope, and replay) scout stubs (issue #88).
+    // Phase 10 (Admin, cost envelope, and replay) feature implementation (issue #89).
     // These routes use admin-role auth (not superuser-only), so they must be
     // checked BEFORE handleAdminRequest which enforces superuser-only access.
     // PATCH /api/admin/sources/:id/scope    — admin source-scope adjustment
     // GET   /api/admin/pipeline-health      — pipeline health (source state + queue depth)
     // GET   /api/admin/pipeline-health/sources/:id — per-source health entry
+    // GET   /api/admin/dlq                  — list dead-letter tasks
+    // POST  /api/admin/dlq/:id/requeue      — requeue a dead task
+    // PATCH /api/admin/cost-budget          — set researcher monthly budget
     if (url.pathname.startsWith('/api/admin/sources') && url.pathname.endsWith('/scope')) {
       const scopeRes = await handleAdminSourceScopeRequest(req, url, appState);
       if (scopeRes) return withTrace(scopeRes);
@@ -328,6 +334,14 @@ export default {
     if (url.pathname.startsWith('/api/admin/pipeline-health')) {
       const healthRes = await handlePipelineHealthRequest(req, url, appState);
       if (healthRes) return withTrace(healthRes);
+    }
+    if (url.pathname.startsWith('/api/admin/dlq')) {
+      const dlqRes = await handleAdminDlqRequest(req, url, appState);
+      if (dlqRes) return withTrace(dlqRes);
+    }
+    if (url.pathname === '/api/admin/cost-budget') {
+      const costBudgetRes = await handleCostTelemetryRequest(req, url, appState);
+      if (costBudgetRes) return withTrace(costBudgetRes);
     }
 
     if (url.pathname.startsWith('/api/admin')) {
@@ -570,6 +584,25 @@ export default {
     if (url.pathname.startsWith('/api/replay')) {
       const replayRes = await handleReplayRequest(req, url, appState);
       if (replayRes) return withTrace(replayRes);
+    }
+
+    // Phase 10: event replay and signal replay (issue #89).
+    // POST /api/replay/event             — replay a past market event against historical inputs
+    // GET  /api/replay/signal/:id        — get inputs that produced a specific signal
+    if (url.pathname === '/api/replay/event' || url.pathname.match(/^\/api\/replay\/signal\//)) {
+      const eventReplayRes = await handleEventReplayRequest(req, url, appState);
+      if (eventReplayRes) return withTrace(eventReplayRes);
+      const signalReplayRes = await handleSignalReplayRequest(req, url, appState);
+      if (signalReplayRes) return withTrace(signalReplayRes);
+    }
+
+    // Phase 10: cost telemetry — researcher and admin visibility (issue #89).
+    // GET  /api/cost/status              — spend vs budget for requesting researcher
+    // GET  /api/cost/breakdown           — per-operation cost breakdown
+    // POST /internal/cost-record         — worker cost recording (internal)
+    if (url.pathname.startsWith('/api/cost/') || url.pathname === '/internal/cost-record') {
+      const costRes = await handleCostTelemetryRequest(req, url, appState);
+      if (costRes) return withTrace(costRes);
     }
 
     // Serve static assets. import.meta.dir is the compiled bundle dir (/app/dist)

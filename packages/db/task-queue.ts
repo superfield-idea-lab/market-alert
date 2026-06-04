@@ -637,8 +637,9 @@ export interface DlqDepthRow {
  *
  * Blueprint ref: TQ-C-003 (dead-letter alert threshold).
  */
-export async function getDlqDepth(): Promise<DlqDepthRow[]> {
-  const rows = await sql<DlqDepthRow[]>`
+export async function getDlqDepth(options: { sql?: postgres.Sql } = {}): Promise<DlqDepthRow[]> {
+  const db = options.sql ?? sql;
+  const rows = await db<DlqDepthRow[]>`
     SELECT agent_type, COUNT(*)::INTEGER AS dead_count
     FROM task_queue
     WHERE status = 'dead'
@@ -673,4 +674,98 @@ export async function checkDlqAlertThreshold(
   const depth = await getDlqDepth();
   const breached = depth.filter((row) => row.dead_count > threshold);
   return { breached, depth };
+}
+
+// ---------------------------------------------------------------------------
+// DLQ list and requeue — Admin panel operations (issue #89)
+// ---------------------------------------------------------------------------
+
+/**
+ * List dead-letter tasks, optionally filtered by agent_type.
+ *
+ * Returns up to `limit` rows ordered by created_at DESC.
+ *
+ * ## Integration point
+ *
+ * Called by GET /api/admin/dlq (admin DLQ view).
+ *
+ * @param sqlClient  Optional SQL pool override (used in tests).
+ */
+export interface ListDlqOptions {
+  agent_type?: string;
+  limit?: number;
+  offset?: number;
+  /** Optional SQL pool override (for tests). */
+  sql?: postgres.Sql;
+}
+
+export async function listDlqTasks(options: ListDlqOptions = {}): Promise<TaskQueueAdminRow[]> {
+  const { agent_type, limit = 50, offset = 0, sql: sqlOverride } = options;
+  const db = sqlOverride ?? sql;
+
+  const rows = await db<TaskQueueAdminRow[]>`
+    SELECT
+      id, idempotency_key, agent_type, job_type, status,
+      correlation_id, created_by, claimed_by, claimed_at,
+      claim_expires_at, result, error_message, attempt,
+      max_attempts, next_retry_at, priority, created_at, updated_at
+    FROM task_queue
+    WHERE status = 'dead'
+      ${agent_type ? db`AND agent_type = ${agent_type}` : db``}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+    OFFSET ${offset}
+  `;
+  return rows;
+}
+
+export interface RequeueDlqResult {
+  /** ID of the task that was requeued. */
+  task_id: string;
+  /** The new status after requeue (always 'pending'). */
+  new_status: 'pending';
+}
+
+/**
+ * Requeue a dead-letter task by resetting it to `pending` status.
+ *
+ * Resets: status → 'pending', attempt → 0, error_message → null,
+ * claimed_by → null, claimed_at → null, claim_expires_at → null,
+ * next_retry_at → null.
+ *
+ * Returns null when the task does not exist or is not in 'dead' status
+ * (idempotent: calling twice on the same task returns null on the second call).
+ *
+ * ## Integration point
+ *
+ * Called by POST /api/admin/dlq/:id/requeue (admin DLQ replay).
+ *
+ * Architecture ref: docs/architecture.md §"DLQ replay"
+ */
+export async function requeueDlqTask(
+  taskId: string,
+  options: { sql?: postgres.Sql } = {},
+): Promise<RequeueDlqResult | null> {
+  const db = options.sql ?? sql;
+
+  const rows = await db<{ id: string; status: string }[]>`
+    UPDATE task_queue
+    SET
+      status           = 'pending',
+      attempt          = 0,
+      error_message    = NULL,
+      claimed_by       = NULL,
+      claimed_at       = NULL,
+      claim_expires_at = NULL,
+      delegated_token  = NULL,
+      next_retry_at    = NULL,
+      updated_at       = NOW()
+    WHERE id     = ${taskId}
+      AND status = 'dead'
+    RETURNING id, status
+  `;
+
+  const row = rows[0];
+  if (!row) return null;
+  return { task_id: row.id, new_status: 'pending' };
 }

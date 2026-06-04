@@ -111,16 +111,16 @@ async function getTestSession(
   return { cookie, userId };
 }
 
-// A placeholder source ID (does not need to exist in DB for stub tests — the
-// handler never reads it because the stub returns 501 before any DB query)
-const TEST_SOURCE_ID = 'test-source-stub-001';
+// A placeholder source ID that does not exist in the DB.
+// The full implementation (issue #89) returns 404 for non-existent sources.
+const TEST_SOURCE_ID = 'test-source-nonexistent-001';
 
 // ---------------------------------------------------------------------------
 // TC-1: admin scope adjustment — auth seam reaches business logic
 // ---------------------------------------------------------------------------
 
 describe('TC-1: admin scope adjustment auth seam', () => {
-  test('admin session reaches PATCH /api/admin/sources/:id/scope (stub returns 501)', async () => {
+  test('admin session reaches PATCH /api/admin/sources/:id/scope (returns 404 for missing source)', async () => {
     const { cookie } = await getTestSession(env.baseUrl, `admin-scope-user-${Date.now()}`, 'admin');
 
     const res = await fetch(`${env.baseUrl}/api/admin/sources/${TEST_SOURCE_ID}/scope`, {
@@ -130,14 +130,17 @@ describe('TC-1: admin scope adjustment auth seam', () => {
         Cookie: cookie,
         'X-CSRF-Token': 'bypass', // CSRF_DISABLED=true in test server
       },
-      body: JSON.stringify({ access_mode: 'authenticated', reason: 'Scout auth seam test' }),
+      body: JSON.stringify({ access_mode: 'authenticated', reason: 'Auth seam test' }),
     });
 
-    // Auth passed — stub returns 501 (not 403 or 401)
-    expect(res.status).toBe(501);
+    // Auth passed — full implementation returns 404 (source does not exist) rather than 403 or 401.
+    // (Issue #89 replaced the 501 stub with the real implementation.)
+    expect([404, 200]).toContain(res.status);
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(401);
   });
 
-  test('admin session reaches GET /api/admin/pipeline-health (stub returns 501)', async () => {
+  test('admin session reaches GET /api/admin/pipeline-health (returns 200)', async () => {
     const { cookie } = await getTestSession(
       env.baseUrl,
       `admin-health-user-${Date.now()}`,
@@ -149,8 +152,16 @@ describe('TC-1: admin scope adjustment auth seam', () => {
       headers: { Cookie: cookie },
     });
 
-    // Auth passed — stub returns 501 (not 403 or 401)
-    expect(res.status).toBe(501);
+    // Auth passed — full implementation returns 200 with sources and queue_depths.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      sources: unknown[];
+      queue_depths: Record<string, number>;
+      as_of: string;
+    };
+    expect(Array.isArray(body.sources)).toBe(true);
+    expect(typeof body.queue_depths).toBe('object');
+    expect(typeof body.as_of).toBe('string');
   });
 });
 
