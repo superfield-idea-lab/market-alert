@@ -89,6 +89,8 @@ export const TaskType = {
   WIKI_REBUILD: 'WIKI_REBUILD',
   // Phase 3 — Standing-prompt distillation: wiki publish → bounded active standing prompt (issue #78)
   STANDING_PROMPT_DISTILL: 'STANDING_PROMPT_DISTILL',
+  // Phase 6 — Event ingestion: EDGAR filing → normalized market event (issue #80)
+  EVENT_EVALUATE: 'EVENT_EVALUATE',
 } as const;
 
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
@@ -122,6 +124,8 @@ export const TASK_TYPE_AGENT_MAP: Record<TaskType, string> = {
   [TaskType.WIKI_REBUILD]: 'wiki_rebuild',
   // Phase 3 (issue #78)
   [TaskType.STANDING_PROMPT_DISTILL]: 'sp_distiller',
+  // Phase 6 (issue #80)
+  [TaskType.EVENT_EVALUATE]: 'event_evaluator',
 };
 
 /**
@@ -170,6 +174,8 @@ const TRADING_TASK_TYPES: ReadonlySet<TaskType> = new Set<TaskType>([
   TaskType.FACT_EXTRACT,
   // Phase 3 (issue #78): standing-prompt distill payload carries only researcher_id + window
   TaskType.STANDING_PROMPT_DISTILL,
+  // Phase 6 (issue #80): event evaluate payload carries only market_event_id
+  TaskType.EVENT_EVALUATE,
 ]);
 
 /**

@@ -432,3 +432,106 @@ CREATE INDEX IF NOT EXISTS idx_wiki_debates_tenant_status
 
 CREATE INDEX IF NOT EXISTS idx_wiki_debates_version
   ON wiki_debates (wiki_page_version_id);
+
+-- ---------------------------------------------------------------------------
+-- raw_filings — idempotent landing table for EDGAR filing payloads (issue #80)
+-- ---------------------------------------------------------------------------
+--
+-- One row per unique filing, identified by the composite idempotency key
+-- `edgar_poll:<form_type>:<accession_number>`.
+--
+-- The landing step is separate from market_events creation so that the
+-- land-before-advance watermark guarantee can be expressed as a single
+-- INSERT into this table: the watermark is only advanced after a durable
+-- write here (architecture ref: "land-before-advance watermark").
+--
+-- Status pipeline:  raw → normalized | quarantined
+--   raw         — landed but not yet turned into a market_event
+--   normalized  — a market_event row has been created from this filing
+--   quarantined — malformed payload; moved to etl_quarantine for inspection
+--
+-- Encryption:
+--   raw_payload stores AES-256-GCM ciphertext. The API handler encrypts the
+--   filing XML before INSERT. Acceptance criterion: raw_payload is never
+--   plaintext.
+--
+-- Architecture refs:
+--   docs/architecture.md § "Market-event feed" (land-before-advance watermark)
+--   WORKER-P-001 (API-gateway sole writer)
+--   DATA-D-006   (four-pool Postgres)
+CREATE TABLE IF NOT EXISTS raw_filings (
+  id               TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  idempotency_key  TEXT        NOT NULL UNIQUE,
+  source           TEXT        NOT NULL DEFAULT 'edgar',
+  form_type        TEXT        NOT NULL,
+  accession_number TEXT        NOT NULL,
+  cik              TEXT        NOT NULL,
+  issuer_name      TEXT,
+  filing_date      TIMESTAMPTZ NOT NULL,
+  raw_payload      TEXT        NOT NULL,
+  status           TEXT        NOT NULL DEFAULT 'raw'
+                               CHECK (status IN ('raw', 'normalized', 'quarantined')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_filings_idempotency
+  ON raw_filings (idempotency_key);
+
+CREATE INDEX IF NOT EXISTS idx_raw_filings_status
+  ON raw_filings (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_raw_filings_source_form
+  ON raw_filings (source, form_type, filing_date DESC);
+
+-- ---------------------------------------------------------------------------
+-- market_events — normalized catalyst events queued for evaluation (issue #80)
+-- ---------------------------------------------------------------------------
+--
+-- One row per real-world event. An EDGAR filing that lands in raw_filings
+-- produces exactly one market_event row (idempotent via ON CONFLICT DO NOTHING
+-- on the composite identity key).
+--
+-- Cross-venue deduplication (Phase 6 follow-on issue) collapses the same
+-- real-world event arriving via different venues into a single market_event
+-- row using the composite identity (subject_entity_id, event_type,
+-- event_date). That dedup step is OUT OF SCOPE for this scout; the schema
+-- is designed to accommodate it.
+--
+-- State machine: Expected → Detected → Enriched → Evaluated → Closed
+-- The `Disputed` and `PassedSilently` terminal branches are planned for
+-- cross-venue dedup and silent-passage detection (follow-on issues).
+--
+-- Architecture refs:
+--   docs/architecture.md § "Catalyst event state machine"
+--   docs/prd.md §9 — event evaluation latency constraint
+--   DATA-D-006 (four-pool Postgres)
+--   WORKER-P-001 (API-gateway sole writer)
+CREATE TABLE IF NOT EXISTS market_events (
+  id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  raw_filing_id       TEXT        UNIQUE REFERENCES raw_filings(id),
+  source              TEXT        NOT NULL DEFAULT 'edgar',
+  event_type          TEXT        NOT NULL,
+  subject_entity_id   TEXT,
+  subject_entity_type TEXT        NOT NULL DEFAULT 'company',
+  event_date          TIMESTAMPTZ NOT NULL,
+  description         TEXT,
+  status              TEXT        NOT NULL DEFAULT 'Detected'
+                                  CHECK (status IN (
+                                    'Expected', 'Detected', 'Enriched',
+                                    'Evaluated', 'Closed', 'Disputed', 'PassedSilently'
+                                  )),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_events_status
+  ON market_events (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_market_events_subject
+  ON market_events (subject_entity_id, event_type, event_date DESC)
+  WHERE subject_entity_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_market_events_raw_filing
+  ON market_events (raw_filing_id)
+  WHERE raw_filing_id IS NOT NULL;
