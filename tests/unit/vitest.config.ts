@@ -13,6 +13,7 @@
  *  - autolearn-pod-spec.test.ts          — distroless pod spec manifest assertions (issue #35)
  *  - autolearn-network-policy.test.ts    — autolearn worker NetworkPolicy validation (issue #102)
  *  - cookie-config.test.ts               — auth cookie SameSite=Strict decision record (issue #228)
+ *  - signal-notify.test.ts              — SIGNAL_NOTIFY outbound adapters (issue #85)
  *
  * Canonical doc: docs/implementation-plan-v1.md § Phase 0
  * Blueprint ref: calypso-blueprint/rules/blueprints/test.yaml
@@ -38,6 +39,8 @@ export default defineConfig({
       'autolearn-pod-spec.test.ts',
       'autolearn-network-policy.test.ts',
       'cookie-config.test.ts',
+      // Phase 6 — SIGNAL_NOTIFY outbound adapters (issue #85)
+      'signal-notify.test.ts',
     ],
     root: resolve(import.meta.dirname),
   },
