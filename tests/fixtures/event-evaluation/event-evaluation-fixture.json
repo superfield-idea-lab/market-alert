@@ -1,0 +1,20 @@
+{
+  "_comment": "Fixture for event-evaluation integration tests — issue #82",
+  "market_event": {
+    "source": "edgar",
+    "event_type": "8-K",
+    "subject_entity_id": "entity-ACME-001",
+    "subject_entity_type": "company",
+    "event_date": "2026-01-15T14:30:00.000Z",
+    "description": "ACME Corp files 8-K disclosing material agreement with strategic partner.",
+    "status": "Detected"
+  },
+  "standing_prompt": {
+    "tenant_id": "tenant-test-82",
+    "researcher_id": "researcher-test-82",
+    "subject_type": "entity",
+    "subject_id": "entity-ACME-001",
+    "body": "ACME Corp thesis: monitor 8-K filings for material agreements and partnerships. Evaluate for strategic impact on revenue and market position. Signal HIGH confidence when a disclosed agreement aligns with thesis. Signal LOW confidence when the agreement scope is unclear or restricted.",
+    "wiki_version_window": "2026-01-15T14:00"
+  }
+}
