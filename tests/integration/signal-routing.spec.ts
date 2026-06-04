@@ -204,51 +204,6 @@ afterAll(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper: seed a standing prompt version at a given subject level
-// ---------------------------------------------------------------------------
-
-async function seedPrompt(
-  subjectType: 'entity' | 'thesis' | 'portfolio',
-  subjectId: string,
-  body: string,
-  window: string,
-): Promise<string> {
-  const sp = await upsertStandingPrompt(
-    sql as unknown as import('../../packages/db/standing-prompt-store').SqlClient,
-    {
-      tenant_id: fixture.tenant_id,
-      researcher_id: fixture.researcher_id,
-      subject_type: subjectType,
-      subject_id: subjectId,
-    },
-  );
-
-  const { row: spv } = await insertStandingPromptVersion(
-    sql as unknown as import('../../packages/db/standing-prompt-store').SqlClient,
-    {
-      standing_prompt_id: sp.id,
-      tenant_id: fixture.tenant_id,
-      researcher_id: fixture.researcher_id,
-      wiki_version_window: window,
-    },
-  );
-
-  const activated = await activateStandingPromptVersion(
-    sql as unknown as import('../../packages/db/standing-prompt-store').SqlClient,
-    {
-      standing_prompt_id: sp.id,
-      standing_prompt_version_id: spv.id,
-      body,
-    },
-  );
-
-  if (!activated.activated) {
-    throw new Error(`Failed to activate ${subjectType} prompt for ${subjectId}`);
-  }
-  return activated.row.id;
-}
-
-// ---------------------------------------------------------------------------
 // Unit tests: computeConfidence + routeByConfidence
 // ---------------------------------------------------------------------------
 
