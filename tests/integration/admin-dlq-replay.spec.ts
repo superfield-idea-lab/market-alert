@@ -37,12 +37,7 @@ import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { runInitRemote } from '../../packages/db/init-remote';
 import { migrate, migrateMkt } from '../../packages/db/index';
-import {
-  enqueueTask,
-  updateTaskStatus,
-  listDlqTasks,
-  requeueDlqTask,
-} from '../../packages/db/task-queue';
+import { enqueueTask, listDlqTasks, requeueDlqTask } from '../../packages/db/task-queue';
 import { handleAdminDlqRequest } from '../../apps/server/src/api/admin-dlq-api';
 import type { AppState } from '../../apps/server/src/index';
 
@@ -62,7 +57,6 @@ let pg: PgContainer;
 let sql: ReturnType<typeof postgres>;
 let appState: AppState;
 let httpServer: Server;
-let apiBaseUrl: string;
 
 // ---------------------------------------------------------------------------
 // Local HTTP server
@@ -146,9 +140,8 @@ beforeAll(async () => {
     dictionarySql: sql as unknown as AppState['sql'],
   } as AppState;
 
-  const { server, url } = await startLocalServer(appState);
+  const { server } = await startLocalServer(appState);
   httpServer = server;
-  apiBaseUrl = url;
 }, 90_000);
 
 afterAll(async () => {

@@ -169,8 +169,6 @@ afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TENANT_ID = 'tenant-cost-test-001';
-const RESEARCHER_ID = 'researcher-cost-test-001';
 const PERIOD_START = '2026-06-01';
 
 async function insertFakeResearcher(researcherId: string, tenantId: string): Promise<void> {
@@ -182,19 +180,6 @@ async function insertFakeResearcher(researcherId: string, tenantId: string): Pro
        VALUES ($1, 'user', $2, $3)
        ON CONFLICT (id) DO NOTHING`,
       [researcherId, JSON.stringify({ role: 'researcher' }), tenantId],
-    );
-  });
-}
-
-async function insertFakeAdmin(adminId: string, tenantId: string): Promise<void> {
-  await sql.begin(async (tx) => {
-    await tx.unsafe(`SET LOCAL app.current_tenant_id = '${tenantId}'`);
-    await tx.unsafe(`SET LOCAL app.current_user_id = '${adminId}'`);
-    await tx.unsafe(
-      `INSERT INTO entities (id, type, properties, tenant_id)
-       VALUES ($1, 'user', $2, $3)
-       ON CONFLICT (id) DO NOTHING`,
-      [adminId, JSON.stringify({ role: 'admin' }), tenantId],
     );
   });
 }

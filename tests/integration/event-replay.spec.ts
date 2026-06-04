@@ -63,7 +63,6 @@ let pg: PgContainer;
 let sql: ReturnType<typeof postgres>;
 let appState: AppState;
 let httpServer: Server;
-let apiBaseUrl: string;
 
 // ---------------------------------------------------------------------------
 // Local HTTP server
@@ -159,9 +158,8 @@ beforeAll(async () => {
     dictionarySql: sql as unknown as AppState['sql'],
   } as AppState;
 
-  const { server, url } = await startLocalServer(appState);
+  const { server } = await startLocalServer(appState);
   httpServer = server;
-  apiBaseUrl = url;
 }, 90_000);
 
 afterAll(async () => {
@@ -278,29 +276,8 @@ describe('TC-1: POST /api/replay/event returns signal and replay inputs', () => 
   });
 
   test('returns 200 with original_signal and replay_inputs', async () => {
-    // The handler uses getAuthenticatedUser; since we're testing without a
-    // session cookie we mock out the auth by calling through the appState
-    // directly. We skip the auth step by building a fake admin session.
-    // For now, inject a superuser via the isSuperuser path.
-    const SUPERUSER_ID = process.env.SUPERUSER_ID ?? 'superuser';
-    const superuserReq = new Request(`${apiBaseUrl}/api/replay/event`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Inject a fake session cookie for the superuser (handled by isSuperuser).
-        Cookie: `superfield_auth=fake-superuser-token`,
-      },
-      body: JSON.stringify({ market_event_id: marketEventId }),
-    });
-
-    // Call the handler directly (bypassing the HTTP server's auth layer)
-    // to get the replay output without needing a real session cookie.
-    const url = new URL(`${apiBaseUrl}/api/replay/event`);
-
-    // Simulate superuser auth: override getAuthenticatedUser in the handler
-    // by calling the handler with a patched appState that includes a fake user.
-    // Since we cannot easily mock sessions, we test the DB-layer behavior
-    // directly as an integration test at the function level.
+    // Test the DB-layer behavior directly as an integration test at the function
+    // level (no session cookie required at this layer).
     const { getSignalById, getSignalCites } = await import('../../packages/db/signal-store');
     const { getMarketEventById } = await import('../../packages/db/mkt-market-event-store');
 
