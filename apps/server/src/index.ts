@@ -68,6 +68,7 @@ import { handleWikiRebuildApiRequest } from './api/wiki-rebuild-api';
 import { handleWikiDebateApiRequest } from './api/wiki-debate-api';
 import { handleWikiNavApiRequest } from './api/wiki-nav-api';
 import { handleSignalFeedRequest } from './api/signal-feed-api';
+import { handleWikiInlineEditRequest } from './api/wiki-inline-edit-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -405,6 +406,23 @@ export default {
     ) {
       const signalFeedRes = await handleSignalFeedRequest(req, url, appState);
       if (signalFeedRes) return withTrace(signalFeedRes);
+    }
+
+    // Inline wiki edit + meta-commentary surfacing (issue #87).
+    // POST   /api/wiki/inline-edit                         — capture inline edit as correction prompt
+    // GET    /api/wiki/meta-commentary/badge               — badge count of open entries
+    // GET    /api/wiki/meta-commentary/digest              — weekly digest by class
+    // GET    /api/wiki/meta-commentary/urgent              — high-urgency escalation list
+    // PATCH  /api/wiki/meta-commentary/:id/acknowledge     — open → acknowledged
+    // PATCH  /api/wiki/meta-commentary/:id/fold-in         — acknowledged → folded_in (explicit)
+    // PATCH  /api/wiki/meta-commentary/:id/archive         — close without fold-in
+    // Must be checked BEFORE the generic /api/wiki handler to avoid path conflicts.
+    if (
+      url.pathname.startsWith('/api/wiki/inline-edit') ||
+      url.pathname.startsWith('/api/wiki/meta-commentary')
+    ) {
+      const wikiInlineEditRes = await handleWikiInlineEditRequest(req, url, appState);
+      if (wikiInlineEditRes) return withTrace(wikiInlineEditRes);
     }
 
     // Wiki draft management + claim-citation coverage check (issue #43).
