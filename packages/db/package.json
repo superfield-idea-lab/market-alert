@@ -42,6 +42,7 @@
     "./worm-mode": "./worm-mode.ts",
     "./kms-backfill": "./kms-backfill.ts",
     "./mkt-alert-channel": "./mkt-alert-channel.ts",
+    "./signal-channel": "./signal-channel.ts",
     "./mkt-trade-replay": "./mkt-trade-replay.ts",
     "./golden-document-store": "./golden-document-store.ts"
   },
