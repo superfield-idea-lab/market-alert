@@ -44,7 +44,8 @@
     "./mkt-alert-channel": "./mkt-alert-channel.ts",
     "./signal-channel": "./signal-channel.ts",
     "./mkt-trade-replay": "./mkt-trade-replay.ts",
-    "./golden-document-store": "./golden-document-store.ts"
+    "./golden-document-store": "./golden-document-store.ts",
+    "./chat-feedback-store": "./chat-feedback-store.ts"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
