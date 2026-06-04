@@ -69,6 +69,8 @@ import { handleWikiDebateApiRequest } from './api/wiki-debate-api';
 import { handleWikiNavApiRequest } from './api/wiki-nav-api';
 import { handleSignalFeedRequest } from './api/signal-feed-api';
 import { handleWikiInlineEditRequest } from './api/wiki-inline-edit-api';
+import { handleAdminSourceScopeRequest } from './api/admin-source-scope-api';
+import { handlePipelineHealthRequest } from './api/pipeline-health-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -311,6 +313,21 @@ export default {
     if (url.pathname.startsWith('/api/audit')) {
       const auditRes = await handleAuditRequest(req, url, appState);
       if (auditRes) return withTrace(auditRes);
+    }
+
+    // Phase (Admin, cost envelope, and replay) scout stubs (issue #88).
+    // These routes use admin-role auth (not superuser-only), so they must be
+    // checked BEFORE handleAdminRequest which enforces superuser-only access.
+    // PATCH /api/admin/sources/:id/scope    — admin source-scope adjustment
+    // GET   /api/admin/pipeline-health      — pipeline health (source state + queue depth)
+    // GET   /api/admin/pipeline-health/sources/:id — per-source health entry
+    if (url.pathname.startsWith('/api/admin/sources') && url.pathname.endsWith('/scope')) {
+      const scopeRes = await handleAdminSourceScopeRequest(req, url, appState);
+      if (scopeRes) return withTrace(scopeRes);
+    }
+    if (url.pathname.startsWith('/api/admin/pipeline-health')) {
+      const healthRes = await handlePipelineHealthRequest(req, url, appState);
+      if (healthRes) return withTrace(healthRes);
     }
 
     if (url.pathname.startsWith('/api/admin')) {
