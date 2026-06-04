@@ -507,22 +507,45 @@ CREATE INDEX IF NOT EXISTS idx_raw_filings_source_form
 --   docs/prd.md §9 — event evaluation latency constraint
 --   DATA-D-006 (four-pool Postgres)
 --   WORKER-P-001 (API-gateway sole writer)
+--
+-- Cross-venue deduplication (issue #81):
+--   The composite identity key (subject_entity_id, event_type, event_date) collapses
+--   the same real-world event arriving via different venues (wire lead + later filing)
+--   into a single market_event row. When a new filing arrives and a matching Expected or
+--   Detected event already exists within the composite identity window, the ingestion
+--   handler calls dedupMarketEventByCompositeIdentity (packages/db/mkt-market-event-store.ts)
+--   instead of inserting a new row.
+--
+-- Silent-passage detection (issue #81):
+--   anticipated_window_close is set when a market_event is registered with
+--   status='Expected' and an anticipated catalyst window is known. The
+--   SILENT_PASSAGE_CHECK worker reads all Expected events whose
+--   anticipated_window_close has passed and transitions them to PassedSilently
+--   if no Detected event exists for the same composite identity.
+--
+-- Architecture refs:
+--   docs/prd.md §9 (cross-venue dedup, silent-passage latency ≤ 15 min)
+--   docs/architecture.md § task-type table (SILENT_PASSAGE_CHECK row)
+--   packages/db/mkt-market-event-store.ts — dedupMarketEventByCompositeIdentity,
+--                                           transitionToPassedSilently,
+--                                           listExpectedEventsWithExpiredWindows
 CREATE TABLE IF NOT EXISTS market_events (
-  id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  raw_filing_id       TEXT        UNIQUE REFERENCES raw_filings(id),
-  source              TEXT        NOT NULL DEFAULT 'edgar',
-  event_type          TEXT        NOT NULL,
-  subject_entity_id   TEXT,
-  subject_entity_type TEXT        NOT NULL DEFAULT 'company',
-  event_date          TIMESTAMPTZ NOT NULL,
-  description         TEXT,
-  status              TEXT        NOT NULL DEFAULT 'Detected'
-                                  CHECK (status IN (
-                                    'Expected', 'Detected', 'Enriched',
-                                    'Evaluated', 'Closed', 'Disputed', 'PassedSilently'
-                                  )),
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+  id                       TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  raw_filing_id            TEXT        UNIQUE REFERENCES raw_filings(id),
+  source                   TEXT        NOT NULL DEFAULT 'edgar',
+  event_type               TEXT        NOT NULL,
+  subject_entity_id        TEXT,
+  subject_entity_type      TEXT        NOT NULL DEFAULT 'company',
+  event_date               TIMESTAMPTZ NOT NULL,
+  anticipated_window_close TIMESTAMPTZ,
+  description              TEXT,
+  status                   TEXT        NOT NULL DEFAULT 'Detected'
+                                       CHECK (status IN (
+                                         'Expected', 'Detected', 'Enriched',
+                                         'Evaluated', 'Closed', 'Disputed', 'PassedSilently'
+                                       )),
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_events_status
@@ -535,3 +558,9 @@ CREATE INDEX IF NOT EXISTS idx_market_events_subject
 CREATE INDEX IF NOT EXISTS idx_market_events_raw_filing
   ON market_events (raw_filing_id)
   WHERE raw_filing_id IS NOT NULL;
+
+-- Index for SILENT_PASSAGE_CHECK: efficiently scan Expected events whose
+-- anticipated window has closed (issue #81).
+CREATE INDEX IF NOT EXISTS idx_market_events_expected_window
+  ON market_events (anticipated_window_close)
+  WHERE status = 'Expected' AND anticipated_window_close IS NOT NULL;
