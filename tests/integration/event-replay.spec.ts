@@ -178,16 +178,12 @@ async function insertFakeResearcher(researcherId: string, tenantId: string): Pro
   await sql.begin(async (tx) => {
     await tx.unsafe(`SET LOCAL app.current_tenant_id = '${tenantId}'`);
     await tx.unsafe(`SET LOCAL app.current_user_id = '${researcherId}'`);
-    await tx`
-      INSERT INTO entities (id, type, properties, tenant_id)
-      VALUES (
-        ${researcherId},
-        'user',
-        ${JSON.stringify({ role: 'researcher' })},
-        ${tenantId}
-      )
-      ON CONFLICT (id) DO NOTHING
-    `;
+    await tx.unsafe(
+      `INSERT INTO entities (id, type, properties, tenant_id)
+       VALUES ($1, 'user', $2, $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [researcherId, JSON.stringify({ role: 'researcher' }), tenantId],
+    );
   });
 }
 
