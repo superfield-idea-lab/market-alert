@@ -94,6 +94,7 @@ import {
   validateTranscriptionResult,
 } from './transcription-job';
 import { WIKI_REBUILD_JOB_TYPE, executeWikiRebuildTask } from './wiki-rebuild-job';
+import { EVENT_EVAL_JOB_TYPE, executeEventEvalTask } from './event-eval-job';
 import { runWorkerLoop } from 'db/task-queue-worker';
 import { claimNextTask, updateTaskStatus } from 'db/task-queue';
 
@@ -313,6 +314,21 @@ async function tryClaimAndExecute(
         throw new Error(`Task ${task.id} has no delegated token — cannot call wiki rebuild API`);
       }
       result = (await executeWikiRebuildTask(
+        task,
+        apiBaseUrl,
+        task.delegated_token,
+      )) as unknown as Record<string, unknown>;
+    } else if (task.job_type === EVENT_EVAL_JOB_TYPE) {
+      // Event evaluation worker — Phase 6 scout (issue #82).
+      // Applies the researcher's active standing prompt to the market event
+      // in one model call (stub in this scout), producing a signal row that
+      // cites the exact wiki snapshot and standing-prompt revision used.
+      // Idempotent: re-evaluating the same event with the same prompt version
+      // is a no-op (ON CONFLICT DO NOTHING on idempotency_key).
+      if (!task.delegated_token) {
+        throw new Error(`Task ${task.id} has no delegated token — cannot call event-eval API`);
+      }
+      result = (await executeEventEvalTask(
         task,
         apiBaseUrl,
         task.delegated_token,

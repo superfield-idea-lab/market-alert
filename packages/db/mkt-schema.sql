@@ -564,3 +564,96 @@ CREATE INDEX IF NOT EXISTS idx_market_events_raw_filing
 CREATE INDEX IF NOT EXISTS idx_market_events_expected_window
   ON market_events (anticipated_window_close)
   WHERE status = 'Expected' AND anticipated_window_close IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- signals — evaluated market events producing cited, auditable trade signals (issue #82)
+-- ---------------------------------------------------------------------------
+--
+-- One row per evaluated market_event × standing_prompt_version pair.
+-- An EVENT_EVALUATE task applies the researcher's active standing prompt to a
+-- market event in one model call, producing one signal row that cites the exact
+-- wiki_page_version and standing_prompt_version used (PRD §9 auditability).
+--
+-- Idempotency: ON CONFLICT (idempotency_key) DO NOTHING prevents duplicate rows
+-- when the same EVENT_EVALUATE task is retried (at-least-once delivery).
+-- The idempotency key encodes both market_event_id and standing_prompt_version_id
+-- so a later prompt revision produces a new signal row rather than a conflict.
+-- This implements acceptance criterion AC-3: "Re-evaluating the same event is idempotent."
+--
+-- Confidence decomposition (follow-on Phase 6 issue):
+--   - source_trust         — tier of the supporting wiki claims per Research Methodology
+--   - extraction_certainty — how unambiguously the event maps to the standing prompt
+-- Both stored as floats in [0.0, 1.0]. Default to 1.0 in this scout.
+--
+-- Status state machine (PRD §5, §9, architecture §"Signal routing"):
+--   Generated → Delivered  (confidence ≥ threshold, direct delivery)
+--   Generated → Queued     (confidence < threshold, routed to Reviewer queue)
+--   Queued    → Delivered  (Reviewer approves)
+--   Queued    → Suppressed (Reviewer suppresses)
+-- Terminal states: Delivered, Suppressed.
+--
+-- Architecture refs:
+--   docs/architecture.md §"Signal routing"
+--   docs/prd.md §5, §9 — event evaluation, confidence, auditability
+--   packages/db/signal-store.ts — data access layer (issue #82)
+CREATE TABLE IF NOT EXISTS signals (
+  id                          TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id                   TEXT        NOT NULL,
+  researcher_id               TEXT        NOT NULL,
+  market_event_id             TEXT        NOT NULL,
+  standing_prompt_version_id  TEXT        NOT NULL,
+  -- Idempotency key: event_eval:<market_event_id>:<standing_prompt_version_id>
+  idempotency_key             TEXT        NOT NULL UNIQUE,
+  -- Structured markdown rationale. Null in scout; set by LLM call in follow-on issue.
+  rationale                   TEXT,
+  -- Confidence decomposition (follow-on Phase 6 issue). Default 1.0 in this scout.
+  source_trust                FLOAT       NOT NULL DEFAULT 1.0,
+  extraction_certainty        FLOAT       NOT NULL DEFAULT 1.0,
+  status                      TEXT        NOT NULL DEFAULT 'Generated'
+                                          CHECK (status IN (
+                                            'Generated', 'Queued', 'Delivered', 'Suppressed'
+                                          )),
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_signals_tenant_researcher
+  ON signals (tenant_id, researcher_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_signals_market_event
+  ON signals (market_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_signals_status
+  ON signals (status, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- signal_cites — typed citation edges from a signal to immutable snapshots (issue #82)
+-- ---------------------------------------------------------------------------
+--
+-- Each signal carries citations into the wiki snapshot and standing-prompt revision
+-- used for evaluation; both are immutable, supporting the auditability and replay
+-- constraint (PRD §9, architecture §"Citations: first-class relation edges").
+--
+-- target_type values:
+--   - `wiki_page_version`       — the wiki snapshot the signal was reasoned against
+--   - `standing_prompt_version` — the standing prompt revision used for evaluation
+--
+-- ON CONFLICT (signal_id, target_type, target_id) DO NOTHING makes cite insertion
+-- idempotent on worker retry.
+--
+-- Architecture refs:
+--   docs/architecture.md §"Citations: first-class relation edges"
+--   | signal | wiki_page_version       | This signal was reasoned against … |
+--   | signal | standing_prompt_version | This signal was evaluated by …     |
+CREATE TABLE IF NOT EXISTS signal_cites (
+  id          TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  signal_id   TEXT        NOT NULL,
+  target_type TEXT        NOT NULL
+                          CHECK (target_type IN ('wiki_page_version', 'standing_prompt_version')),
+  target_id   TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (signal_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_cites_signal_id
+  ON signal_cites (signal_id);
