@@ -101,7 +101,6 @@ describe('ET-3: GET /api/tasks-queue HTTP auth gates', () => {
   test('returns 401 for unauthenticated request', async () => {
     const res = await fetch(`${env.baseUrl}/api/tasks-queue`);
     await res.text(); // drain
-    // eslint-disable-next-line vitest/valid-expect
     expect(res.status).toBe(401);
   });
 
