@@ -1,15 +1,22 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Bell, Settings, User, BookOpen, Globe, ListTodo } from 'lucide-react';
+import { Bell, Settings, User, BookOpen, Globe, ListTodo, Radio } from 'lucide-react';
 import { SettingsPage } from './pages/settings';
 import { SignalFeedPage } from './pages/signal-feed';
 import { GoldenDocumentsPage } from './pages/golden-documents';
 import { WikiNavPage } from './pages/wiki-nav';
 import { AgentTaskQueuePage } from './pages/agent-task-queue';
+import { SourcesTriggersPage } from './pages/sources-triggers';
 import { PendingDraftsBadge } from './components/PendingDraftsBadge';
 
-type ActiveView = 'alerts' | 'settings' | 'golden-documents' | 'wiki' | 'agent-queue';
+type ActiveView =
+  | 'alerts'
+  | 'settings'
+  | 'golden-documents'
+  | 'wiki'
+  | 'agent-queue'
+  | 'sources-triggers';
 
 function App() {
   const { user, logout, loading } = useAuth();
@@ -83,6 +90,16 @@ function App() {
               </div>
             </div>
 
+            {/* Sources & Triggers — researcher pipeline visibility */}
+            <button
+              onClick={() => setActiveView('sources-triggers')}
+              title="Sources & Triggers"
+              data-testid="nav-sources-triggers"
+              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'sources-triggers' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+            >
+              <Radio size={20} strokeWidth={2.5} />
+            </button>
+
             {/* Agent Queue — superadmin only */}
             {user.isSuperadmin && (
               <button
@@ -115,6 +132,7 @@ function App() {
             {activeView === 'settings' && <SettingsPage />}
             {activeView === 'golden-documents' && <GoldenDocumentsPage />}
             {activeView === 'wiki' && <WikiNavPage tenantId={user.id} />}
+            {activeView === 'sources-triggers' && <SourcesTriggersPage />}
             {activeView === 'agent-queue' && user.isSuperadmin && <AgentTaskQueuePage />}
           </div>
         </div>
