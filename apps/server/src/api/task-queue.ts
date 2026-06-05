@@ -18,10 +18,11 @@ import {
   claimNextTask,
   updateTaskStatus,
   submitTaskResult,
+  listTasksForAdmin,
   type TaskQueueStatus,
 } from 'db/task-queue';
 import { validateTaskPayload, PayloadValidationError } from './task-payload-validation';
-import { makeJson } from '../lib/response';
+import { makeJson, isSuperuser } from '../lib/response';
 
 // ---------------------------------------------------------------------------
 // Delegated-token auth chain — POST /api/tasks/:id/result
@@ -93,6 +94,7 @@ export async function handleTaskQueueResultRequest(
 
 /**
  * Session-authenticated task-queue CRUD (issue #43, TQ-D-001):
+ *   GET  /api/tasks-queue            — admin live view         (issue #115)
  *   POST /api/tasks-queue            — idempotent enqueue   (TQ-P-003)
  *   POST /api/tasks-queue/claim      — atomic claim          (TQ-P-001)
  *   PATCH /api/tasks-queue/:id       — status update
@@ -112,6 +114,14 @@ export async function handleTasksQueueRequest(
 
   const user = await getAuthenticatedUser(req);
   if (!user) return json({ error: 'Unauthorized' }, 401);
+
+  // GET /api/tasks-queue — superadmin live view (issue #115)
+  if (req.method === 'GET' && url.pathname === '/api/tasks-queue') {
+    if (!isSuperuser(user.id)) return json({ error: 'Forbidden — superadmin required' }, 403);
+
+    const tasks = await listTasksForAdmin();
+    return json({ tasks });
+  }
 
   // POST /api/tasks-queue — idempotent enqueue (TQ-P-003)
   if (req.method === 'POST' && url.pathname === '/api/tasks-queue') {
