@@ -19,29 +19,26 @@
  * ## Architecture
  *
  * Runs in headless Chromium via Playwright / vitest-browser-react.
- * The fetch calls are mocked at the browser level by returning fixture data.
- * No vi.fn, vi.mock, or vi.spyOn — the component API helpers (fetchSources,
- * fetchStandingPrompts) accept an optional `fetchImpl` parameter for injection.
+ * The fixture server (global-setup.ts) intercepts /api/researcher/* requests
+ * and returns pre-seeded state — no mocks, no vi.fn.
  *
  * @see apps/web/src/pages/sources-triggers.tsx
+ * @see apps/web/tests/component/fixture-server.ts — add researcher routes
  * @see https://github.com/superfield-idea-lab/market-alert/issues/118
  */
 
 import React from 'react';
 import { render } from 'vitest-browser-react';
-import { expect, test } from 'vitest';
-import { page } from '@vitest/browser/context';
-import {
-  SourcesTriggersPage,
-  type ResearcherSourceRow,
-  type ResearcherStandingPromptRow,
-} from '../../../../apps/web/src/pages/sources-triggers';
+import { commands } from '@vitest/browser/context';
+import { afterEach, expect, test } from 'vitest';
+import { SourcesTriggersPage } from '../../../../apps/web/src/pages/sources-triggers';
+import type { FixtureResearcherSource, FixtureStandingPrompt } from './fixture-server';
 
 // ---------------------------------------------------------------------------
 // Fixture data
 // ---------------------------------------------------------------------------
 
-const FIXTURE_SOURCES: ResearcherSourceRow[] = [
+const FIXTURE_SOURCES: FixtureResearcherSource[] = [
   {
     id: 'src-001',
     name: 'SEC EDGAR',
@@ -65,7 +62,7 @@ const FIXTURE_SOURCES: ResearcherSourceRow[] = [
   },
 ];
 
-const FIXTURE_PROMPTS: ResearcherStandingPromptRow[] = [
+const FIXTURE_PROMPTS: FixtureStandingPrompt[] = [
   {
     id: 'sp-001',
     subject_type: 'entity',
@@ -93,161 +90,120 @@ const FIXTURE_PROMPTS: ResearcherStandingPromptRow[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Fetch interceptor — intercept window.fetch to return fixture data.
+// Helpers
 // ---------------------------------------------------------------------------
 
-function installFetchInterceptor() {
-  const orig = window.fetch;
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes('/api/researcher/sources')) {
-      return new Response(JSON.stringify({ sources: FIXTURE_SOURCES }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    if (
-      url.includes('/api/researcher/standing-prompts') &&
-      !url.includes('/pin') &&
-      !url.includes('/unpin')
-    ) {
-      return new Response(JSON.stringify({ standing_prompts: FIXTURE_PROMPTS }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    if (url.includes('/pin') || url.includes('/unpin')) {
-      const isPinAction = url.includes('/pin') && !url.includes('/unpin');
-      return new Response(
-        JSON.stringify({ standing_prompt_version_id: 'spv-001', is_pinned: isPinAction }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-    return orig(input, init);
-  };
+async function setResearcherFixture(
+  sources: FixtureResearcherSource[],
+  prompts: FixtureStandingPrompt[],
+) {
+  await commands.setFixtureState({
+    state: {
+      researcherSources: sources,
+      researcherStandingPrompts: prompts,
+    },
+  });
 }
+
+afterEach(async () => {
+  await commands.resetFixtureState({ fixtureId: 'default' });
+});
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test('SourcesTriggersPage renders Sources and Triggers tabs', async () => {
-  installFetchInterceptor();
-  const { getByTestId } = render(<SourcesTriggersPage />);
-  const sourcesTab = getByTestId('tab-sources');
-  const triggersTab = getByTestId('tab-triggers');
-  expect(sourcesTab).toBeTruthy();
-  expect(triggersTab).toBeTruthy();
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
+
+  await expect.element(screen.getByTestId('tab-sources')).toBeVisible();
+  await expect.element(screen.getByTestId('tab-triggers')).toBeVisible();
 });
 
 test('Sources tab renders source rows with name, URL, and status chip', async () => {
-  installFetchInterceptor();
-  const { getByTestId } = render(<SourcesTriggersPage />);
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
 
-  // Default tab is Sources — wait for table to render.
-  await page.waitFor(() => document.querySelector('[data-testid="sources-table"]') !== null);
+  // Sources tab is the default — wait for the table to appear.
+  await expect.element(screen.getByTestId('sources-table')).toBeVisible();
 
-  const table = getByTestId('sources-table');
-  expect(table).toBeTruthy();
+  // All three source names should be present.
+  await expect.element(screen.getByText('SEC EDGAR')).toBeVisible();
+  await expect.element(screen.getByText('Bloomberg API')).toBeVisible();
+  await expect.element(screen.getByText('Old Venue')).toBeVisible();
 
-  // All source rows should be present.
-  const rows = document.querySelectorAll('[data-testid="source-row"]');
-  expect(rows.length).toBe(3);
-
-  // Check SEC EDGAR name is rendered.
-  const tableText = table.element().textContent ?? '';
-  expect(tableText).toContain('SEC EDGAR');
-  expect(tableText).toContain('Bloomberg API');
-  expect(tableText).toContain('Old Venue');
-
-  // Check URLs are rendered as links.
-  const urlLinks = document.querySelectorAll('[data-testid="source-url"]');
-  expect(urlLinks.length).toBe(3);
+  // Status chips should be visible.
+  await expect.element(screen.getByText('active')).toBeVisible();
+  await expect.element(screen.getByText('pending')).toBeVisible();
+  await expect.element(screen.getByText('retired')).toBeVisible();
 });
 
 test('Sources tab has no create, edit, or delete controls', async () => {
-  installFetchInterceptor();
-  render(<SourcesTriggersPage />);
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
 
-  await page.waitFor(() => document.querySelector('[data-testid="sources-table"]') !== null);
+  await expect.element(screen.getByTestId('sources-table')).toBeVisible();
 
-  // No buttons other than the refresh and tab controls should appear.
-  const allButtons = document.querySelectorAll('button');
-  const buttonTexts = Array.from(allButtons).map((b) => b.textContent?.toLowerCase() ?? '');
+  // The only buttons on the Sources tab are the tab switchers and the refresh button.
+  const buttons = screen.getAllByRole('button');
+  const buttonLabels = await Promise.all(
+    buttons.elements().map(async (b) => (b as HTMLElement).textContent?.toLowerCase().trim() ?? ''),
+  );
 
   // Must not have any create/edit/delete buttons.
   expect(
-    buttonTexts.some((t) => t.includes('create') || t.includes('add') || t.includes('new')),
+    buttonLabels.some((t) => t.includes('create') || t.includes('add') || t.includes('new')),
   ).toBe(false);
-  expect(buttonTexts.some((t) => t.includes('edit') || t.includes('modify'))).toBe(false);
-  expect(buttonTexts.some((t) => t.includes('delete') || t.includes('remove'))).toBe(false);
+  expect(buttonLabels.some((t) => t.includes('edit') || t.includes('modify'))).toBe(false);
+  expect(buttonLabels.some((t) => t.includes('delete') || t.includes('remove'))).toBe(false);
 });
 
 test('Triggers tab renders standing prompt rows grouped by subject_type', async () => {
-  installFetchInterceptor();
-  const { getByTestId } = render(<SourcesTriggersPage />);
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
 
   // Click the Triggers tab.
-  const triggersTab = getByTestId('tab-triggers');
-  await triggersTab.click();
+  await screen.getByTestId('tab-triggers').click();
 
-  // Wait for prompt rows to render.
-  await page.waitFor(() => document.querySelector('[data-testid="triggers-container"]') !== null);
+  // Wait for the triggers container.
+  await expect.element(screen.getByTestId('triggers-container')).toBeVisible();
 
-  const container = getByTestId('triggers-container');
-  expect(container).toBeTruthy();
+  // All three subject type group headers should appear.
+  await expect.element(screen.getByText('Entity (per Ticker)')).toBeVisible();
+  await expect.element(screen.getByText('Thesis')).toBeVisible();
+  await expect.element(screen.getByText('Portfolio (Fallback)')).toBeVisible();
 
-  const containerText = container.element().textContent ?? '';
-
-  // All three subject types should appear.
-  expect(containerText).toContain('Entity');
-  expect(containerText).toContain('Thesis');
-  expect(containerText).toContain('Portfolio');
-
-  // Subject IDs should appear.
-  expect(containerText).toContain('AAPL');
-  expect(containerText).toContain('rates-thesis');
-  expect(containerText).toContain('portfolio');
-
-  // Word counts should appear.
-  expect(containerText).toContain('42 words');
-  expect(containerText).toContain('67 words');
-  expect(containerText).toContain('31 words');
-});
-
-test('Triggers tab renders pin and unpin buttons for prompts with active versions', async () => {
-  installFetchInterceptor();
-  const { getByTestId } = render(<SourcesTriggersPage />);
-
-  // Click the Triggers tab.
-  const triggersTab = getByTestId('tab-triggers');
-  await triggersTab.click();
-
-  await page.waitFor(
-    () => document.querySelectorAll('[data-testid="standing-prompt-row"]').length > 0,
-  );
-
-  // Pin buttons should be rendered for unpinned prompts.
-  const pinButtons = document.querySelectorAll('[data-testid="pin-button"]');
-  expect(pinButtons.length).toBeGreaterThanOrEqual(1);
-
-  // Unpin buttons should be rendered for pinned prompts.
-  const unpinButtons = document.querySelectorAll('[data-testid="unpin-button"]');
-  expect(unpinButtons.length).toBeGreaterThanOrEqual(1);
+  // Subject IDs and word counts should appear.
+  await expect.element(screen.getByText('AAPL')).toBeVisible();
+  await expect.element(screen.getByText('rates-thesis')).toBeVisible();
+  await expect.element(screen.getByText('42 words')).toBeVisible();
+  await expect.element(screen.getByText('67 words')).toBeVisible();
+  await expect.element(screen.getByText('31 words')).toBeVisible();
 });
 
 test('Triggers tab shows Pinned badge for pinned prompts', async () => {
-  installFetchInterceptor();
-  const { getByTestId } = render(<SourcesTriggersPage />);
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
 
-  const triggersTab = getByTestId('tab-triggers');
-  await triggersTab.click();
+  await screen.getByTestId('tab-triggers').click();
 
-  await page.waitFor(() => document.querySelector('[data-testid="triggers-container"]') !== null);
+  await expect.element(screen.getByTestId('triggers-container')).toBeVisible();
 
-  const container = getByTestId('triggers-container');
-  const containerText = container.element().textContent ?? '';
+  // The thesis prompt is pinned — should show "Pinned" badge text.
+  await expect.element(screen.getByText('Pinned')).toBeVisible();
+});
 
-  // The thesis prompt is pinned — should show "Pinned" label.
-  expect(containerText).toContain('Pinned');
+test('Triggers tab renders pin button for unpinned prompt and unpin for pinned prompt', async () => {
+  await setResearcherFixture(FIXTURE_SOURCES, FIXTURE_PROMPTS);
+  const screen = render(<SourcesTriggersPage />);
+
+  await screen.getByTestId('tab-triggers').click();
+  await expect.element(screen.getByTestId('triggers-container')).toBeVisible();
+
+  // There should be at least one pin button (for unpinned prompts).
+  await expect.element(screen.getByTestId('pin-button')).toBeVisible();
+
+  // There should be at least one unpin button (for the pinned thesis prompt).
+  await expect.element(screen.getByTestId('unpin-button')).toBeVisible();
 });

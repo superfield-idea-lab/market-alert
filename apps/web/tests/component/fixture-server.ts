@@ -30,6 +30,23 @@ type FixturePasskeyCredential = {
   last_used_at: string | null;
 };
 
+export type FixtureResearcherSource = {
+  id: string;
+  name: string;
+  url: string;
+  trust_tier: 'public' | 'authenticated' | 'api_key' | null;
+  status: 'pending' | 'active' | 'retired';
+};
+
+export type FixtureStandingPrompt = {
+  id: string;
+  subject_type: 'entity' | 'thesis' | 'portfolio';
+  subject_id: string;
+  active_version_word_count: number | null;
+  is_pinned: boolean | null;
+  active_version_id: string | null;
+};
+
 type FixtureState = {
   tasks?: FixtureTask[];
   /** OAuth status response */
@@ -39,6 +56,10 @@ type FixtureState = {
   /** OAuth complete response */
   oauthComplete?: OAuthCompleteResponse | FixtureResponse<OAuthCompleteResponse>;
   passkeys?: FixturePasskeyCredential[];
+  /** Researcher canonical sources */
+  researcherSources?: FixtureResearcherSource[];
+  /** Researcher standing prompts */
+  researcherStandingPrompts?: FixtureStandingPrompt[];
 };
 
 type FixtureStore = Record<string, FixtureState>;
@@ -139,6 +160,37 @@ export async function handleFixtureRequest(req: Request, statePath: string): Pro
   // OAuth complete endpoint
   if (req.method === 'POST' && url.pathname === '/api/auth/oauth/complete') {
     return fixtureJson(state.oauthComplete ?? { connected: true });
+  }
+
+  // Researcher Sources & Triggers endpoints (issue #118)
+  if (req.method === 'GET' && url.pathname === '/api/researcher/sources') {
+    return json({ sources: state.researcherSources ?? [] });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/researcher/standing-prompts') {
+    return json({ standing_prompts: state.researcherStandingPrompts ?? [] });
+  }
+
+  if (
+    req.method === 'POST' &&
+    url.pathname.match(/^\/api\/researcher\/standing-prompts\/[^/]+\/(pin|unpin)$/)
+  ) {
+    const parts = url.pathname.split('/');
+    const promptId = parts.at(-2);
+    const action = parts.at(-1);
+    const prompts = state.researcherStandingPrompts ?? [];
+    const prompt = prompts.find((p) => p.id === promptId);
+    if (!prompt) {
+      return new Response(JSON.stringify({ error: 'Not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const newIsPinned = action === 'pin';
+    const updated = prompts.map((p) => (p.id === promptId ? { ...p, is_pinned: newIsPinned } : p));
+    store[fixtureId] = { ...state, researcherStandingPrompts: updated };
+    writeState(statePath, store);
+    return json({ standing_prompt_version_id: prompt.active_version_id, is_pinned: newIsPinned });
   }
 
   return new Response(
