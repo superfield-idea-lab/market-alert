@@ -234,7 +234,7 @@ export async function seedDemoFixtures(sql: Sql): Promise<void> {
       ${f.users.researcher.id},
       'user',
       ${sql.json({ username: f.users.researcher.username, role: f.users.researcher.role }) as never},
-      ${DEMO_TENANT}
+      null
     )
     ON CONFLICT (id) DO NOTHING
   `;
