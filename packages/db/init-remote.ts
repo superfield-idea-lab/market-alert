@@ -723,7 +723,9 @@ CREATE POLICY wiki_page_versions_bdm_block
  * REVOKE INSERT, UPDATE, DELETE on golden_documents FROM agent_worker ensures
  * the base worker role group can never write even without RLS.
  */
-async function configureGoldenDocumentsRls(appAdmin: ReturnType<typeof makePool>): Promise<void> {
+export async function configureGoldenDocumentsRls(
+  appAdmin: ReturnType<typeof makePool>,
+): Promise<void> {
   // Enable RLS and FORCE RLS on golden_documents
   await appAdmin.unsafe(`ALTER TABLE golden_documents ENABLE ROW LEVEL SECURITY`);
   await appAdmin.unsafe(`ALTER TABLE golden_documents FORCE ROW LEVEL SECURITY`);

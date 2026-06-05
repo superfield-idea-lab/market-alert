@@ -1,7 +1,7 @@
 /**
  * @file golden-documents.test.ts
  *
- * Integration tests for the golden-document API routes (issue #73).
+ * Integration tests for the golden-document API routes (issue #73, #117).
  *
  * Routes under test:
  *   POST   /api/golden-documents            — researcher creates a golden document
@@ -24,13 +24,20 @@
  *   AC3 — Unified retrieval returns active doc + sections:
  *     - GET /active/:kind returns active document with sections
  *
+ *   Issue #117 — RLS-enforced endpoint correctness:
+ *     - GET /:id/sections returns 200 after configureGoldenDocumentsRls
+ *     - POST /:id/sections returns 200 after configureGoldenDocumentsRls
+ *     - PATCH /:id/state returns 200 after configureGoldenDocumentsRls
+ *     - GET /:id returns 200 after configureGoldenDocumentsRls
+ *
  * No mocks. Real Postgres + real Bun server.
  */
 
-import { test, expect, beforeAll, afterAll } from 'vitest';
+import { test, describe, expect, beforeAll, afterAll } from 'vitest';
 import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../helpers/pg-container';
 import { createTestSession } from '../helpers/test-session';
+import { configureGoldenDocumentsRls, makePool } from '../../../../packages/db/init-remote';
 
 const PORT = 31473;
 const BASE = `http://localhost:${PORT}`;
@@ -311,6 +318,111 @@ test('GET /api/golden-documents/active/:kind returns active doc with sections', 
   expect(body.document).not.toBeNull();
   expect(body.document.state).toBe('active');
   expect(body.sections.length).toBeGreaterThan(0);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #117: RLS-enforced endpoint correctness
+//
+// Apply configureGoldenDocumentsRls against the same test Postgres container
+// before exercising the section and state endpoints. This verifies that the
+// bootstrap SELECT queries no longer use the raw pool (which would fail under
+// FORCE ROW LEVEL SECURITY) and instead derive tenant_id from the entities
+// table before wrapping golden_documents lookups in withRlsContext.
+// ---------------------------------------------------------------------------
+
+describe('golden-documents under RLS enforcement (issue #117)', () => {
+  beforeAll(async () => {
+    // Apply golden-documents RLS policies to the test Postgres container.
+    // makePool opens a connection as the postgres superfield user which can
+    // run ALTER TABLE ... FORCE ROW LEVEL SECURITY and CREATE POLICY.
+    const adminPool = makePool(pg.url);
+    try {
+      await configureGoldenDocumentsRls(adminPool);
+    } finally {
+      await adminPool.end({ timeout: 5 });
+    }
+  });
+
+  test('GET /api/golden-documents/:id returns 200 in RLS-enforced environment', async () => {
+    // Create a document first.
+    const createRes = await fetch(`${BASE}/api/golden-documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ kind: 'industry_definition', title: 'RLS Test Doc' }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = await createRes.json();
+    const docId = created.document.id;
+
+    // GET /:id must succeed (not 404) after RLS is configured.
+    const res = await fetch(`${BASE}/api/golden-documents/${docId}`, {
+      headers: { Cookie: authCookie },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.document.id).toBe(docId);
+  });
+
+  test('GET /api/golden-documents/:id/sections returns 200 in RLS-enforced environment', async () => {
+    // Create a document.
+    const createRes = await fetch(`${BASE}/api/golden-documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ kind: 'research_methodology', title: 'RLS Sections Doc' }),
+    });
+    expect(createRes.status).toBe(201);
+    const doc = (await createRes.json()).document;
+
+    // GET /:id/sections must return 200 (not 404) after RLS is configured.
+    const res = await fetch(`${BASE}/api/golden-documents/${doc.id}/sections`, {
+      headers: { Cookie: authCookie },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.sections)).toBe(true);
+  });
+
+  test('POST /api/golden-documents/:id/sections returns 200 in RLS-enforced environment', async () => {
+    // Create a document.
+    const createRes = await fetch(`${BASE}/api/golden-documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ kind: 'industry_definition', title: 'RLS Upsert Doc' }),
+    });
+    expect(createRes.status).toBe(201);
+    const doc = (await createRes.json()).document;
+
+    // POST /:id/sections must return 200 (not 404) after RLS is configured.
+    const res = await fetch(`${BASE}/api/golden-documents/${doc.id}/sections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ section_key: 'intro', content: '# Introduction', position: 0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.section.section_key).toBe('intro');
+  });
+
+  test('PATCH /api/golden-documents/:id/state returns 200 in RLS-enforced environment', async () => {
+    // Create a document.
+    const createRes = await fetch(`${BASE}/api/golden-documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ kind: 'research_methodology', title: 'RLS State Doc' }),
+    });
+    expect(createRes.status).toBe(201);
+    const doc = (await createRes.json()).document;
+
+    // PATCH /:id/state must return 200 (not 404) after RLS is configured.
+    const res = await fetch(`${BASE}/api/golden-documents/${doc.id}/state`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: authCookie },
+      body: JSON.stringify({ state: 'active' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.document.state).toBe('active');
+  });
 });
 
 // ---------------------------------------------------------------------------
