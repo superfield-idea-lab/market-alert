@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Bell, Settings, User, BookOpen, Globe } from 'lucide-react';
+import { Bell, Settings, User, BookOpen, Globe, ListTodo } from 'lucide-react';
 import { SettingsPage } from './pages/settings';
 import { SignalFeedPage } from './pages/signal-feed';
 import { GoldenDocumentsPage } from './pages/golden-documents';
 import { WikiNavPage } from './pages/wiki-nav';
+import { AgentTaskQueuePage } from './pages/agent-task-queue';
 import { PendingDraftsBadge } from './components/PendingDraftsBadge';
 
-type ActiveView = 'alerts' | 'settings' | 'golden-documents' | 'wiki';
+type ActiveView = 'alerts' | 'settings' | 'golden-documents' | 'wiki' | 'agent-queue';
 
 function App() {
   const { user, logout, loading } = useAuth();
@@ -81,6 +82,18 @@ function App() {
                 <PendingDraftsBadge customerId={user.id} />
               </div>
             </div>
+
+            {/* Agent Queue — superadmin only */}
+            {user.isSuperadmin && (
+              <button
+                onClick={() => setActiveView('agent-queue')}
+                title="Agent Queue"
+                data-testid="nav-agent-queue"
+                className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'agent-queue' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+              >
+                <ListTodo size={20} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -102,6 +115,7 @@ function App() {
             {activeView === 'settings' && <SettingsPage />}
             {activeView === 'golden-documents' && <GoldenDocumentsPage />}
             {activeView === 'wiki' && <WikiNavPage tenantId={user.id} />}
+            {activeView === 'agent-queue' && user.isSuperadmin && <AgentTaskQueuePage />}
           </div>
         </div>
       </main>
