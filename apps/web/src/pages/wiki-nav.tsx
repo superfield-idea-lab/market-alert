@@ -91,17 +91,8 @@ export interface WikiPageDetail {
 // API helpers
 // ---------------------------------------------------------------------------
 
-const TOKEN = (import.meta as { env?: Record<string, string> }).env?.VITE_WIKI_TEST_TOKEN ?? '';
-
-function authHeaders(): Record<string, string> {
-  return {
-    Authorization: `Bearer ${TOKEN}`,
-    'Content-Type': 'application/json',
-  };
-}
-
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: authHeaders() });
+  const res = await fetch(path, { credentials: 'include' });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((body as { error?: string }).error ?? res.statusText);

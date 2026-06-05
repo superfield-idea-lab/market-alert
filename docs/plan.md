@@ -1,34 +1,33 @@
 # Implementation Plan — Market Alert Trading System
 
-<!-- last-edited: 2026-05-01 -->
-<!-- review-applied: 2026-05-01 — six gaps resolved: outbound delivery, Corporate Action state machine, out-of-order events, incomplete announcement fallback, trade-from-alert UI linkage, volume scaling -->
+<!-- last-edited: 2026-05-03 -->
+<!-- review-applied: 2026-05-03 — corrected stale references, health endpoint paths, added apps/admin to Phase 0, aligned DB pool inventory, added ALERT_SUPPLEMENT to task queue scaffold, added WebSocket sticky-session note to Phase 4 -->
 <!-- source-decision: 2026-05-01 — EDGAR RSS/ATOM feed is the sole v1 ingestion source; multi-vendor adapter layer deferred to v2 -->
 
 CONTEXT MAP
-this ──implements─────▶ docs/pre-new.md (trading system PRD)
+this ──implements─────▶ docs/prd.md (trading system PRD)
+this ──references─────▶ docs/architecture.md (system architecture)
 this ──references─────▶ blueprint/rules/blueprints/ (arch, auth, data, deploy, env, process, prune, task-queue, test, ux, worker)
-this ──references─────▶ docs/implementation-plan-v1.md (Superfield KB plan, predecessor reference)
-this ──references─────▶ docs/review/plan-review-2026-04-11.md (prior blueprint-compliance review)
 
 ---
 
 ## About this document
 
-This plan implements the trading system PRD at `docs/pre-new.md`: an event-driven
+This plan implements the trading system PRD at `docs/prd.md`: an event-driven
 arbitrage hedge fund alert platform that detects corporate actions (M&A, dividends,
 spinoffs) from multiple vendor sources, enriches them, deduplicates, and delivers
 sub-second alerts to traders.
 
-The existing codebase (`main`) is a mature Superfield KB implementation (all 8 phases).
-This plan describes the incremental build-out needed to realize the trading system
-requirements on top of that substrate — and flags where the PRD conflicts with or is
-silent on blueprint requirements that are non-negotiable.
+The plan is grounded in `docs/architecture.md`, which defines the canonical monorepo
+layout, runtime decisions, data layer, task queue design, and all architectural
+decision log (ADL) entries. Where the PRD and blueprint conflict, blueprint requirements
+are non-negotiable and override PRD intent.
 
 ---
 
 ## PRD vs. Blueprint gap analysis
 
-The PRD (`docs/pre-new.md`) is thin in places where the blueprints are strict.
+The PRD (`docs/prd.md`) is thin in places where the blueprints are strict.
 Every gap below is a required addition, not optional polish.
 
 ### Critical conflicts
@@ -63,7 +62,7 @@ a custom feature.
 | Topic                        | Blueprint rule                 | Required addition                                                                              |
 | ---------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------- |
 | Passkey authentication       | `AUTH-D-001`, `AUTH-X-001`     | Phase 1 — passkey login for Trader and Admin                                                   |
-| Four-pool Postgres           | `DATA-D-006`, `DATA-C-001`     | Phase 0/1 — `mkt_app`, `mkt_audit`, `mkt_analytics`, `mkt_dictionary`                          |
+| Three-pool Postgres          | `DATA-D-006`, `DATA-C-001`     | Phase 0/1 — `mkt_app`, `mkt_audit`, `mkt_analytics` with disjoint roles (see architecture.md)  |
 | Audit store isolation        | `DATA-D-004`, `DATA-C-026`     | Phase 1 — append-only, hash-chained, own role                                                  |
 | Field-level encryption       | `DATA-C-023`                   | Phase 1 — sensitive alert and user fields                                                      |
 | Worker writes via API only   | `WORKER-D-001`, `WORKER-D-002` | Phase 3 — enrichment workers call API, no direct DB                                            |
@@ -103,7 +102,7 @@ UPDATE SKIP LOCKED`. No ad-hoc cron workers.
 | #   | Phase                                | Scout delivers                                                                 | Gates |
 | --- | ------------------------------------ | ------------------------------------------------------------------------------ | ----- |
 | 0   | Scaffolding & infrastructure         | Monorepo, twelve-check CI, k3d dev cluster, task queue, feature flags          | —     |
-| 1   | Security foundation                  | Four-pool Postgres, passkey login, RLS, field encryption, audit isolation      | 0     |
+| 1   | Security foundation                  | Three-pool Postgres, passkey login, RLS, field encryption, audit isolation     | 0     |
 | 2   | EDGAR ingestion worker               | One 8-K filing stored, filing text encrypted, `ALERT_ENRICH` task queued       | 1     |
 | 3   | Alert enrichment pipeline            | SEC filing retrieval + terms extraction + dedup: one enriched alert end-to-end | 2     |
 | 4   | Real-time alert delivery & trader UI | WebSocket push: alert delivered to trader UI within 1 s of enrichment          | 3     |
@@ -120,12 +119,14 @@ deploys a trivial service to a k3d cluster, all behind a twelve-check CI gate.
 
 **Scout issue.** _Scaffold the monorepo and land a "hello" service behind the full
 twelve-check CI gate._ Deliverables: `apps/server`, `apps/web`, `apps/worker`,
-`packages/core`, `tests/` skeleton per ARCH blueprint; three health endpoints
-(`/health/live`, `/health/ready`, `/health/deep` — `DEPLOY-C-030/031/032`); one
-empty trader route in the web app; CI pipeline with build, lint, format, unit,
-integration, e2e, coverage, checklist, depends-on, issue-checklist, conflicts, and
-single-issue checks — 99% coverage threshold; `pnpm dev` = k3d cluster create +
-kubectl apply (not Docker Compose — `ENV-D-002`).
+`apps/admin`, `packages/core`, `tests/` skeleton per ARCH blueprint; three health
+endpoints (`/healthz/live`, `/healthz/ready`, `/healthz/startup` —
+`DEPLOY-C-030/031/032`); one empty trader route in the web app; one empty admin route
+in the admin app; CI pipeline with build, lint, format, unit, integration, e2e,
+coverage, checklist, depends-on, issue-checklist, conflicts, and single-issue checks
+— 99% coverage threshold; `pnpm dev` = k3d cluster create + kubectl apply (not Docker
+Compose — `ENV-D-002`). `docs/dependencies.md` checked in as Phase 0 deliverable
+(`ARCH-C-005`).
 
 **Follow-on issues.**
 
@@ -144,18 +145,19 @@ kubectl apply (not Docker Compose — `ENV-D-002`).
   `packages/db/task-queue.ts` with the following new types — preserving existing types for
   the KB substrate, adding trading types alongside:
 
-  | TaskType constant     | agent_type string | Worker                                       | Trigger                           |
-  | --------------------- | ----------------- | -------------------------------------------- | --------------------------------- |
-  | `EDGAR_POLL`          | `edgar_ingest`    | Ingestion worker                             | Cron every 10 min                 |
-  | `ALERT_ENRICH`        | `enrichment`      | Enrichment worker                            | Enqueued by `edgar_ingest`        |
-  | `ALERT_DEDUP`         | `enrichment`      | Same enrichment worker, `job_type` sub-route | Enqueued after enrich             |
-  | `ALERT_NOTIFY`        | `notification`    | Notification worker                          | Enqueued on `Deduplicated`        |
-  | `CORP_ACTION_ADVANCE` | `scheduler`       | Scheduler worker                             | Cron on effective/settlement date |
-  | `TRADE_SETTLE`        | `scheduler`       | Same scheduler worker, `job_type` sub-route  | Cron on settlement date           |
+  | TaskType constant     | agent_type string | Worker                                       | Trigger                                    |
+  | --------------------- | ----------------- | -------------------------------------------- | ------------------------------------------ |
+  | `EDGAR_POLL`          | `edgar_ingest`    | Ingestion worker                             | Cron every 10 min                          |
+  | `ALERT_ENRICH`        | `enrichment`      | Enrichment worker                            | Enqueued by `edgar_ingest`                 |
+  | `ALERT_DEDUP`         | `enrichment`      | Same enrichment worker, `job_type` sub-route | Enqueued after enrich                      |
+  | `ALERT_NOTIFY`        | `notification`    | Notification worker                          | Enqueued on `Deduplicated`                 |
+  | `ALERT_SUPPLEMENT`    | `enrichment`      | Same enrichment worker, `job_type` sub-route | Enqueued on amended EDGAR filing (`8-K/A`) |
+  | `CORP_ACTION_ADVANCE` | `scheduler`       | Scheduler worker                             | Cron on effective/settlement date          |
+  | `TRADE_SETTLE`        | `scheduler`       | Same scheduler worker, `job_type` sub-route  | Cron on settlement date                    |
 
   Add per-type views `task_queue_view_edgar_ingest`, `task_queue_view_enrichment`,
   `task_queue_view_notification`, `task_queue_view_scheduler` in `packages/db/schema.sql`,
-  following the existing `task_queue_view_*` pattern (lines 103–148 of schema.sql).
+  following the existing `task_queue_view_*` pattern.
 
   Task queue status machine (existing, do not change):
   `pending → claimed → running → submitting → completed | failed | dead`
@@ -188,7 +190,7 @@ kubectl apply (not Docker Compose — `ENV-D-002`).
 - **Deployment audit record** — `deployments.jsonl` written on every deployment with
   timestamp, operator, release tag, environment, outcome, image digest
   (`DEPLOY-D-006`, `DEPLOY-C-035`).
-- Golden-path e2e test: boots the stack, hits `/health/live`, tears down. Canary for
+- Golden-path e2e test: boots the stack, hits `/healthz/live`, tears down. Canary for
   every subsequent PR.
 
 **Exit criteria.** CI is all-green on a PR that only changes a comment. Dev onboarding
@@ -211,10 +213,13 @@ chain for a single entity type. Nothing else in Phase 1 may land until this is m
 
 **Follow-on issues.**
 
-- **Four-pool Postgres architecture** — `mkt_app`, `mkt_audit`, `mkt_analytics`,
-  `mkt_dictionary` with disjoint roles and disjoint KMS key domains. Analytics pool
-  starts empty; populated in Phase 7. Dictionary pool holds trader identity tokens
-  under its own role. No operational role can read the audit pool.
+- **Three-pool Postgres architecture** — `mkt_app` (`mkt_app_rw`), `mkt_audit`
+  (`mkt_audit_w`), `mkt_analytics` (`mkt_analytics_w`) with disjoint roles and disjoint
+  KMS key domains, as specified in `docs/architecture.md`. The `mkt_analytics` pool starts
+  empty; populated in Phase 7. No operational role can read the audit pool. Pool
+  permissions per the architecture ADL: `mkt_app_rw` reads/writes transactional tables;
+  `mkt_audit_w` is INSERT-only on `mkt_audit` schema; `mkt_analytics_w` is INSERT-only
+  on `mkt_analytics` schema.
 - **Passkey registration + login** — FIDO2 WebAuthn only; no password, no magic link.
   SameSite=Strict cookies, HTTP-only, Secure. Trader and Admin roles both use passkey.
   Reuse existing `apps/server/src/auth/` passkey implementation rather than rewriting.
@@ -228,9 +233,10 @@ chain for a single entity type. Nothing else in Phase 1 may land until this is m
   terms, SEC filing text, trader name/email, any enrichment output that references
   real parties. KMS-managed keys partitioned by sensitivity class. HSM-backed staging KMS
   (`DATA-C-023`). Key rotation ≤ 90 days.
-- **Audit store** — append-only, hash-chained, own Postgres role, own KMS key domain.
-  Audit writes precede sensitive reads; a failed audit write denies the read. Operational
-  role cannot read or modify audit data.
+- **Audit store** — append-only, hash-chained `journal_entries` table in the `mkt_audit`
+  schema. Audit writes precede sensitive reads; a failed audit write denies the read.
+  Operational role cannot read or modify audit data. Written exclusively via `mkt_audit_w`
+  pool.
 - **Restrictive RLS policies** — one policy test per role per table. Admin cannot read
   another tenant's data; Trader cannot read another Trader's private alert notes.
 - **Business journal distinct from audit log** — audit log is the access trail; journal
@@ -241,10 +247,14 @@ chain for a single entity type. Nothing else in Phase 1 may land until this is m
   signing key compromise, agent credential compromise, admin account compromise, mass
   session invalidation (`AUTH-C-030`). Must be executed against staging environment.
 - **JWT/session hardening** — algorithm pinned at deploy (ES256; no header negotiation),
-  JTI revocation replay protection, CSRF double-submit on all cookie-authenticated mutations.
-- **mTLS service mesh** (Linkerd or Istio) — all pod-to-pod traffic mutually authenticated.
+  JTI revocation replay protection (`jti_revocations` table in `mkt_app`), CSRF
+  double-submit on all cookie-authenticated mutations.
+- **mTLS service mesh** (Linkerd) — all pod-to-pod traffic mutually authenticated.
   Worker → API, API → Postgres calls use short-lived workload identities.
 - **Rate limiting** — auth endpoints + API endpoints that could be probed.
+- **Machine tokens for workers** — scoped machine API tokens stored in AWS Secrets Manager,
+  rotated weekly. Workers carry no `DATABASE_URL`; all DB writes routed through
+  `POST /internal/...` endpoints validated by `worker-tokens.ts`.
 
 **Exit criteria.** An Admin test session cannot read a Trader's private alert note even
 when it tries directly; the database blocks it. Audit query against any sensitive read
@@ -294,11 +304,13 @@ with its delegated token, matching the existing `submitResultViaApi` pattern in
 
 - **EDGAR ingestion worker** (`apps/worker/src/edgar-ingest-job.ts`) — implements the
   `EDGAR_POLL` job type. Fetches the ATOM feed for each configured form type, parses
-  entries since the last-seen `accession_number` (stored in the task result), deduplicates
-  via `idempotency_key = 'edgar_poll:<form_type>:<accession_number>'`, and calls
-  `POST /internal/ingestion/corporate-action` per new filing. Registered in
-  `apps/worker/src/runner.ts` alongside `EMAIL_INGEST_JOB_TYPE`. Egress restricted to
-  `www.sec.gov` and `efts.sec.gov` only (`WORKER-C-024`).
+  entries since the last-seen `accession_number` (stored in `mkt_app.etl_cursors`
+  per-form-type cursor), deduplicates via
+  `idempotency_key = 'edgar_poll:<form_type>:<accession_number>'`, and calls
+  `POST /internal/ingestion/corporate-action` per new filing. In-process
+  `If-Modified-Since` / `ETag` cache short-circuits on 304 Not Modified.
+  Egress restricted to `www.sec.gov` and `efts.sec.gov` only (`WORKER-C-024`).
+  Registered in `apps/worker/src/runner.ts` alongside existing job types.
 - **Cron producer** — cron inserts `EDGAR_POLL` task rows every 10 minutes (matching EDGAR
   feed refresh cadence). Poll interval configurable via `feature_flags` table row — not a
   hard-coded constant (`PRUNE-A-003`). Gated by `edgar_ingest` feature flag (off by default;
@@ -312,25 +324,31 @@ with its delegated token, matching the existing `submitResultViaApi` pattern in
   (`M&A | dividend | spinoff | ownership_change | proxy | merger_comms`), `ticker`,
   `cik`, `filing_url`, `filing_text` (encrypted), `announced_at`, `effective_date`,
   `settlement_date`, `state` (`Announced | Effective | Closed | Disputed`),
-  `raw_payload_hash`, `retention_class`, `legal_hold`.
+  `raw_payload_hash`, `retention_class`, `legal_hold`. Monthly `RANGE` partitioning on
+  `announced_at` per `docs/architecture.md` data layer spec.
 - **Corporate Action state machine** — implements PRD §6 lifecycle:
   `Announced → Effective → Closed → Disputed`. Cron inserts `CORP_ACTION_ADVANCE` tasks
   on `effective_date` and `settlement_date`; `scheduler` worker calls
   `PATCH /internal/corporate-actions/:id/advance`. Admin forces `→ Disputed` via
   `POST /internal/corporate-actions/:id/dispute`; journal compensation event written.
-  Every transition is a business journal entry. Registered in the scheduler worker as a
-  `CORP_ACTION_ADVANCE` job type alongside `TRADE_SETTLE`.
+  Every transition is a business journal entry.
 - **Raw filing store** — append-only; stores the original EDGAR XML/HTML filing text
   alongside the normalised entity for replay (`DATA-D-004`). Retention class written at
-  ingestion.
+  ingestion. Long-term archival to AWS S3/MinIO with Object Lock (WORM mode).
 - **Ingestion worker HPA** — Kubernetes HPA on `edgar_ingest` worker deployment; scale
-  metric: `EDGAR_POLL` task queue depth. `MAX_WORKER_CONCURRENCY` configurable via env.
-  Queue depth alert fires at 80% of throttle threshold.
+  metric: `EDGAR_POLL` task queue depth via KEDA `prometheus` trigger.
+  `MAX_WORKER_CONCURRENCY` configurable via env. Queue depth alert fires at 80% of
+  throttle threshold.
 - **EDGAR fixture** — one complete recorded EDGAR ATOM feed response (8-K + S-4) captured
   via the golden fixture recorder from Phase 0 and committed to `tests/fixtures/edgar/`.
   MSW v2 handler intercepts all `sec.gov` calls in CI. Zero live EDGAR calls in automated
   tests. 30-day fixture refresh scheduled pipeline refreshes the fixture and alerts on
   schema drift.
+- **Backup + restore runbook** — written and tested before any market data lands. Recovery
+  path must exist as soon as real data reaches the system.
+- **Observability wiring** — ingestion pipeline metrics exported via `pg_query_exporter`
+  (`task_queue_pending_total{job_type="edgar_ingest"}`). pino structured logs with
+  `trace_id`, `service`, and `job_type` on every worker line.
 
 **Exit criteria.** A recorded EDGAR 8-K ATOM fixture replayed by an integration test
 produces one `CorporateAction` row with encrypted `filing_text`, zero PII in any
@@ -355,16 +373,17 @@ No separate SEC fetch step — the filing text is already in-hand from Phase 2.
 
 **Follow-on issues.**
 
-- **Enrichment worker** (`apps/worker/src/alert-enrich-job.ts`) — implements `ALERT_ENRICH`
-  and `ALERT_DEDUP` job types within the `enrichment` agent type, using the existing
-  multi-`job_type` dispatch pattern in `runner.ts`. Fetches `CorporateAction.filing_text`
-  via `GET /internal/corporate-actions/:id` with its delegated token. No outbound calls to
-  EDGAR — text already stored in Phase 2. Network policy blocks worker → DB (`WORKER-C-006`);
-  egress restricted to `api-server` only (`WORKER-C-024`).
+- **Enrichment worker** (`apps/worker/src/alert-enrich-job.ts`) — implements `ALERT_ENRICH`,
+  `ALERT_DEDUP`, and `ALERT_SUPPLEMENT` job types within the `enrichment` agent type, using
+  the existing multi-`job_type` dispatch pattern in `runner.ts`. Fetches
+  `CorporateAction.filing_text` via `GET /internal/corporate-actions/:id` with its
+  delegated token. No outbound calls to EDGAR — text already stored in Phase 2. Network
+  policy blocks worker → DB (`WORKER-C-006`); egress restricted to `api-server` only
+  (`WORKER-C-024`). Uses `cheerio` for HTML filing text extraction; regex/rule-based terms
+  extraction for v1 (AI-driven extraction via Claude Sonnet deferred to v2 per PRD §8).
 - **Terms extraction** — parses stored EDGAR filing XML/HTML text: extracts
   deal value, target/acquirer, cash/stock split, conditions, expected close date. Produces
-  structured `DealTerms` sub-entity. Out-of-scope for v1: AI-driven extraction (PRD §8);
-  use regex/rule-based extraction in v1. Partial extraction is expected and handled: any
+  structured `DealTerms` sub-entity. Partial extraction is expected and handled: any
   `DealTerms` field that cannot be extracted is set to `null` with an `extraction_confidence`
   flag (`full | partial | failed`). Alerts with `extraction_confidence: failed` still
   advance to `Enriched` and are delivered to traders marked as incomplete — never silently
@@ -376,18 +395,21 @@ No separate SEC fetch step — the filing text is already in-hand from Phase 2.
   date. A new filing for an existing `accession_number` is deduplicated at ingestion; a new
   filing for the same `(ticker, event_type)` with an earlier `filed_at` re-opens the
   `ALERT_ENRICH` task if the alert has not yet reached `Delivered`. Post-`Delivered` amended
-  filings emit an `ALERT_SUPPLEMENT` task, delivered as an update to the existing alert.
+  filings enqueue an `ALERT_SUPPLEMENT` task, delivered as an update to the existing alert.
+  The overlap window in `etl_cursors` re-scans recent accession numbers to catch
+  out-of-order amendments.
 - **Delta-neutral impact calculation** — computes estimated arbitrage spread and
   delta-neutral exposure from deal terms + current price data. Price data fetched from a
-  configured market data source (feature-flagged; dev uses fixture).
+  configured market data source (feature-flagged; dev uses fixture). Best-effort in Phase 3;
+  falls back to raw spread if market data source unavailable.
 - **Deduplication engine** — cross-source dedup after enrichment: if two enriched alerts
   represent the same corporate action from different sources, merge into one alert with
   multiple `source_references`. Dedup key: `(ticker, event_type, announced_at ± 24h)`.
-  Dedup decisions journaled.
+  Dedup decisions journaled. `ALERT_DEDUP` task enqueued after `ALERT_ENRICH` completes.
 - **Alert entity write path** — `POST /internal/alerts` with enriched payload; worker
   token scoped to `(alert_type, source)`. Alert created in `Enriched` state; transitions
-  to `Deduplicated` after dedup pass, then `Delivered` once all enabled delivery channels
-  confirm dispatch (Phase 4).
+  to `Deduplicated` after dedup pass. Monthly `RANGE` partitioning on `created_at` per
+  architecture.md.
 - **Alert state machine** — implements PRD §6 state machine:
   `Pending → Detected → Enriched → Deduplicated → Delivered → Acknowledged → Archived`.
   Every transition is a journal entry; reversions produce a business journal compensation
@@ -419,49 +441,53 @@ enriched detail — those land after the scout proves the real-time path.
 
 **Follow-on issues.**
 
-- **WebSocket server** — authenticated WebSocket endpoint in `apps/server`. Session
-  validated on upgrade via same cookie/JWT as HTTP. Trader session subscribes to their
-  watchlist-filtered alert channel. Heartbeat + reconnect with exponential backoff.
-- **LISTEN/NOTIFY trigger** — `pg_notify` fired on alert `Deduplicated` state transition;
-  WebSocket server receives it and pushes to all connected trader sessions that have
-  the alert's ticker in their watchlist. Latency target: < 1 second from DB write to
-  client receipt. Simultaneously enqueues an `ALERT_NOTIFY` task for outbound channels.
+- **WebSocket server** — authenticated WebSocket endpoint in `apps/server` using Bun's
+  native `Bun.serve` WebSocket upgrade (no `ws` library). Session validated on upgrade via
+  same HTTP-only cookie/JWT as HTTP. Trader session subscribes to their watchlist-filtered
+  alert channel. Heartbeat + reconnect with exponential backoff. For multi-replica
+  deployments, sticky sessions via ALB target group are required until a pub/sub fan-out
+  strategy is chosen (architecture.md open question #3). The LISTEN/NOTIFY → WebSocket
+  push path must deliver within 1 second of an alert reaching `Deduplicated` state.
+- **LISTEN/NOTIFY trigger** — `pg_notify` fired on alert `Deduplicated` state transition
+  via a dedicated `postgres` LISTEN connection in `apps/server` (separate from the main
+  `mkt_app` pool). WebSocket server receives it and pushes to all connected trader sessions
+  that have the alert's ticker in their watchlist. Simultaneously enqueues an `ALERT_NOTIFY`
+  task for outbound channels.
 - **Trader dashboard** — alert feed sorted by timestamp, newest first. Each alert shows:
   ticker, event type, deal terms summary, sources, spread estimate, timestamp, status badge.
   RLS: trader sees only alerts for tickers on their watchlist (`mkt_app` RLS enforced).
+  State management: React Context + `useReducer` (`AlertFeedContext`) — no Redux/Zustand
+  per architecture.md. Server data fetching via TanStack Query v5. Alert list rendered with
+  TanStack Table v8.
 - **Alert detail view** — full enriched detail: deal terms, SEC filing excerpt, all source
-  references, delta-neutral impact, citation links. Citations open the raw source snippet.
-  Re-identification service used to display real names in filing references (same pattern
-  as Superfield KB `apps/server/src/api/reidentification.ts`).
+  references, delta-neutral impact, citation links.
 - **Acknowledge action** — Trader transitions alert from `Delivered` to `Acknowledged`
   via `POST /api/alerts/:id/acknowledge`. Audit event written. Optimistic UI update with
   rollback on error.
 - **Watchlist management** — Trader can add/remove tickers from their watchlist via the
   settings page. Watchlist changes immediately affect which alerts are pushed.
 - **Alert filtering** — client-side filter by event type, expected close date range,
-  minimum spread threshold.
+  minimum spread threshold via TanStack Table v8 column filters.
 - **Playwright e2e suite** — happy path (alert pushed within 1 s) + wrong-trader RLS
   path (trader cannot see another trader's private notes) — run on real headless Chromium
-  (`TEST-C-018`).
+  (`TEST-C-018`). The "alert pushed within 1 s" assertion is a merge gate.
 - **Outbound notification delivery** — `ALERT_NOTIFY` task worker dispatches to all
   enabled outbound channels for each trader on the watchlist. Channel adapters (each
   feature-flag-gated, default off):
-  - **Email** — SMTP adapter; sends enriched alert summary with deal terms and spread.
-  - **SMS** — pluggable SMS provider adapter; sends ticker + event type + spread one-liner.
-  - **Webhook** — per-trader configurable outbound webhook URL; POST with signed HMAC
-    payload containing the full enriched alert JSON. Signature uses a per-trader secret
-    stored encrypted in `mkt_app`.
-    Alert transitions to `Delivered` only after all enabled channels for that trader have
-    dispatched (or failed after retry). Channel failures are non-blocking: a failed email
-    does not block the WebSocket push. Each channel failure is an audit event. Retry via
-    DLQ with exponential backoff.
+  - **Email** — SMTP adapter (`packages/integrations`); sends enriched alert summary.
+  - **SMS** — pluggable SMS provider adapter (`packages/integrations`); sends ticker +
+    event type + spread one-liner.
+  - **Webhook** — per-trader configurable outbound webhook URL (`packages/integrations`);
+    POST with signed HMAC payload containing the full enriched alert JSON. Signature uses
+    a per-trader secret stored encrypted in `mkt_app`.
+    Alert transitions to `Delivered` after WebSocket push completion. Channel failures are
+    non-blocking: a failed email does not block the WebSocket push. Each channel failure is
+    an audit event. Retry via DLQ with exponential backoff.
 - **"Propose trade from alert" CTA** — alert detail view includes a "Propose trade" button
   that navigates to the Phase 6 trade form with `alert_id`, `ticker`, and inferred
   `direction` pre-populated. Button is hidden until Phase 6 ships; displayed as a
   disabled stub in Phase 4 to preserve the UI slot. Gated by the `trade_lifecycle`
-  feature flag, which is `false` until Phase 6 exits.
-- **PWA parity** — alert feed, acknowledge action, and outbound channel preferences work
-  on the mobile PWA surface.
+  feature flag (`false` until Phase 6 exits).
 
 **Exit criteria.** In a CI environment, a seeded alert transition triggers a WebSocket
 push received by a connected trader session within 1 second, verified by a Playwright
@@ -474,17 +500,20 @@ reads at the database layer.
 ## Phase 5 — Admin panel & source configuration
 
 **Goal.** An Admin can manage vendor source on/off state, override false-positive alerts,
-view system health metrics per source, and read the audit trail.
+view system health metrics per source, and read the audit trail. The admin panel runs in
+`apps/admin` (separate deployable SPA, shares `packages/ui` with `apps/web`, distinct
+`alerts:admin` and `sources:admin` auth scopes).
 
 **Scout issue.** _Source toggle and health view_: Admin can disable EDGAR ingestion (set
 `edgar_ingest` feature flag row to `false`) via the admin UI; the cron producer stops
-inserting `EDGAR_POLL` tasks; health dashboard shows EDGAR as inactive. Proves the feature-flag-backed source
-configuration path before alert override or audit views land.
+inserting `EDGAR_POLL` tasks; health dashboard shows EDGAR as inactive. Proves the
+feature-flag-backed source configuration path before alert override or audit views land.
 
 **Follow-on issues.**
 
-- **Admin dashboard shell** — authenticated Admin-only layout; RLS blocks non-Admin
-  sessions from all admin endpoints at the database layer.
+- **Admin dashboard shell** — authenticated Admin-only layout in `apps/admin`; RLS blocks
+  non-Admin sessions from all admin endpoints at the database layer. Auth scopes:
+  `alerts:admin`, `sources:admin`.
 - **Vendor source configuration UI** — list of all configured sources with on/off toggle,
   polling interval, circuit breaker status, last-seen-event timestamp. Each change writes
   to the `feature_flags` table and the business journal; effective immediately.
@@ -500,8 +529,9 @@ configuration path before alert override or audit views land.
 - **Alert volume and latency dashboards** — alert volume per source per hour; p50/p95
   delivery latency (time from vendor receipt to trader acknowledgement). Persisted in
   `mkt_analytics`.
-- **Bulk alert export** — structured JSON export of alerts for a date range, audited per
-  the same pattern as e-discovery export in Phase 7.
+- **Bulk alert export** — structured JSON export of alerts for a date range, audited.
+- **DLQ replay** — DLQ items queryable and re-queueable from `apps/admin` per
+  architecture.md task queue DLQ replay spec.
 
 **Exit criteria.** Admin disables a vendor source via the UI; the ingestion worker's next
 poll cycle finds the feature flag `false` and skips; the health dashboard updates within
@@ -527,16 +557,18 @@ settlement or reconciliation land. The Phase 4 feature flag `trade_lifecycle` fl
 - **Trade entity** — fields: `alert_id` (FK to the originating alert), `trader_id`,
   `ticker`, `direction` (long/short), `notional`, `executed_price`, `executed_at`,
   `settlement_date`, `state`, `reconciliation_notes`. Field-level encryption on price and
-  notional fields.
+  notional fields. RBAC scopes: `trades:propose`, `trades:execute`.
 - **Trade state machine** — `Proposed → Executed → Settled → Reconciled`. Each transition
   is a business journal entry. Disputed state (`Disputed`) reachable from any post-`Executed`
   state on Admin override; journal compensation event required.
 - **Settlement tracking** — settlement date tracked; on settlement date, cron inserts
-  `TRADE_SETTLE` task; worker marks trade `Settled` via API.
+  `TRADE_SETTLE` task; scheduler worker marks trade `Settled` via
+  `PATCH /internal/trades/:id/settle`.
 - **Reconciliation** — Trader or Admin records post-trade reconciliation notes; trade
   transitions to `Reconciled`. Reconciliation records are append-only (no editing).
 - **Trade history view** — Trader dashboard tab listing their trades: state badges,
   linked alert, timeline, journal entries. RLS: each Trader sees only their own trades.
+  Forms use DIY controlled React inputs (`useState`) per architecture.md frontend spec.
 - **Admin trade oversight** — Admin can view all trades (aggregate, not per-trader detail)
   and can mark a trade `Disputed` with a reason. Trader notified via WebSocket.
 
@@ -561,22 +593,24 @@ before the API or export path land.
 
 - **Replay API** — `GET /api/replay/corporate-actions/:id` and `/api/replay/trades/:id`
   return the ordered journal entries that produced the current state. Response includes
-  each state transition with actor, timestamp, and input payload hash.
+  each state transition with actor, timestamp, and input payload hash. RBAC scope:
+  `replay:read`.
 - **Point-in-time state query** — `?at=<ISO8601>` parameter reconstructs entity state
   at an arbitrary historical timestamp from the journal. Useful for debugging and
   compliance review.
-- **Event stream subscription** (advanced, can be a follow-on) — server-sent events
-  endpoint for Admin to stream live journal events for a given entity. Same RLS rules
-  as the read endpoint.
+- **Event stream subscription** — server-sent events endpoint for Admin to stream live
+  journal events for a given entity. Same RLS rules as the read endpoint.
 - **Structured replay export** — Admin exports a point-in-time bundle (journal +
   audit trail + entity snapshots) for a corporate action, date range, or trader, in
   structured JSON. Export itself is an audit event. Replays are verified by the
   `mkt_analytics` materialisation and compared against the live `mkt_app` state.
 - **Analytics tier population** — materialise pseudonymised session events and aggregated
-  alert/trade metrics into `mkt_analytics`. BDM-style queries (future: cross-desk
-  aggregate analytics) execute against `mkt_analytics`, not `mkt_app` (`DATA-D-006`,
-  `DATA-D-007`, `DATA-C-010/011`, avoids `DATA-X-003`). Session pseudonyms rotate per
-  session via HMAC-SHA256.
+  alert/trade metrics into `mkt_analytics`. BDM-style queries execute against
+  `mkt_analytics`, not `mkt_app` (`DATA-D-006`, `DATA-D-007`, `DATA-C-010/011`, avoids
+  `DATA-X-003`). Session pseudonyms rotate per session via HMAC-SHA256.
+- **Cold archival** — alerts in `Archived` state cold-migrated to S3/MinIO. Business
+  journal: 7-year retention (SEC compliance); cold-tier migration to S3/MinIO
+  Glacier-class storage after 90 days.
 - **30-day fixture refresh** — scheduled CI job refreshes all vendor fixtures via the
   golden fixture recorder from Phase 0; schema drift detection alerts on changes.
 
@@ -597,6 +631,7 @@ Items that are not scout-eligible but must land with or before the phases that n
 | Trace-ID propagation (browser → server → DB)  | Phase 0    | End-to-end from browser side; needed from first real request                         |
 | k3d cluster + task queue + design system      | Phase 0    | Foundation; Docker Compose never used                                                |
 | Feature flags for all sources and channels    | Phase 0    | `edgar_ingest`, notify channels, `trade_lifecycle` all backed by DB flag rows        |
+| `docs/dependencies.md` (Buy/DIY log)          | Phase 0    | `ARCH-C-005` deliverable; all runtime deps must be justified before code lands       |
 | mTLS service mesh (Linkerd)                   | Phase 1    | Required before any multi-service traffic with market data                           |
 | KMS integration (HSM-backed)                  | Phase 1    | Field encryption is a Phase 1 gate; KMS must be HSM-backed in staging                |
 | Rate limiting (auth + API)                    | Phase 1    | Auth endpoints from first login; alert query path from first enriched alert          |
@@ -621,6 +656,7 @@ Not blocking issue creation, but must be resolved before the phase they affect b
 | Delta-neutral impact: required v1 or v2?                 | Phase 3             | Best-effort in Phase 3; fallback to raw spread if market data source unavailable                                         |
 | Market data source for spread calculation?               | Phase 3             | Needs a free or contracted price feed; open until resolved                                                               |
 | Outbound channel priority (email vs. SMS vs. webhook)?   | Phase 4             | All three gated off by default; Admin enables per-tenant; Trader sets preference                                         |
+| WebSocket fan-out strategy for multi-replica server?     | Phase 4             | Sticky sessions (ALB target group) for MVP; pub/sub relay deferred; must be resolved before Phase 4 merges               |
 | Webhook integration with external trading systems?       | Phase 6             | Per-trader outbound webhook in Phase 4; trading-system API integration is v2                                             |
 | Vendor sources (Bloomberg, DealReporter, etc.) timeline? | v2                  | All dark behind feature flags; no v1 commitment                                                                          |
 | AI-driven alert filtering?                               | PRD §8 out-of-scope | Confirmed out of scope for v1                                                                                            |
@@ -637,10 +673,10 @@ Not blocking issue creation, but must be resolved before the phase they affect b
 | Deduplication false-merges create missed alerts        | P1 trader impact                       | Dedup decisions journaled; any merge can be reversed; Phase 3 integration tests cover all edge cases with recorded fixtures |
 | Out-of-order late events corrupt enriched alert        | Wrong deal terms delivered to traders  | Sequence-gap detection re-opens enrichment task if alert not yet `Delivered`; supplement path for post-delivery late events |
 | Partial terms extraction silently blocks delivery      | Alert stuck in `Enriched` indefinitely | `partial` extraction confidence flag ensures alert advances regardless; null fields surfaced explicitly in UI               |
-| Ingestion worker overwhelmed at peak volume            | Queue depth grows unboundedly          | HPA on `EDGAR_POLL` queue depth; load test required at Phase 2 exit                                                         |
+| Ingestion worker overwhelmed at peak volume            | Queue depth grows unboundedly          | HPA on `EDGAR_POLL` queue depth via KEDA; load test required at Phase 2 exit                                                |
 | RLS policy authoring is error-prone                    | Silent cross-trader data leaks         | Every RLS policy has a dedicated integration test asserting the block; Phase 4 e2e verifies at the DB layer                 |
-| SEC EDGAR rate limits in enrichment workers            | Phase 3 pipeline throttled             | Configurable request rate in worker; circuit breaker backs off; enrichment result cached per `(corporate_action_id)`        |
 | Outbound channel (email/SMS/webhook) delivery failures | Trader misses alert                    | Channel failures non-blocking; DLQ + audit event per failure; alert still `Delivered` if WebSocket push succeeded           |
 | Corporate Action effective date wrong from vendor      | Traders acting on stale spread window  | EDGAR filing overrides vendor date when available; Admin can manually correct via `Disputed` transition                     |
 | PRD "minimal audit" intent vs. blueprint requirement   | Phase 1 compliance debt                | Resolved: comprehensive audit is Phase 1; PRD intent overridden by blueprint                                                |
 | Feature creep from open questions                      | Plan becomes unachievable              | v2 features explicitly excluded; open questions stay here until a v2 plan is drafted                                        |
+| WebSocket sticky-session limit                         | Horizontal scale blocked past MVP      | Documented as open question; must be resolved before Phase 4 exits                                                          |
