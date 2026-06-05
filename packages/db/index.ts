@@ -5,6 +5,8 @@ import { dirname, resolve } from 'path';
 import { buildSslOptions } from './ssl';
 
 export { buildSslOptions } from './ssl';
+export { seedDemoFixtures, DEMO_FIXTURES } from './demo-seed';
+export type { DemoFixtures } from './demo-seed';
 
 const DEFAULT_DATABASE_URLS = {
   app: 'postgres://app_rw:app_rw_password@localhost:5432/superfield_app',

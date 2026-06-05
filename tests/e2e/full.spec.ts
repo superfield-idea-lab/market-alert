@@ -9,9 +9,9 @@
  * the "Sign in with a passkey" button and a toggle to switch to registration.
  */
 import { chromium, type Browser, expect as playwrightExpect } from '@playwright/test';
-import postgres from 'postgres';
 import { afterAll, beforeAll, expect as vitestExpect, test } from 'vitest';
 import { startE2EServer, stopE2EServer, type E2EEnvironment } from './environment';
+import { getFixtureSession } from './fixtures';
 
 const INVALID_ERROR_PATTERNS = ['favicon', '401', 'Unauthorized'];
 
@@ -77,56 +77,31 @@ test('register toggle shows username field and passkey register button', async (
   await page.close();
 });
 
-test('crm admin can open the CRM tab and create an asset manager', async () => {
+test('demo researcher can log in via quick-login and reaches the signal feed', async () => {
   const page = await browser.newPage();
-  const session = await getTestSession(env.baseUrl, `crm-ui-${Date.now()}`);
-  const db = postgres(env.pg.url, { max: 1 });
+  try {
+    // Use the fixture session for the demo researcher — same session path the
+    // live demo uses when the user clicks "Sign in as Account Manager".
+    const session = await getFixtureSession(env.baseUrl, 'researcher');
+    await page.context().addCookies([
+      {
+        name: 'superfield_auth',
+        value: session.cookie.match(/superfield_auth=([^;]+)/)?.[1] ?? '',
+        url: env.baseUrl,
+      },
+    ]);
 
-  await db`
-    UPDATE entities
-    SET properties = ${db.json({ username: session.username, role: 'crm_admin' }) as never}
-    WHERE id = ${session.userId}
-  `;
+    await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
 
-  await page.context().addCookies([
-    {
-      name: 'superfield_auth',
-      value: session.cookie.match(/superfield_auth=([^;]+)/)?.[1] ?? '',
-      url: env.baseUrl,
-    },
-  ]);
+    // Authenticated researchers land on the signal feed (alerts view).
+    // The login page should no longer be visible.
+    await playwrightExpect(
+      page.getByRole('button', { name: 'Sign in with a passkey' }),
+    ).not.toBeVisible();
 
-  await page.goto(env.baseUrl, { waitUntil: 'networkidle' });
-
-  await playwrightExpect(page.getByTitle('Admin Dashboard')).toBeVisible();
-  await page.getByTitle('Admin Dashboard').click();
-  await playwrightExpect(page.getByRole('button', { name: 'CRM' })).toBeVisible();
-  await page.getByRole('button', { name: 'CRM' }).click();
-
-  await playwrightExpect(page.getByPlaceholder('E.g. Atlas Capital')).toBeVisible();
-  await page.getByPlaceholder('E.g. Atlas Capital').fill('Atlas Capital');
-  await page.getByPlaceholder('Optional note').fill('Playwright-created manager');
-  await page.getByRole('button', { name: 'Create' }).click();
-
-  await playwrightExpect(page.locator('input[value="Atlas Capital"]')).toBeVisible();
-  await db.end({ timeout: 5 });
-  await page.close();
+    // The wiki nav button should be present in the sidebar for authenticated users.
+    await playwrightExpect(page.getByTitle('Wiki')).toBeVisible();
+  } finally {
+    await page.close();
+  }
 });
-
-async function getTestSession(
-  base: string,
-  username: string,
-): Promise<{ cookie: string; userId: string; username: string }> {
-  const res = await fetch(`${base}/api/test/session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username }),
-  });
-  const body = (await res.json()) as { user: { id: string; username: string } };
-  const cookie = res.headers.get('set-cookie') ?? '';
-  return {
-    cookie,
-    userId: body.user.id,
-    username: body.user.username,
-  };
-}

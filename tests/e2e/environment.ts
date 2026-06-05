@@ -42,6 +42,9 @@ export async function startE2EServer(): Promise<E2EEnvironment> {
       // Enable the test-session backdoor so integration tests can obtain
       // session cookies without going through the WebAuthn ceremony.
       TEST_MODE: 'true',
+      // Enable demo mode so seedDemoFixtures() runs at server startup and
+      // /api/demo/session is available for fixture-user login in tests.
+      DEMO_MODE: 'true',
       // Disable CSRF in the E2E test environment so API tests can make
       // authenticated POST requests without managing the double-submit token.
       CSRF_DISABLED: 'true',
