@@ -339,6 +339,7 @@ Primary evidence: SEC 8-K filings (Tier A). FDA press releases (Tier A). Clinica
   await sql.begin(async (txRaw) => {
     const tx = txRaw as unknown as Sql;
     await tx.unsafe(`SET LOCAL "app.current_role" = 'researcher'`);
+    await tx.unsafe(`SET LOCAL "app.current_tenant_id" = '${DEMO_TENANT}'`);
 
     await tx`
       INSERT INTO golden_documents (id, kind, author_id, tenant_id, title, state)

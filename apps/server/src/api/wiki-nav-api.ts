@@ -44,27 +44,9 @@
 
 import type { AppState } from '../index';
 import { makeJson } from '../lib/response';
+import { getAuthenticatedUser } from './auth';
 import { getCitesEdges } from 'db/wiki-rebuild-store';
 import { listOpenDebatesForPage } from 'db/wiki-debate-store';
-
-// ---------------------------------------------------------------------------
-// Auth helper (mirrors wiki-rebuild-api.ts pattern)
-// ---------------------------------------------------------------------------
-
-function checkBearer(req: Request): string | null {
-  const authHeader = req.headers.get('Authorization') ?? '';
-  if (!authHeader.startsWith('Bearer ')) return null;
-  return authHeader.slice('Bearer '.length).trim();
-}
-
-function isAuthorized(token: string | null): boolean {
-  if (!token) return false;
-  const testMode = process.env.TEST_MODE === 'true';
-  const expectedToken = process.env.WIKI_REBUILD_TEST_TOKEN ?? '';
-  if (testMode) return token === expectedToken && expectedToken.length > 0;
-  // Production: TODO replace with signed JWT verification (follow-on).
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,9 +92,9 @@ export async function handleWikiNavApiRequest(
   if (req.method !== 'GET') return null;
 
   const json = makeJson({});
-  const token = checkBearer(req);
+  const user = await getAuthenticatedUser(req);
 
-  if (!isAuthorized(token)) return json({ error: 'Unauthorized' }, 401);
+  if (!user) return json({ error: 'Unauthorized' }, 401);
 
   const { sql } = appState;
 
