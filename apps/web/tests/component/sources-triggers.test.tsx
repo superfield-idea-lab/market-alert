@@ -200,9 +200,14 @@ test('Triggers tab renders pin button for unpinned prompt and unpin for pinned p
   await screen.getByTestId('tab-triggers').click();
   await expect.element(screen.getByTestId('triggers-container')).toBeVisible();
 
-  // There should be at least one pin button (for unpinned prompts).
-  await expect.element(screen.getByTestId('pin-button')).toBeVisible();
+  // AAPL is an unpinned entity prompt — its row should have a pin button.
+  // Use getByRole('row') scoping to avoid strict-mode collision when multiple
+  // pin-buttons are rendered (AAPL and portfolio are both unpinned).
+  const aaplRow = screen.getByRole('row', { name: /AAPL/ });
+  await expect.element(aaplRow.getByTestId('pin-button')).toBeVisible();
 
-  // There should be at least one unpin button (for the pinned thesis prompt).
-  await expect.element(screen.getByTestId('unpin-button')).toBeVisible();
+  // The thesis prompt is pinned — its row should have an unpin button.
+  // 'rates-thesis' is unique in the fixture so the row locator resolves to one element.
+  const thesisRow = screen.getByRole('row', { name: /rates-thesis/ });
+  await expect.element(thesisRow.getByTestId('unpin-button')).toBeVisible();
 });
