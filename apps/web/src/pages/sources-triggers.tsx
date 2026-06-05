@@ -310,7 +310,10 @@ function TriggersTab({
                         {prompt.is_pinned === null ? (
                           <span className="text-zinc-400 text-xs">—</span>
                         ) : prompt.is_pinned ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                            data-testid="pinned-badge"
+                          >
                             <Pin size={10} /> Pinned
                           </span>
                         ) : (
