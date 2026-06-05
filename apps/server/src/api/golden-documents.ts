@@ -193,12 +193,20 @@ export async function handleGoldenDocumentsRequest(
   const sectionsListMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)\/sections$/);
   if (req.method === 'GET' && sectionsListMatch) {
     const docId = sectionsListMatch[1];
-    // Fetch the doc to derive tenant_id for RLS context.
-    const docForTenant = await sql<{ tenant_id: string }[]>`
-      SELECT tenant_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    // Bootstrap tenant_id from the entities table (safe on raw pool — entities
+    // policy allows NULL tenant_id rows, same pattern as POST /api/golden-documents).
+    const entityRows = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
     `;
-    if (docForTenant.length === 0) return json({ error: 'Not found' }, 404);
-    const tenantId = docForTenant[0].tenant_id;
+    const tenantId = entityRows[0]?.tenant_id ?? 'default';
+
+    // Verify the document exists under RLS context.
+    const docExists = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => getGoldenDocument(tx, docId),
+    );
+    if (!docExists) return json({ error: 'Not found' }, 404);
 
     const sections = await withRlsContext(
       sql,
@@ -223,15 +231,23 @@ export async function handleGoldenDocumentsRequest(
       return json({ error: 'section_key and content are required' }, 400);
     }
 
-    // Fetch the doc to derive tenant_id for RLS context.
-    const docForTenant = await sql<{ tenant_id: string; author_id: string }[]>`
-      SELECT tenant_id, author_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    // Bootstrap tenant_id from the entities table (safe on raw pool — entities
+    // policy allows NULL tenant_id rows, same pattern as POST /api/golden-documents).
+    const entityRowsForSection = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
     `;
-    if (docForTenant.length === 0) return json({ error: 'Not found' }, 404);
-    if (docForTenant[0].author_id !== user.id) {
+    const tenantId = entityRowsForSection[0]?.tenant_id ?? 'default';
+
+    // Verify the document exists and check authorship under RLS context.
+    const docForSection = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => getGoldenDocument(tx, docId),
+    );
+    if (!docForSection) return json({ error: 'Not found' }, 404);
+    if (docForSection.author_id !== user.id) {
       return json({ error: 'Forbidden — only the author may edit sections' }, 403);
     }
-    const tenantId = docForTenant[0].tenant_id;
 
     const section = await withRlsContext(
       sql,
@@ -262,15 +278,23 @@ export async function handleGoldenDocumentsRequest(
       return json({ error: 'state must be "active" or "retired"' }, 400);
     }
 
-    // Fetch doc to get tenant_id and verify authorship.
-    const docRows = await sql<{ tenant_id: string; author_id: string }[]>`
-      SELECT tenant_id, author_id FROM golden_documents WHERE id = ${docId} LIMIT 1
+    // Bootstrap tenant_id from the entities table (safe on raw pool — entities
+    // policy allows NULL tenant_id rows, same pattern as POST /api/golden-documents).
+    const entityRowsForState = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
     `;
-    if (docRows.length === 0) return json({ error: 'Not found' }, 404);
-    if (docRows[0].author_id !== user.id) {
+    const tenantId = entityRowsForState[0]?.tenant_id ?? 'default';
+
+    // Verify the document exists and check authorship under RLS context.
+    const docForState = await withRlsContext(
+      sql,
+      { userId: user.id, tenantId, role: sessionRole },
+      async (tx) => getGoldenDocument(tx, docId),
+    );
+    if (!docForState) return json({ error: 'Not found' }, 404);
+    if (docForState.author_id !== user.id) {
       return json({ error: 'Forbidden — only the author may change document state' }, 403);
     }
-    const tenantId = docRows[0].tenant_id;
 
     const updatedDoc = await withRlsContext(
       sql,
@@ -299,12 +323,12 @@ export async function handleGoldenDocumentsRequest(
   const getMatch = url.pathname.match(/^\/api\/golden-documents\/([^/]+)$/);
   if (req.method === 'GET' && getMatch) {
     const id = getMatch[1];
-    // Derive tenant_id from the document (needed for RLS context).
-    const tenantRows = await sql<{ tenant_id: string }[]>`
-      SELECT tenant_id FROM golden_documents WHERE id = ${id} LIMIT 1
+    // Bootstrap tenant_id from the entities table (safe on raw pool — entities
+    // policy allows NULL tenant_id rows, same pattern as POST /api/golden-documents).
+    const entityRowsForGet = await sql<{ tenant_id: string }[]>`
+      SELECT tenant_id FROM entities WHERE id = ${user.id} LIMIT 1
     `;
-    if (tenantRows.length === 0) return json({ error: 'Not found' }, 404);
-    const tenantId = tenantRows[0].tenant_id;
+    const tenantId = entityRowsForGet[0]?.tenant_id ?? 'default';
 
     const doc = await withRlsContext(
       sql,
