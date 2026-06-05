@@ -18,6 +18,7 @@ import type { Subprocess } from 'bun';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { readFileSync } from 'fs';
 import postgres from 'postgres';
+import { DEMO_FIXTURES } from './fixtures';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 const SERVER_ENTRY_ABS = join(REPO_ROOT, 'apps/server/src/index.ts');
@@ -125,8 +126,8 @@ describe('demo quick-login', () => {
     // The superuser seed requires env vars — at minimum the seeded demo roles
     // (account_manager, supervisor) should be present.
     const roles = users.map((u) => u.role);
-    expect(roles).toContain('account_manager');
-    expect(roles).toContain('supervisor');
+    expect(roles).toContain(DEMO_FIXTURES.users.researcher.role);
+    expect(roles).toContain(DEMO_FIXTURES.users.supervisor.role);
   });
 
   it('demo login page shows "Sign in as" buttons in DEMO_MODE', async () => {
@@ -232,5 +233,147 @@ describe('demo quick-login', () => {
     // Non-demo deployments return 404 — we confirm this by checking the
     // server's demo mode flag via the response (200 means demo is on).
     // The non-demo path is covered by the server unit test for isDemoMode().
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Demo smoke tests — verify the enriched seed data is visible after login.
+// Each test authenticates as the demo researcher and checks a key API surface.
+// ---------------------------------------------------------------------------
+
+async function researcherCookie(): Promise<string> {
+  const sessionRes = await fetch(`${demoEnv.baseUrl}/api/demo/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: DEMO_FIXTURES.users.researcher.id }),
+  });
+  if (!sessionRes.ok) throw new Error(`demo/session failed: ${sessionRes.status}`);
+  const setCookie = sessionRes.headers.get('set-cookie') ?? '';
+  const m = /superfield_auth=([^;]+)/.exec(setCookie);
+  return m ? `superfield_auth=${m[1]}` : '';
+}
+
+describe('demo smoke — signal feed', () => {
+  it('GET /api/signals returns seeded Delivered signals for the demo researcher', async () => {
+    const cookie = await researcherCookie();
+    const res = await fetch(`${demoEnv.baseUrl}/api/signals`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      signals: Array<{ id: string; status: string; rationale: string }>;
+    };
+    expect(Array.isArray(body.signals)).toBe(true);
+
+    const delivered = body.signals.filter((s) => s.status === 'Delivered');
+    expect(delivered.length).toBeGreaterThanOrEqual(2);
+
+    const ids = body.signals.map((s) => s.id);
+    expect(ids).toContain(DEMO_FIXTURES.signals.readoutSignal.id);
+    expect(ids).toContain(DEMO_FIXTURES.signals.btdSignal.id);
+
+    // Rationale should be populated and non-trivial.
+    const readout = body.signals.find((s) => s.id === DEMO_FIXTURES.signals.readoutSignal.id);
+    expect(readout?.rationale).toMatch(/Direction/);
+  });
+
+  it('GET /api/signals includes the Queued PIPE signal', async () => {
+    const cookie = await researcherCookie();
+    const res = await fetch(`${demoEnv.baseUrl}/api/signals`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { signals: Array<{ id: string; status: string }> };
+    const pipe = body.signals.find((s) => s.id === DEMO_FIXTURES.signals.pipeSignal.id);
+    expect(pipe).toBeDefined();
+    expect(pipe?.status).toBe('Queued');
+  });
+});
+
+describe('demo smoke — wiki', () => {
+  it('GET /api/wiki-nav/pages returns the seeded ACME Therapeutics wiki page', async () => {
+    const cookie = await researcherCookie();
+    const tenantId = DEMO_FIXTURES.wikiPage.tenantId;
+    const res = await fetch(`${demoEnv.baseUrl}/api/wiki-nav/pages?tenant_id=${tenantId}`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const pages = (await res.json()) as Array<{ id: string; subject_id: string }>;
+    const acme = pages.find((p) => p.id === DEMO_FIXTURES.wikiPage.id);
+    expect(acme).toBeDefined();
+    expect(acme?.subject_id).toBe(DEMO_FIXTURES.wikiPage.subjectId);
+  });
+
+  it('wiki page version has body content', async () => {
+    const cookie = await researcherCookie();
+    const res = await fetch(
+      `${demoEnv.baseUrl}/api/wiki-nav/pages/${DEMO_FIXTURES.wikiPage.id}/versions/${DEMO_FIXTURES.wikiPage.versionId}`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { body_ciphertext: string | null };
+    expect(body.body_ciphertext).toBeTruthy();
+    expect(body.body_ciphertext).toMatch(/ACME Therapeutics/);
+  });
+});
+
+describe('demo smoke — golden documents', () => {
+  it('GET /api/golden-documents returns both seeded active golden documents', async () => {
+    const cookie = await researcherCookie();
+    const res = await fetch(`${demoEnv.baseUrl}/api/golden-documents`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      documents: Array<{ id: string; kind: string; state: string }>;
+    };
+    expect(Array.isArray(body.documents)).toBe(true);
+
+    const kinds = body.documents.map((d) => d.kind);
+    expect(kinds).toContain('industry_definition');
+    expect(kinds).toContain('research_methodology');
+
+    const ids = body.documents.map((d) => d.id);
+    expect(ids).toContain(DEMO_FIXTURES.goldenDocs.industryDefinition.id);
+    expect(ids).toContain(DEMO_FIXTURES.goldenDocs.researchMethodology.id);
+  });
+
+  it('GET /api/golden-documents/:id/sections returns sections with content', async () => {
+    const cookie = await researcherCookie();
+    const docId = DEMO_FIXTURES.goldenDocs.industryDefinition.id;
+    const res = await fetch(`${demoEnv.baseUrl}/api/golden-documents/${docId}/sections`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      sections: Array<{ section_key: string; content: string }>;
+    };
+    expect(body.sections.length).toBeGreaterThanOrEqual(3);
+
+    const keys = body.sections.map((s) => s.section_key);
+    expect(keys).toContain('niche');
+    expect(keys).toContain('watchlist');
+
+    const niche = body.sections.find((s) => s.section_key === 'niche');
+    expect(niche?.content).toMatch(/biotech/i);
+  });
+});
+
+describe('demo smoke — cost telemetry', () => {
+  it('GET /api/cost/status shows spend against the seeded budget', async () => {
+    const cookie = await researcherCookie();
+    const res = await fetch(`${demoEnv.baseUrl}/api/cost/status`, {
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      spent_usd: number | string;
+      limit_usd: number | string;
+      period_start: string;
+    };
+    expect(Number(body.limit_usd)).toBe(500);
+    expect(Number(body.spent_usd)).toBeGreaterThan(0);
+    // Total seeded cost entries sum to ~127.40.
+    expect(Number(body.spent_usd)).toBeLessThan(500);
   });
 });
