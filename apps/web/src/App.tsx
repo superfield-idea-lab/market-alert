@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './components/Login';
-import { Bell, ClipboardList, Settings, Shield, User, BookOpen, Globe } from 'lucide-react';
-import { AdminDashboard } from './pages/admin-dashboard';
+import { Bell, Settings, User, BookOpen, Globe } from 'lucide-react';
 import { SettingsPage } from './pages/settings';
 import { SignalFeedPage } from './pages/signal-feed';
-import TradeProposalForm from './components/TradeProposalForm';
 import { GoldenDocumentsPage } from './pages/golden-documents';
 import { WikiNavPage } from './pages/wiki-nav';
+import { PendingDraftsBadge } from './components/PendingDraftsBadge';
 
-type ActiveView = 'alerts' | 'trade-proposal' | 'settings' | 'admin' | 'golden-documents' | 'wiki';
+type ActiveView = 'alerts' | 'settings' | 'golden-documents' | 'wiki';
 
 function App() {
   const { user, logout, loading } = useAuth();
@@ -27,9 +26,6 @@ function App() {
   if (!user) {
     return <Login />;
   }
-
-  const canAccessAdmin =
-    user.isSuperadmin === true || user.isCrmAdmin === true || user.isComplianceOfficer === true;
 
   return (
     <div className="flex h-screen w-full bg-zinc-50 font-sans overflow-hidden text-zinc-900">
@@ -51,16 +47,6 @@ function App() {
               <Bell size={20} strokeWidth={2.5} />
             </button>
 
-            {/* Trade Proposal */}
-            <button
-              onClick={() => setActiveView('trade-proposal')}
-              title="Trade Proposal"
-              data-testid="nav-trade-proposal"
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'trade-proposal' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-            >
-              <ClipboardList size={20} strokeWidth={2.5} />
-            </button>
-
             {/* Settings */}
             <button
               onClick={() => setActiveView('settings')}
@@ -71,7 +57,7 @@ function App() {
               <Settings size={20} strokeWidth={2.5} />
             </button>
 
-            {/* Golden Documents — researcher authoring surface (issue #73) */}
+            {/* Golden Documents — researcher authoring surface */}
             <button
               onClick={() => setActiveView('golden-documents')}
               title="Golden Documents"
@@ -81,27 +67,20 @@ function App() {
               <BookOpen size={20} strokeWidth={2.5} />
             </button>
 
-            {/* Wiki Navigation — browse, search, drill-in with citations (issue #77) */}
-            <button
-              onClick={() => setActiveView('wiki')}
-              title="Wiki"
-              data-testid="nav-wiki"
-              className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'wiki' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
-            >
-              <Globe size={20} strokeWidth={2.5} />
-            </button>
-
-            {/* Admin — only for privileged users */}
-            {canAccessAdmin && (
+            {/* Wiki Navigation — browse, search, drill-in with citations */}
+            <div className="relative">
               <button
-                onClick={() => setActiveView('admin')}
-                title="Admin Dashboard"
-                data-testid="nav-admin"
-                className={`p-3 rounded-xl flex items-center justify-center transition-all ${activeView === 'admin' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
+                onClick={() => setActiveView('wiki')}
+                title="Wiki"
+                data-testid="nav-wiki"
+                className={`p-3 rounded-xl flex items-center justify-center transition-all w-full ${activeView === 'wiki' ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600'}`}
               >
-                <Shield size={20} strokeWidth={2.5} />
+                <Globe size={20} strokeWidth={2.5} />
               </button>
-            )}
+              <div className="absolute -top-1 -right-1 pointer-events-none">
+                <PendingDraftsBadge customerId={user.id} />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -120,16 +99,9 @@ function App() {
         <div className="flex-1 flex flex-col bg-white">
           <div className="flex-1 overflow-hidden overflow-y-auto">
             {activeView === 'alerts' && <SignalFeedPage />}
-            {activeView === 'trade-proposal' && <TradeProposalForm />}
             {activeView === 'settings' && <SettingsPage />}
             {activeView === 'golden-documents' && <GoldenDocumentsPage />}
             {activeView === 'wiki' && <WikiNavPage tenantId={user.id} />}
-            {activeView === 'admin' && canAccessAdmin && <AdminDashboard />}
-            {activeView === 'admin' && !canAccessAdmin && (
-              <div className="p-8 text-zinc-400 text-sm">
-                Access denied. Admin privileges required.
-              </div>
-            )}
           </div>
         </div>
       </main>

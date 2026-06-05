@@ -38,6 +38,8 @@ import {
   FileText,
   Link,
 } from 'lucide-react';
+import { renderWikiMarkdown } from '../components/wiki-markdown';
+import { DraftReviewModal } from '../components/DraftReviewModal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,9 +136,15 @@ interface VersionHistoryProps {
   tenantId: string;
   currentVersionId: string | null;
   onSelectVersion: (versionId: string) => void;
+  onDraftReview: (versionId: string) => void;
 }
 
-function VersionHistory({ wikiPageId, currentVersionId, onSelectVersion }: VersionHistoryProps) {
+function VersionHistory({
+  wikiPageId,
+  currentVersionId,
+  onSelectVersion,
+  onDraftReview,
+}: VersionHistoryProps) {
   const [versions, setVersions] = useState<WikiVersionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -155,26 +163,35 @@ function VersionHistory({ wikiPageId, currentVersionId, onSelectVersion }: Versi
 
   return (
     <div className="space-y-1">
-      {versions.map((v) => (
-        <button
-          key={v.id}
-          type="button"
-          onClick={() => onSelectVersion(v.id)}
-          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-center justify-between gap-2 ${
-            v.id === currentVersionId
-              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-              : 'hover:bg-zinc-50 text-zinc-600 border border-transparent hover:border-zinc-200'
-          }`}
-        >
-          <span className="flex items-center gap-1.5">
-            <Clock size={11} />
-            {new Date(v.created_at).toLocaleString()}
-          </span>
-          {v.id === currentVersionId && (
-            <span className="text-xs text-indigo-500 font-medium">current</span>
-          )}
-        </button>
-      ))}
+      {versions.map((v) => {
+        const isDraft = v.status === 'draft';
+        return (
+          <button
+            key={v.id}
+            type="button"
+            onClick={() => (isDraft ? onDraftReview(v.id) : onSelectVersion(v.id))}
+            className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all flex items-center justify-between gap-2 ${
+              v.id === currentVersionId
+                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                : isDraft
+                  ? 'hover:bg-amber-50 text-amber-700 border border-amber-200 hover:border-amber-300'
+                  : 'hover:bg-zinc-50 text-zinc-600 border border-transparent hover:border-zinc-200'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Clock size={11} />
+              {new Date(v.created_at).toLocaleString()}
+            </span>
+            <span className="text-xs font-medium">
+              {isDraft ? (
+                <span className="text-amber-600">draft · review</span>
+              ) : v.id === currentVersionId ? (
+                <span className="text-indigo-500">current</span>
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -196,6 +213,7 @@ function PageDetail({ page, tenantId, onBack }: PageDetailProps) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reviewDraftId, setReviewDraftId] = useState<string | null>(null);
 
   const loadDetail = useCallback(
     async (versionId: string | null) => {
@@ -235,101 +253,115 @@ function PageDetail({ page, tenantId, onBack }: PageDetailProps) {
   }, []);
 
   return (
-    <div className="flex gap-6 h-full">
-      {/* Left: version history sidebar */}
-      <div className="w-56 shrink-0 border-r border-zinc-100 pr-4 space-y-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
-        >
-          <ArrowLeft size={12} />
-          Back to wiki
-        </button>
+    <>
+      {reviewDraftId && (
+        <DraftReviewModal
+          draftId={reviewDraftId}
+          onClose={() => setReviewDraftId(null)}
+          onDecision={() => {
+            setReviewDraftId(null);
+            void loadDetail(selectedVersionId);
+          }}
+        />
+      )}
+      <div className="flex gap-6 h-full">
+        {/* Left: version history sidebar */}
+        <div className="w-56 shrink-0 border-r border-zinc-100 pr-4 space-y-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
+          >
+            <ArrowLeft size={12} />
+            Back to wiki
+          </button>
 
-        <div>
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">
-            Version history
-          </p>
-          <VersionHistory
-            wikiPageId={page.id}
-            tenantId={tenantId}
-            currentVersionId={selectedVersionId}
-            onSelectVersion={handleVersionSelect}
-          />
+          <div>
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">
+              Version history
+            </p>
+            <VersionHistory
+              wikiPageId={page.id}
+              tenantId={tenantId}
+              currentVersionId={selectedVersionId}
+              onSelectVersion={handleVersionSelect}
+              onDraftReview={setReviewDraftId}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Right: version body + citations */}
-      <div className="flex-1 min-w-0 space-y-4">
-        {/* Page header */}
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-              {page.subject_type}
-            </span>
-            {page.open_debate_count > 0 && (
-              <span className="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                <AlertTriangle size={11} />
-                {page.open_debate_count} open debate{page.open_debate_count !== 1 ? 's' : ''}
+        {/* Right: version body + citations */}
+        <div className="flex-1 min-w-0 space-y-4">
+          {/* Page header */}
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                {page.subject_type}
               </span>
+              {page.open_debate_count > 0 && (
+                <span className="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                  <AlertTriangle size={11} />
+                  {page.open_debate_count} open debate{page.open_debate_count !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <h2 className="text-base font-semibold text-zinc-900 mt-1">{page.subject_id}</h2>
+            {selectedVersionId && selectedVersionId !== page.currently_published_version_id && (
+              <p className="text-xs text-amber-600 mt-0.5">Viewing a prior version</p>
             )}
           </div>
-          <h2 className="text-base font-semibold text-zinc-900 mt-1">{page.subject_id}</h2>
-          {selectedVersionId && selectedVersionId !== page.currently_published_version_id && (
-            <p className="text-xs text-amber-600 mt-0.5">Viewing a prior version</p>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {loading ? (
+            <p className="text-sm text-zinc-400">Loading version…</p>
+          ) : detail?.current_version ? (
+            <>
+              {/* Body */}
+              <div
+                data-testid="wiki-version-body"
+                className="border border-zinc-200 rounded-xl p-4 bg-white prose prose-zinc prose-sm max-w-none"
+                dangerouslySetInnerHTML={{
+                  __html: detail.current_version.body_ciphertext
+                    ? renderWikiMarkdown(detail.current_version.body_ciphertext).html
+                    : '<p class="text-zinc-400">(no content)</p>',
+                }}
+              />
+
+              {/* Citations */}
+              {detail.citations.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-2">
+                    Citations ({detail.citations.length})
+                  </p>
+                  <div
+                    className="flex flex-wrap gap-1.5"
+                    data-testid="wiki-citations"
+                    aria-label="Citation edges"
+                  >
+                    {detail.citations.map((c) => (
+                      <CitationBadge key={c.id} edge={c} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {detail.citations.length === 0 && (
+                <p className="text-xs text-zinc-400">No citation edges for this version.</p>
+              )}
+            </>
+          ) : (
+            <div className="border border-zinc-100 rounded-xl p-8 text-center">
+              <FileText size={28} className="text-zinc-300 mx-auto mb-2" />
+              <p className="text-sm text-zinc-500">No published version yet.</p>
+              <p className="text-xs text-zinc-400 mt-1">
+                A wiki rebuild task will populate this page when facts are available.
+              </p>
+            </div>
           )}
         </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        {loading ? (
-          <p className="text-sm text-zinc-400">Loading version…</p>
-        ) : detail?.current_version ? (
-          <>
-            {/* Body */}
-            <div
-              data-testid="wiki-version-body"
-              className="border border-zinc-200 rounded-xl p-4 bg-white"
-            >
-              <pre className="text-sm text-zinc-700 whitespace-pre-wrap font-mono break-words">
-                {detail.current_version.body_ciphertext ?? '(no content)'}
-              </pre>
-            </div>
-
-            {/* Citations */}
-            {detail.citations.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-2">
-                  Citations ({detail.citations.length})
-                </p>
-                <div
-                  className="flex flex-wrap gap-1.5"
-                  data-testid="wiki-citations"
-                  aria-label="Citation edges"
-                >
-                  {detail.citations.map((c) => (
-                    <CitationBadge key={c.id} edge={c} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {detail.citations.length === 0 && (
-              <p className="text-xs text-zinc-400">No citation edges for this version.</p>
-            )}
-          </>
-        ) : (
-          <div className="border border-zinc-100 rounded-xl p-8 text-center">
-            <FileText size={28} className="text-zinc-300 mx-auto mb-2" />
-            <p className="text-sm text-zinc-500">No published version yet.</p>
-            <p className="text-xs text-zinc-400 mt-1">
-              A wiki rebuild task will populate this page when facts are available.
-            </p>
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }
 
