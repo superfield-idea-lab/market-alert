@@ -74,6 +74,7 @@ import { handlePipelineHealthRequest } from './api/pipeline-health-api';
 import { handleAdminDlqRequest } from './api/admin-dlq-api';
 import { handleCostTelemetryRequest } from './api/cost-telemetry-api';
 import { handleEventReplayRequest, handleSignalReplayRequest } from './api/event-replay-api';
+import { handleResearcherSettingsRequest } from './api/researcher-settings-api';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -382,6 +383,16 @@ export default {
     if (url.pathname === '/api/wiki/pending-drafts') {
       const pendingRes = await handleWikiPendingDraftsRequest(req, url, appState);
       if (pendingRes) return withTrace(pendingRes);
+    }
+
+    // Researcher Sources & Triggers settings API (issue #118).
+    // GET  /api/researcher/sources              — list canonical sources for the researcher's tenant
+    // GET  /api/researcher/standing-prompts     — list standing prompts with active version metadata
+    // POST /api/researcher/standing-prompts/:id/pin   — pin active version
+    // POST /api/researcher/standing-prompts/:id/unpin — unpin active version
+    if (url.pathname.startsWith('/api/researcher/')) {
+      const researcherRes = await handleResearcherSettingsRequest(req, url, appState);
+      if (researcherRes) return withTrace(researcherRes);
     }
 
     // Phase 2 golden-document endpoints — researcher-only write path (issue #72).
