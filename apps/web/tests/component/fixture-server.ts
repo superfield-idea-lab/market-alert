@@ -47,6 +47,20 @@ export type FixtureStandingPrompt = {
   active_version_id: string | null;
 };
 
+export type FixtureResearchTopic = {
+  id: string;
+  name: string;
+  tenant_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FixtureTopicMember = {
+  researcher_id: string;
+  username: string;
+  joined_at: string;
+};
+
 type FixtureState = {
   tasks?: FixtureTask[];
   /** OAuth status response */
@@ -60,6 +74,10 @@ type FixtureState = {
   researcherSources?: FixtureResearcherSource[];
   /** Researcher standing prompts */
   researcherStandingPrompts?: FixtureStandingPrompt[];
+  /** Research topics (issue #122) */
+  researchTopics?: FixtureResearchTopic[];
+  /** Topic members keyed by topic ID (issue #122) */
+  topicMembers?: Record<string, FixtureTopicMember[]>;
 };
 
 type FixtureStore = Record<string, FixtureState>;
@@ -169,6 +187,93 @@ export async function handleFixtureRequest(req: Request, statePath: string): Pro
 
   if (req.method === 'GET' && url.pathname === '/api/researcher/standing-prompts') {
     return json({ standing_prompts: state.researcherStandingPrompts ?? [] });
+  }
+
+  // Research Topics endpoints (issue #122)
+  if (req.method === 'GET' && url.pathname === '/api/research-topics') {
+    return json({ topics: state.researchTopics ?? [] });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/research-topics') {
+    const body = (await req.json()) as Record<string, unknown>;
+    const now = new Date().toISOString();
+    const created: FixtureResearchTopic = {
+      id: `topic-${Date.now()}`,
+      name: String(body.name ?? 'New Topic'),
+      tenant_id: 'tenant-fixture',
+      created_at: now,
+      updated_at: now,
+    };
+    const existing = state.researchTopics ?? [];
+    store[fixtureId] = { ...state, researchTopics: [...existing, created] };
+    writeState(statePath, store);
+    return json({ topic: created });
+  }
+
+  if (req.method === 'PATCH' && url.pathname.match(/^\/api\/research-topics\/[^/]+$/)) {
+    const topicId = url.pathname.split('/').at(-1) ?? '';
+    const body = (await req.json()) as Record<string, unknown>;
+    const topics = state.researchTopics ?? [];
+    const existing = topics.find((t) => t.id === topicId);
+    if (!existing) {
+      return new Response(JSON.stringify({ error: 'Not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const updated: FixtureResearchTopic = {
+      ...existing,
+      name: String(body.name ?? existing.name),
+      updated_at: new Date().toISOString(),
+    };
+    store[fixtureId] = {
+      ...state,
+      researchTopics: topics.map((t) => (t.id === topicId ? updated : t)),
+    };
+    writeState(statePath, store);
+    return json({ topic: updated });
+  }
+
+  if (req.method === 'GET' && url.pathname.match(/^\/api\/research-topics\/[^/]+\/members$/)) {
+    const topicId = url.pathname.split('/').at(-2) ?? '';
+    const members = (state.topicMembers ?? {})[topicId] ?? [];
+    return json({ members });
+  }
+
+  if (req.method === 'POST' && url.pathname.match(/^\/api\/research-topics\/[^/]+\/members$/)) {
+    const topicId = url.pathname.split('/').at(-2) ?? '';
+    const body = (await req.json()) as Record<string, unknown>;
+    const newMember: FixtureTopicMember = {
+      researcher_id: `researcher-${Date.now()}`,
+      username: String(body.username ?? 'unknown'),
+      joined_at: new Date().toISOString(),
+    };
+    const allMembers = state.topicMembers ?? {};
+    const topicMembers = allMembers[topicId] ?? [];
+    store[fixtureId] = {
+      ...state,
+      topicMembers: { ...allMembers, [topicId]: [...topicMembers, newMember] },
+    };
+    writeState(statePath, store);
+    return json({ member: newMember });
+  }
+
+  if (
+    req.method === 'DELETE' &&
+    url.pathname.match(/^\/api\/research-topics\/[^/]+\/members\/[^/]+$/)
+  ) {
+    const parts = url.pathname.split('/');
+    const researcherId = parts.at(-1) ?? '';
+    const topicId = parts.at(-3) ?? '';
+    const allMembers = state.topicMembers ?? {};
+    const topicMembers = allMembers[topicId] ?? [];
+    const next = topicMembers.filter((m) => m.researcher_id !== researcherId);
+    store[fixtureId] = {
+      ...state,
+      topicMembers: { ...allMembers, [topicId]: next },
+    };
+    writeState(statePath, store);
+    return new Response(null, { status: 204 });
   }
 
   if (

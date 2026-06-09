@@ -40,6 +40,8 @@ import {
 } from 'lucide-react';
 import { renderWikiMarkdown } from '../components/wiki-markdown';
 import { DraftReviewModal } from '../components/DraftReviewModal';
+import { useTopic } from '../context/TopicContext';
+import { TopicSwitcher } from '../components/TopicSwitcher';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -503,29 +505,39 @@ export interface WikiNavPageProps {
  * - AC-1: Researcher can browse and search the wiki and drill into any page.
  * - AC-2: Every claim links to its supporting source/fact (via citation badges).
  * - AC-3: A contested claim surfaces as a debate (open_debate_count badge).
+ *
+ * When TopicContext provides an active topic, wiki pages are scoped to that
+ * topic's tenant_id. The prop tenantId serves as a fallback (e.g. in tests).
  */
 export function WikiNavPage({ tenantId }: WikiNavPageProps): React.ReactElement {
+  const { activeTopic } = useTopic();
   const [selected, setSelected] = useState<WikiPageSummary | null>(null);
+
+  // Use active topic's tenant_id when available, falling back to the prop.
+  const effectiveTenantId = activeTopic?.tenant_id ?? tenantId;
 
   if (selected) {
     return (
       <main aria-label="Wiki page detail" className="p-6 max-w-5xl h-full">
-        <PageDetail page={selected} tenantId={tenantId} onBack={() => setSelected(null)} />
+        <PageDetail page={selected} tenantId={effectiveTenantId} onBack={() => setSelected(null)} />
       </main>
     );
   }
 
   return (
     <main aria-label="Wiki navigation" className="p-6 max-w-3xl space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-zinc-900">Wiki</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">
-          Browse, search, and drill into knowledge pages. Citations link every claim to its
-          supporting evidence.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-zinc-900">Wiki</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            Browse, search, and drill into knowledge pages. Citations link every claim to its
+            supporting evidence.
+          </p>
+        </div>
+        <TopicSwitcher />
       </div>
 
-      <WikiNavList tenantId={tenantId} onSelectPage={setSelected} />
+      <WikiNavList tenantId={effectiveTenantId} onSelectPage={setSelected} />
     </main>
   );
 }
