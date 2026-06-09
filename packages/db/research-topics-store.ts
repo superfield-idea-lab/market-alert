@@ -279,13 +279,20 @@ export async function getDefaultTopicIdForTenant(
   sql: SqlClient,
   tenantId: string,
 ): Promise<string | null> {
-  const rows = await sql<{ id: string }[]>`
-    SELECT id FROM research_topics
-    WHERE tenant_id = ${tenantId}
-      AND name = 'Default'
-    LIMIT 1
-  `;
-  return rows[0]?.id ?? null;
+  try {
+    const rows = await sql<{ id: string }[]>`
+      SELECT id FROM research_topics
+      WHERE tenant_id = ${tenantId}
+        AND name = 'Default'
+      LIMIT 1
+    `;
+    return rows[0]?.id ?? null;
+  } catch {
+    // research_topics table may not exist yet (e.g. pre-migration DB or test
+    // environments that apply canonical_sources DDL without the research_topics
+    // migration). Return null so callers gracefully fall back to a NULL topic_id.
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

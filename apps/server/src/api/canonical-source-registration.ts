@@ -64,6 +64,7 @@ import {
   type RegisterCanonicalSourceInput,
   type CanonicalSourceRow,
 } from 'db/canonical-source-store';
+import { getDefaultTopicIdForTenant } from 'db/research-topics-store';
 
 // ---------------------------------------------------------------------------
 // Request body shape
@@ -221,6 +222,12 @@ export async function handleCanonicalSourceRegistrationRequest(
     return json({ error: validationError }, 400);
   }
 
+  // Resolve the tenant's Default research topic so new canonical sources are
+  // automatically scoped to it (issue #121). Falls back to null when no Default
+  // topic has been created yet (e.g. a brand-new tenant whose migration hasn't
+  // run — the column is nullable so the insert still succeeds).
+  const defaultTopicId = await getDefaultTopicIdForTenant(sql, body.tenant_id!);
+
   const input: RegisterCanonicalSourceInput = {
     methodology_id: body.methodology_id!,
     author_id: body.author_id!,
@@ -229,6 +236,7 @@ export async function handleCanonicalSourceRegistrationRequest(
     url: body.url!,
     description: body.description ?? null,
     access_mode: body.access_mode ?? null,
+    topic_id: defaultTopicId,
   };
 
   // ── Persist via DB store ──────────────────────────────────────────────────
