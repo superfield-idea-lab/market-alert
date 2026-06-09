@@ -14,6 +14,7 @@ import {
   migrateAudit,
   migrateDictionary,
   migrateMkt,
+  migrateResearchTopics,
   sql,
 } from 'db';
 import { migrateTradeReplay } from 'db/mkt-trade-replay';
@@ -75,6 +76,7 @@ import { handleAdminDlqRequest } from './api/admin-dlq-api';
 import { handleCostTelemetryRequest } from './api/cost-telemetry-api';
 import { handleEventReplayRequest, handleSignalReplayRequest } from './api/event-replay-api';
 import { handleResearcherSettingsRequest } from './api/researcher-settings-api';
+import { handleResearchTopicsRequest } from './api/research-topics';
 
 // Starter behavior:
 // the server boot path auto-runs a local schema initializer for convenience.
@@ -101,6 +103,11 @@ try {
   await migrateTradeReplay();
 } catch (err) {
   console.warn('[db] Phase 7 trade replay schema migration skipped:', err);
+}
+try {
+  await migrateResearchTopics();
+} catch (err) {
+  console.warn('[db] Research-topics migration skipped:', err);
 }
 
 // Register all Phase 1 property graph entity types in the in-memory registry
@@ -393,6 +400,18 @@ export default {
     if (url.pathname.startsWith('/api/researcher/')) {
       const researcherRes = await handleResearcherSettingsRequest(req, url, appState);
       if (researcherRes) return withTrace(researcherRes);
+    }
+
+    // Research topics CRUD and membership management (issue #121).
+    // POST   /api/research-topics              — create a topic (creator inserted as owner)
+    // GET    /api/research-topics?tenant_id=   — list topics the researcher is a member of
+    // GET    /api/research-topics/:id          — fetch topic + members
+    // PATCH  /api/research-topics/:id          — update name/description (owner only)
+    // POST   /api/research-topics/:id/members  — add a member (owner only)
+    // DELETE /api/research-topics/:id/members/:researcher_id — remove member (owner, or self)
+    if (url.pathname.startsWith('/api/research-topics')) {
+      const topicsRes = await handleResearchTopicsRequest(req, url, appState);
+      if (topicsRes) return withTrace(topicsRes);
     }
 
     // Phase 2 golden-document endpoints — researcher-only write path (issue #72).

@@ -353,6 +353,70 @@ export async function migrateAudit(options: MigrateAuditOptions = {}) {
 }
 
 /**
+ * Resolve the path to mkt-research-topics.sql (issue #121 migration).
+ *
+ * This migration adds research_topics, topic_members, topic_id columns,
+ * updated UNIQUE constraints, and the data migration for existing tenants.
+ */
+export function resolveMktResearchTopicsSqlPath(
+  moduleUrl: string = import.meta.url,
+  cwd: string = process.cwd(),
+): string {
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    resolve(moduleDir, 'mkt-research-topics.sql'),
+    resolve(moduleDir, '../packages/db/mkt-research-topics.sql'),
+    resolve(cwd, 'packages/db/mkt-research-topics.sql'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
+/**
+ * Apply the research-topics migration (mkt-research-topics.sql) to the app database.
+ *
+ * Idempotent — uses CREATE TABLE IF NOT EXISTS, ADD COLUMN IF NOT EXISTS, and
+ * DO blocks that check pg_constraint before altering UNIQUE constraints.
+ * Called at server startup after migrateMkt().
+ *
+ * Blueprint refs: issue #121 (research_topics, topic_members, topic_id columns).
+ */
+export async function migrateResearchTopics(options: MigrateOptions = {}): Promise<void> {
+  console.log('[db] Applying research-topics migration (mkt-research-topics.sql)...');
+  const schemaSql = readFileSync(resolveMktResearchTopicsSqlPath(), 'utf-8');
+  const databaseUrl = options.databaseUrl ?? databaseUrls.app;
+  const migrationSql =
+    options.databaseUrl === undefined
+      ? sql
+      : postgres(databaseUrl, {
+          max: 1,
+          idle_timeout: 10,
+          connect_timeout: 10,
+          connection: { client_min_messages: 'warning' },
+        });
+
+  try {
+    const cleanSql = schemaSql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const statements = splitSqlStatements(cleanSql).filter((s) => s.length > 0);
+    for (const statement of statements) {
+      await migrationSql.unsafe(statement);
+    }
+    console.log('[db] Research-topics migration applied.');
+  } catch (err) {
+    console.error('[db] Research-topics migration failed:', err);
+    throw err;
+  } finally {
+    if (migrationSql !== sql) {
+      await migrationSql.end({ timeout: 5 });
+    }
+  }
+}
+
+/**
  * Verifies connectivity to the dictionary database at server startup.
  *
  * The dictionary schema is created by init-remote.ts at deploy time.
