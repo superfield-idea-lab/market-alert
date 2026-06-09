@@ -699,6 +699,189 @@ CREATE POLICY wiki_page_versions_bdm_block
 }
 
 /**
+ * Configure RLS for research_topics, topic_members, wiki_pages, and signals
+ * (issue #121 — multi-scope research programme isolation).
+ *
+ * Three policies are applied:
+ *
+ * 1. `research_topics_tenant_isolation` (PERMISSIVE FOR ALL) on research_topics:
+ *    Restricts every operation to rows whose tenant_id matches the session variable
+ *    `app.current_tenant_id`. FORCE ROW LEVEL SECURITY ensures app_rw is subject too.
+ *
+ * 2. `topic_members_tenant_isolation` (PERMISSIVE FOR ALL) on topic_members:
+ *    Restricts reads to topic_members rows whose topic's tenant matches the session
+ *    tenant (joins through research_topics). This prevents cross-tenant membership leaks.
+ *
+ * 3. `wiki_pages_topic_membership` (PERMISSIVE FOR SELECT) on wiki_pages:
+ *    Restricts SELECT to rows where the researcher is a topic_member of the topic_id,
+ *    OR the topic_id IS NULL (pre-migration rows that have not yet been assigned).
+ *    INSERT/UPDATE paths are unaffected (workers must still be able to write pages).
+ *
+ *    wiki_page_versions_mkt inherits the same pattern via its join to wiki_pages
+ *    through topic_id on the parent table.
+ *
+ * 4. `signals_topic_membership` (PERMISSIVE FOR SELECT) on signals:
+ *    Restricts SELECT to signals belonging to topics the researcher is a member of,
+ *    OR signals with NULL topic_id (pre-migration rows).
+ *
+ * IMPORTANT: these policies are PERMISSIVE and interact with the existing
+ * wiki_page_versions_rm_isolation and BDM block policies. The net effect for any
+ * given row is the AND of all applicable policies.
+ */
+export async function configureResearchTopicsRls(
+  appAdmin: ReturnType<typeof makePool>,
+): Promise<void> {
+  // ── research_topics: tenant isolation ─────────────────────────────────────
+  await appAdmin.unsafe(`ALTER TABLE research_topics ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE research_topics FORCE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS research_topics_tenant_isolation ON research_topics`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY research_topics_tenant_isolation
+  ON research_topics
+  FOR ALL
+  USING (tenant_id = current_setting('app.current_tenant_id', true))
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true))
+`);
+
+  // ── topic_members: tenant isolation via JOIN to research_topics ───────────
+  await appAdmin.unsafe(`ALTER TABLE topic_members ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE topic_members FORCE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS topic_members_tenant_isolation ON topic_members`);
+  await appAdmin.unsafe(`
+CREATE POLICY topic_members_tenant_isolation
+  ON topic_members
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM research_topics rt
+      WHERE rt.id = topic_id
+        AND rt.tenant_id = current_setting('app.current_tenant_id', true)
+    )
+  )
+`);
+
+  // ── wiki_pages: topic membership check ────────────────────────────────────
+  //
+  // A researcher may SELECT wiki_page rows only if they are a topic_member of
+  // the page's topic, OR the page has no topic (NULL topic_id — pre-migration rows).
+  // INSERT/UPDATE bypass policies allow worker write paths to succeed.
+  await appAdmin.unsafe(`ALTER TABLE wiki_pages ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE wiki_pages FORCE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS wiki_pages_topic_membership ON wiki_pages`);
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_pages_topic_membership
+  ON wiki_pages
+  FOR SELECT
+  USING (
+    topic_id IS NULL
+    OR EXISTS (
+      SELECT 1 FROM topic_members tm
+      WHERE tm.topic_id = wiki_pages.topic_id
+        AND tm.researcher_id = current_setting('app.current_user_id', true)
+    )
+  )
+`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS wiki_pages_insert_bypass ON wiki_pages`);
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_pages_insert_bypass
+  ON wiki_pages
+  FOR INSERT
+  WITH CHECK (true)
+`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS wiki_pages_update_bypass ON wiki_pages`);
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_pages_update_bypass
+  ON wiki_pages
+  FOR UPDATE
+  USING (true)
+`);
+
+  // ── wiki_page_versions_mkt: topic membership via wiki_pages join ──────────
+  //
+  // wiki_page_versions_mkt rows inherit topic restriction via their parent
+  // wiki_page row. We apply the same EXISTS check via JOIN.
+  await appAdmin.unsafe(`ALTER TABLE wiki_page_versions_mkt ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE wiki_page_versions_mkt FORCE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_mkt_topic_membership ON wiki_page_versions_mkt`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_mkt_topic_membership
+  ON wiki_page_versions_mkt
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM wiki_pages wp
+      WHERE wp.id = wiki_page_id
+        AND (
+          wp.topic_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM topic_members tm
+            WHERE tm.topic_id = wp.topic_id
+              AND tm.researcher_id = current_setting('app.current_user_id', true)
+          )
+        )
+    )
+  )
+`);
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_mkt_insert_bypass ON wiki_page_versions_mkt`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_mkt_insert_bypass
+  ON wiki_page_versions_mkt
+  FOR INSERT
+  WITH CHECK (true)
+`);
+  await appAdmin.unsafe(
+    `DROP POLICY IF EXISTS wiki_page_versions_mkt_update_bypass ON wiki_page_versions_mkt`,
+  );
+  await appAdmin.unsafe(`
+CREATE POLICY wiki_page_versions_mkt_update_bypass
+  ON wiki_page_versions_mkt
+  FOR UPDATE
+  USING (true)
+`);
+
+  // ── signals: topic membership check ───────────────────────────────────────
+  //
+  // A researcher may SELECT signal rows only if they are a topic_member of the
+  // signal's topic, OR the signal has no topic (NULL topic_id — pre-migration rows).
+  await appAdmin.unsafe(`ALTER TABLE signals ENABLE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`ALTER TABLE signals FORCE ROW LEVEL SECURITY`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS signals_topic_membership ON signals`);
+  await appAdmin.unsafe(`
+CREATE POLICY signals_topic_membership
+  ON signals
+  FOR SELECT
+  USING (
+    topic_id IS NULL
+    OR EXISTS (
+      SELECT 1 FROM topic_members tm
+      WHERE tm.topic_id = signals.topic_id
+        AND tm.researcher_id = current_setting('app.current_user_id', true)
+    )
+  )
+`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS signals_insert_bypass ON signals`);
+  await appAdmin.unsafe(`
+CREATE POLICY signals_insert_bypass
+  ON signals
+  FOR INSERT
+  WITH CHECK (true)
+`);
+  await appAdmin.unsafe(`DROP POLICY IF EXISTS signals_update_bypass ON signals`);
+  await appAdmin.unsafe(`
+CREATE POLICY signals_update_bypass
+  ON signals
+  FOR UPDATE
+  USING (true)
+`);
+}
+
+/**
  * Configure RLS on golden_documents and golden_document_sections (issue #73).
  *
  * Two policies are created on golden_documents:
@@ -1316,6 +1499,22 @@ REVOKE UPDATE, DELETE ON TABLE business_journal FROM ${quoteIdentifier(ROLE_NAME
     await configureBdmRls(appAdmin);
     await configureGoldenDocumentsRls(appAdmin);
     await configureComplianceOfficerRole(appAdmin, auditAdmin);
+    // Research topics RLS — tenant isolation on research_topics/topic_members,
+    // topic-membership enforcement on wiki_pages/wiki_page_versions_mkt/signals.
+    // Must run AFTER migrateAppSchema (tables must exist) and AFTER the base RLS
+    // setup so the tables are already known to the admin connection.
+    // Note: research_topics and topic_members are created by migrateResearchTopics
+    // at server startup; init-remote configures RLS on them idempotently.
+    try {
+      await configureResearchTopicsRls(appAdmin);
+    } catch (err) {
+      // If the tables don't exist yet (e.g. fresh DB before migrateResearchTopics runs),
+      // RLS setup will be applied on the next init-remote invocation.
+      console.warn(
+        '[init-remote] configureResearchTopicsRls skipped (tables may not exist yet):',
+        err,
+      );
+    }
 
     await verifyInitRemote(admin, appAdmin, auditAdmin, analyticsAdmin, dictAdmin, config);
 

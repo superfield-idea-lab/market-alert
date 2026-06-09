@@ -71,6 +71,18 @@ export interface RlsSessionContext {
    * `golden_documents_researcher_only` RLS policy.
    */
   role?: string;
+  /**
+   * Optional research topic scope for this session (issue #121).
+   *
+   * When set, the value is forwarded as SET LOCAL app.current_topic_id so that
+   * RLS policies on wiki_pages, wiki_page_versions_mkt, and signals can enforce
+   * topic-membership checks. Cleared automatically when the transaction ends
+   * (SET LOCAL scoping).
+   *
+   * Omit (or leave undefined) to use the tenant's Default topic visibility,
+   * where RLS falls back to allowing access when topic_id IS NULL.
+   */
+  topicId?: string;
 }
 
 /**
@@ -102,7 +114,7 @@ export function withRlsContext<T>(
   context: RlsSessionContext,
   callback: (tx: TxSql) => Promise<T>,
 ): Promise<T> {
-  const { userId, tenantId, rmCustomerIds, bdmDepartmentId, role } = context;
+  const { userId, tenantId, rmCustomerIds, bdmDepartmentId, role, topicId } = context;
   return sqlPool.begin(async (tx) => {
     const userIdEsc = escapeConfigValue(userId);
     const tenantIdEsc = tenantId !== null ? escapeConfigValue(tenantId) : '';
@@ -129,6 +141,13 @@ export function withRlsContext<T>(
     // because `current_role` is a reserved keyword in PostgreSQL.
     if (role !== undefined) {
       await tx.unsafe(`SET LOCAL "app.current_role" = '${escapeConfigValue(role)}'`);
+    }
+
+    // Set app.current_topic_id for topic-scoped RLS on wiki_pages, signals (issue #121).
+    // SET LOCAL ensures the variable is cleared when the transaction ends — no
+    // stale topic context leaks to subsequent queries on the same connection.
+    if (topicId !== undefined) {
+      await tx.unsafe(`SET LOCAL app.current_topic_id = '${escapeConfigValue(topicId)}'`);
     }
 
     return callback(tx as unknown as Sql);

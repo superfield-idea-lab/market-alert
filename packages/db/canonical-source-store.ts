@@ -105,6 +105,8 @@ export interface CanonicalSourceRow {
   status: CanonicalSourceStatus;
   created_at: Date;
   updated_at: Date;
+  /** Research topic scope (issue #121). Null for legacy rows not yet migrated. */
+  topic_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,11 @@ export interface RegisterCanonicalSourceInput {
   url: string;
   description?: string | null;
   access_mode?: 'public' | 'authenticated' | 'api_key' | null;
+  /** Optional research topic scope (issue #121). When provided, the canonical
+   *  source is associated with the given topic. Callers that cannot supply a
+   *  topic_id should resolve the tenant's Default topic via
+   *  `getDefaultTopicIdForTenant` and pass it here. */
+  topic_id?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +167,7 @@ export async function registerCanonicalSource(
   // Attempt to insert; silently skip on conflict (idempotency).
   await sql`
     INSERT INTO canonical_sources
-      (methodology_id, author_id, tenant_id, name, url, description, access_mode, status)
+      (methodology_id, author_id, tenant_id, name, url, description, access_mode, status, topic_id)
     VALUES (
       ${input.methodology_id},
       ${input.author_id},
@@ -169,7 +176,8 @@ export async function registerCanonicalSource(
       ${input.url},
       ${input.description ?? null},
       ${input.access_mode ?? null},
-      'pending'
+      'pending',
+      ${input.topic_id ?? null}
     )
     ON CONFLICT (methodology_id, url) DO NOTHING
   `;
@@ -177,7 +185,7 @@ export async function registerCanonicalSource(
   // Return the row (pre-existing or newly inserted).
   const rows = await sql<CanonicalSourceRow[]>`
     SELECT id, methodology_id, author_id, tenant_id, name, url,
-           description, access_mode, status, created_at, updated_at
+           description, access_mode, status, topic_id, created_at, updated_at
     FROM canonical_sources
     WHERE methodology_id = ${input.methodology_id}
       AND url            = ${input.url}
@@ -214,7 +222,7 @@ export async function activateCanonicalSource(
     WHERE id = ${id}
       AND status IN ('pending', 'active')
     RETURNING id, methodology_id, author_id, tenant_id, name, url,
-              description, access_mode, status, created_at, updated_at
+              description, access_mode, status, topic_id, created_at, updated_at
   `;
   return rows[0] ?? null;
 }
@@ -234,7 +242,7 @@ export async function getCanonicalSource(
 ): Promise<CanonicalSourceRow | null> {
   const rows = await sql<CanonicalSourceRow[]>`
     SELECT id, methodology_id, author_id, tenant_id, name, url,
-           description, access_mode, status, created_at, updated_at
+           description, access_mode, status, topic_id, created_at, updated_at
     FROM canonical_sources
     WHERE id = ${id}
   `;
@@ -258,7 +266,7 @@ export async function listCanonicalSourcesByMethodology(
   if (status !== undefined) {
     return sql<CanonicalSourceRow[]>`
       SELECT id, methodology_id, author_id, tenant_id, name, url,
-             description, access_mode, status, created_at, updated_at
+             description, access_mode, status, topic_id, created_at, updated_at
       FROM canonical_sources
       WHERE methodology_id = ${methodologyId}
         AND status = ${status}
@@ -268,7 +276,7 @@ export async function listCanonicalSourcesByMethodology(
 
   return sql<CanonicalSourceRow[]>`
     SELECT id, methodology_id, author_id, tenant_id, name, url,
-           description, access_mode, status, created_at, updated_at
+           description, access_mode, status, topic_id, created_at, updated_at
     FROM canonical_sources
     WHERE methodology_id = ${methodologyId}
     ORDER BY created_at ASC
@@ -313,7 +321,7 @@ export async function updateSourceScope(
       updated_at  = CURRENT_TIMESTAMP
     WHERE id = ${id}
     RETURNING id, methodology_id, author_id, tenant_id, name, url,
-              description, access_mode, status, created_at, updated_at
+              description, access_mode, status, topic_id, created_at, updated_at
   `;
   return rows[0] ?? null;
 }
@@ -334,7 +342,7 @@ export async function listAllCanonicalSources(
 ): Promise<CanonicalSourceRow[]> {
   return sql<CanonicalSourceRow[]>`
     SELECT id, methodology_id, author_id, tenant_id, name, url,
-           description, access_mode, status, created_at, updated_at
+           description, access_mode, status, topic_id, created_at, updated_at
     FROM canonical_sources
     ORDER BY updated_at DESC
     LIMIT ${limit}

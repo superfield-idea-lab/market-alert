@@ -55,6 +55,8 @@
 
 import { beforeAll, afterAll, describe, test, expect } from 'vitest';
 import { createServer, type Server } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import postgres from 'postgres';
 import { startPostgres, type PgContainer } from '../../packages/db/pg-container';
 import { runInitRemote } from '../../packages/db/init-remote';
@@ -67,6 +69,13 @@ import {
   type CanonicalSourceRow,
   type SqlClient,
 } from '../../packages/db/canonical-source-store';
+import { RESEARCH_TOPICS_DDL } from '../../packages/db/research-topics-store';
+
+// Path to the research-topics migration SQL (adds topic_id columns to canonical_sources etc.)
+const MKT_RESEARCH_TOPICS_SQL_PATH = resolve(
+  new URL('../..', import.meta.url).pathname,
+  'packages/db/mkt-research-topics.sql',
+);
 import { handleCanonicalSourceRegistrationRequest } from '../../apps/server/src/api/canonical-source-registration';
 import {
   SOURCE_DISCOVER_JOB_TYPE,
@@ -204,6 +213,16 @@ beforeAll(async () => {
 
   // 5. Apply canonical_sources DDL (Phase 3 addition — not yet in mkt-schema.sql)
   await sql.unsafe(CANONICAL_SOURCES_DDL);
+
+  // 5a. Apply research_topics DDL (issue #121) — creates research_topics and topic_members
+  //     tables needed by getDefaultTopicIdForTenant.
+  await sql.unsafe(RESEARCH_TOPICS_DDL);
+
+  // 5b. Apply the full research-topics migration SQL — this adds the nullable topic_id
+  //     column to canonical_sources (and other tables). Without this, INSERT INTO
+  //     canonical_sources (..., topic_id) fails with "column does not exist".
+  const rtMigrationSql = readFileSync(MKT_RESEARCH_TOPICS_SQL_PATH, 'utf-8');
+  await sql.unsafe(rtMigrationSql);
 
   // 6. Build AppState
   appState = {
@@ -486,6 +505,52 @@ describe('handleCanonicalSourceRegistrationRequest', () => {
     const url = new URL(req.url);
     const res = await handleCanonicalSourceRegistrationRequest(req, url, appState);
     expect(res).toBeNull();
+  });
+
+  // AC-canonical-topic: canonical source registration without explicit topic_id
+  // succeeds and the created row has topic_id equal to the tenant's default topic (issue #121).
+  test('POST /internal/canonical-sources without topic_id succeeds; row has tenant default topic_id', async () => {
+    const topicTenantId = 'tenant-canonical-topic-test-' + Date.now();
+    const topicAuthorId = 'author-canonical-topic-test';
+
+    // Create the Default topic for this tenant.
+    const [defaultTopic] = await sql<{ id: string }[]>`
+      INSERT INTO research_topics (tenant_id, name, description, created_by)
+      VALUES (${topicTenantId}, 'Default', 'Default topic for canonical source test', 'system')
+      RETURNING id
+    `;
+    const defaultTopicId = defaultTopic.id;
+
+    // Register a canonical source without supplying topic_id.
+    const req = new Request('http://localhost/internal/canonical-sources', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify({
+        methodology_id: 'meth-canonical-topic-test-001',
+        author_id: topicAuthorId,
+        tenant_id: topicTenantId,
+        name: 'Canonical Source With Default Topic',
+        url: 'https://canonical-topic-test.example.com',
+      }),
+    });
+    const url = new URL(req.url);
+    const res = await handleCanonicalSourceRegistrationRequest(req, url, appState);
+
+    // Should succeed with 201.
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(201);
+
+    // Verify the row in the DB has topic_id = defaultTopicId.
+    const rows = await sql<{ topic_id: string | null }[]>`
+      SELECT topic_id FROM canonical_sources
+      WHERE tenant_id = ${topicTenantId}
+        AND url = 'https://canonical-topic-test.example.com'
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].topic_id).toBe(defaultTopicId);
   });
 });
 
