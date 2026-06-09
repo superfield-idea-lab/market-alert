@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { TopicProvider } from './context/TopicContext';
 import { Login } from './components/Login';
 import { Bell, Settings, User, BookOpen, Globe, ListTodo, Radio } from 'lucide-react';
 import { SettingsPage } from './pages/settings';
@@ -144,7 +145,9 @@ function App() {
 export default function Root() {
   return (
     <AuthProvider>
-      <App />
+      <TopicProvider>
+        <App />
+      </TopicProvider>
     </AuthProvider>
   );
 }

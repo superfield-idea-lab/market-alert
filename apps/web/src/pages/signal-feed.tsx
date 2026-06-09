@@ -30,6 +30,8 @@ import {
   RefreshCw,
   Zap,
 } from 'lucide-react';
+import { useTopic } from '../context/TopicContext';
+import { TopicSwitcher } from '../components/TopicSwitcher';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +75,7 @@ export interface SignalFeedFilters {
 export async function fetchSignals(
   filters: SignalFeedFilters,
   fetchImpl: typeof fetch = fetch,
+  topicId?: string,
 ): Promise<SignalFeedRow[]> {
   const params = new URLSearchParams();
   params.set('sort', filters.sort);
@@ -82,6 +85,7 @@ export async function fetchSignals(
     params.set('filter_confidence_min', filters.filter_confidence_min);
   if (filters.filter_date_from) params.set('filter_date_from', filters.filter_date_from);
   if (filters.filter_date_to) params.set('filter_date_to', filters.filter_date_to);
+  if (topicId) params.set('topic_id', topicId);
 
   const res = await fetchImpl(`/api/signals?${params.toString()}`, {
     credentials: 'include',
@@ -196,9 +200,11 @@ function SortButton({
  * SignalFeedPage — sortable, filterable researcher signal table.
  *
  * Fetches from GET /api/signals (session-cookie auth, scoped to logged-in researcher).
+ * Scoped to the selected research topic when TopicContext is available.
  * Supports acknowledge/act/dismiss actions per row.
  */
 export function SignalFeedPage(): React.ReactElement {
+  const { activeTopic } = useTopic();
   const [signals, setSignals] = useState<SignalFeedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -218,14 +224,14 @@ export function SignalFeedPage(): React.ReactElement {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchSignals(filters);
+      const rows = await fetchSignals(filters, fetch, activeTopic?.id);
       setSignals(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, activeTopic?.id]);
 
   useEffect(() => {
     void load();
@@ -275,6 +281,7 @@ export function SignalFeedPage(): React.ReactElement {
               {signals.length}
             </span>
           )}
+          <TopicSwitcher />
         </div>
         <button
           onClick={() => void load()}
