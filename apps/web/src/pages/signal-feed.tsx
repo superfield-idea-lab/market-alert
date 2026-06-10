@@ -248,9 +248,10 @@ export function SignalFeedPage(): React.ReactElement {
         await actionSignal(signalId, action);
         // Optimistically update the local state
         if (action === 'dismiss') {
-          setSignals((prev) =>
-            prev.map((s) => (s.id === signalId ? { ...s, status: 'Suppressed' } : s)),
-          );
+          // Remove the dismissed signal from the feed immediately so the
+          // Delivered view no longer shows it (server already persisted
+          // Delivered → Suppressed; the feed query excludes Suppressed rows).
+          setSignals((prev) => prev.filter((s) => s.id !== signalId));
         }
         // For acknowledge/act, just reload to reflect any server state change
         if (action !== 'dismiss') {
