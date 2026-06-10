@@ -125,12 +125,13 @@ export type SqlClient = postgres.Sql;
  * Status values for the `signals` state machine.
  *
  * State machine (PRD §5, §9):
- *   Generated → Delivered (direct delivery, confidence ≥ threshold)
- *   Generated → Queued    (routed to Reviewer queue, confidence < threshold)
- *   Queued    → Delivered (Reviewer approves)
+ *   Generated → Delivered  (direct delivery, confidence ≥ threshold)
+ *   Generated → Queued     (routed to Reviewer queue, confidence < threshold)
+ *   Queued    → Delivered  (Reviewer approves)
  *   Queued    → Suppressed (Reviewer suppresses)
+ *   Delivered → Suppressed (researcher dismisses — PRD §5: "Delivered → Dismissed")
  *
- * Terminal states: Delivered, Suppressed.
+ * Terminal state: Suppressed.
  *
  * Architecture ref: docs/architecture.md §"Signal routing"
  */
@@ -259,12 +260,13 @@ export interface InsertSignalCiteOptions {
  * Valid state machine transitions for signals.
  *
  * State machine (PRD §5, §9):
- *   Generated → Delivered (direct delivery, confidence ≥ threshold)
- *   Generated → Queued    (routed to Reviewer queue, confidence < threshold)
- *   Queued    → Delivered (Reviewer approves)
- *   Queued    → Suppressed (Reviewer suppresses)
+ *   Generated → Delivered   (direct delivery, confidence ≥ threshold)
+ *   Generated → Queued      (routed to Reviewer queue, confidence < threshold)
+ *   Queued    → Delivered   (Reviewer approves)
+ *   Queued    → Suppressed  (Reviewer suppresses)
+ *   Delivered → Suppressed  (researcher dismisses — PRD §5: "Delivered → Dismissed")
  *
- * Terminal states: Delivered, Suppressed.
+ * Terminal states: Suppressed.
  *
  * Architecture ref: docs/architecture.md §"Signal routing"
  */
@@ -274,7 +276,7 @@ export const VALID_SIGNAL_TRANSITIONS: ReadonlyMap<
 > = new Map([
   ['Generated', new Set<SignalStatus>(['Delivered', 'Queued'])],
   ['Queued', new Set<SignalStatus>(['Delivered', 'Suppressed'])],
-  ['Delivered', new Set<SignalStatus>()],
+  ['Delivered', new Set<SignalStatus>(['Suppressed'])],
   ['Suppressed', new Set<SignalStatus>()],
 ]);
 
